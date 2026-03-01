@@ -5,9 +5,16 @@
 // ============================================================
 
 import nodemailer from "nodemailer";
+import dns from "dns";
+
+// Force Node.js DNS to resolve IPv4 first — Railway containers
+// cannot reach Gmail SMTP over IPv6 (ENETUNREACH).
+dns.setDefaultResultOrder("ipv4first");
 
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false, // STARTTLS on 587
   auth: {
     user: process.env.SMTP_EMAIL,
     pass: process.env.SMTP_PASSWORD, // Gmail App Password (16 chars, no spaces)
