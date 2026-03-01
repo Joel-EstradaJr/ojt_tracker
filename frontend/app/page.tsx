@@ -1,17 +1,19 @@
-"use client";
+﻿"use client";
 
 // ============================================================
 // Dashboard Page (Landing)
-// Shows all trainee cards. Click a card → password prompt → logs.
+// Shows all trainee cards. Click a card -> password prompt -> logs.
 // ============================================================
 
 import { useEffect, useState, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Trainee } from "@/types";
 import { fetchTrainees, deleteTrainee, verifyPassword, verifySuperPassword, downloadAllCSV, importAllCSV } from "@/lib/api";
 import TraineeCard from "@/components/TraineeCard";
 import PasswordModal from "@/components/PasswordModal";
 import CreateTraineeForm from "@/components/CreateTraineeForm";
 import EditTraineeForm from "@/components/EditTraineeForm";
+import { ThemeToggle } from "@/components/ThemeProvider";
 
 export default function HomePage() {
   const [trainees, setTrainees] = useState<Trainee[]>([]);
@@ -71,7 +73,7 @@ export default function HomePage() {
     try {
       // Verify password first
       await verifyPassword(deletingTrainee.id, deletePassword);
-      // Password correct — proceed with deletion
+      // Password correct - proceed with deletion
       const name = deletingTrainee.displayName;
       await deleteTrainee(deletingTrainee.id);
       setDeletingTrainee(null);
@@ -144,19 +146,28 @@ export default function HomePage() {
 
   return (
     <div className="container">
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
-        <h1>OJT Progress Tracker</h1>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-          <button className="btn btn-outline" onClick={() => setPendingAction("export")}>
-            Export All CSV
+      {/* Hero Header */}
+      <div className="hero-header">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
+          <div>
+            <h1>OJT Progress Tracker</h1>
+            <p>Manage trainee hours, accomplishments, and progress reports</p>
+          </div>
+          <ThemeToggle />
+        </div>
+
+        <div className="hero-actions" style={{ marginTop: "1.25rem" }}>
+          <button className="btn" onClick={() => setPendingAction("export")}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export All
           </button>
           <button
-            className="btn btn-outline"
+            className="btn"
             onClick={() => setPendingAction("import")}
             disabled={importLoading}
           >
-            {importLoading ? "Importing…" : "Import CSV"}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            {importLoading ? "Importing..." : "Import CSV"}
           </button>
           <input
             type="file"
@@ -165,35 +176,73 @@ export default function HomePage() {
             style={{ display: "none" }}
             onChange={handleImportAll}
           />
-          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-            + Add Trainee
+          <button className="btn btn-add" onClick={() => setShowCreate(true)}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Trainee
           </button>
         </div>
       </div>
 
-      {/* Loading state */}
-      {loading && <p style={{ marginTop: "2rem", color: "var(--text-muted)" }}>Loading trainees…</p>}
-
-      {/* Trainee cards grid */}
-      {!loading && trainees.length === 0 && (
-        <p style={{ marginTop: "2rem", color: "var(--text-muted)" }}>
-          No trainees yet. Click <strong>+ Add Trainee</strong> to get started.
-        </p>
+      {/* Loading skeleton */}
+      {loading && (
+        <div className="skeleton">
+          <div className="trainee-grid">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="skeleton-card">
+                <div className="skeleton-line medium" />
+                <div className="skeleton-line short" />
+                <div className="skeleton-line" />
+                <div className="skeleton-line thin" />
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
+      {/* Empty state */}
+      {!loading && trainees.length === 0 && (
+        <motion.div
+          className="empty-state"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+        >
+          <div className="empty-state-icon">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4 }}>
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+          </div>
+          <h3>No Trainees Yet</h3>
+          <p>Get started by adding your first trainee. Click the <strong>Add Trainee</strong> button above to begin tracking OJT progress.</p>
+        </motion.div>
+      )}
+
+      {/* Trainee cards grid */}
       <div className="trainee-grid">
-        {trainees.map((t) => (
-          <TraineeCard
-            key={t.id}
-            trainee={t}
-            onClick={() => setSelectedId(t.id)}
-            onEdit={() => setPendingEditTrainee(t)}
-            onDelete={() => setDeletingTrainee(t)}
-          />
-        ))}
+        <AnimatePresence>
+          {trainees.map((t, idx) => (
+            <motion.div
+              key={t.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.3, delay: idx * 0.05 }}
+            >
+              <TraineeCard
+                trainee={t}
+                onClick={() => setSelectedId(t.id)}
+                onEdit={() => setPendingEditTrainee(t)}
+                onDelete={() => setDeletingTrainee(t)}
+              />
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
 
-      {/* Password modal — shown when a card is clicked */}
+      {/* Password modal - shown when a card is clicked */}
       {selectedId && (
         <PasswordModal
           traineeId={selectedId}
@@ -215,16 +264,23 @@ export default function HomePage() {
       {/* Edit password gate modal */}
       {pendingEditTrainee && !editingTrainee && (
         <div className="modal-overlay" onClick={() => { if (!editPasswordLoading) { setPendingEditTrainee(null); setEditPassword(""); setEditPasswordError(""); } }}>
-          <div className="modal-content" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ marginBottom: "0.25rem" }}>Edit Trainee</h2>
-            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
-              Enter <strong>{pendingEditTrainee.displayName}&apos;s</strong> password to continue.
-            </p>
+          <div className="modal-content" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--primary-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </div>
+              <div>
+                <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Edit Trainee</h2>
+                <p style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>
+                  Enter <strong>{pendingEditTrainee.displayName}&apos;s</strong> password
+                </p>
+              </div>
+            </div>
             <div className="form-group" style={{ marginBottom: "0.75rem" }}>
               <label>Password</label>
               <input
                 type="password"
-                placeholder="••••••••"
+                placeholder="Enter password"
                 value={editPassword}
                 onChange={(e) => { setEditPassword(e.target.value); setEditPasswordError(""); }}
                 onKeyDown={(e) => {
@@ -248,7 +304,9 @@ export default function HomePage() {
               />
             </div>
             {editPasswordError && (
-              <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem" }}>{editPasswordError}</p>
+              <div style={{ background: "var(--danger-light)", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", padding: "0.5rem 0.75rem", marginBottom: "0.75rem" }}>
+                <p style={{ color: "var(--danger)", fontSize: "0.84rem", margin: 0 }}>{editPasswordError}</p>
+              </div>
             )}
             <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
               <button className="btn btn-outline" onClick={() => { setPendingEditTrainee(null); setEditPassword(""); setEditPasswordError(""); }} disabled={editPasswordLoading}>
@@ -271,7 +329,7 @@ export default function HomePage() {
                     .finally(() => setEditPasswordLoading(false));
                 }}
               >
-                {editPasswordLoading ? "Verifying…" : "Continue"}
+                {editPasswordLoading ? "Verifying..." : "Continue"}
               </button>
             </div>
           </div>
@@ -296,31 +354,38 @@ export default function HomePage() {
         const pct = Math.min(100, Math.round((t.totalHoursRendered / t.requiredHours) * 100));
         return (
           <div className="modal-overlay" onClick={closeDeletingModal}>
-            <div className="modal-content" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
-              <h2 style={{ marginBottom: "0.25rem", color: "var(--danger)" }}>Delete Trainee</h2>
-              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
-                Are you sure you want to permanently delete this trainee and <strong>all</strong> their logs and supervisors?
-              </p>
+            <div className="modal-content" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+                <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </div>
+                <div>
+                  <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem", color: "var(--danger)" }}>Delete Trainee</h2>
+                  <p style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>
+                    This action is permanent and cannot be undone.
+                  </p>
+                </div>
+              </div>
 
-              <div style={{ background: "var(--bg)", borderRadius: "6px", padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.88rem" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.3rem 0.75rem" }}>
-                  <strong>Name:</strong>
-                  <span>{t.displayName}</span>
-                  <strong>School:</strong>
+              <div style={{ background: "var(--bg-subtle)", borderRadius: "var(--radius-sm)", padding: "0.85rem 1rem", marginBottom: "1rem", fontSize: "0.88rem" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.35rem 0.75rem" }}>
+                  <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Name:</span>
+                  <span style={{ fontWeight: 600 }}>{t.displayName}</span>
+                  <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>School:</span>
                   <span>{t.school}</span>
                   {t.companyName && (
                     <>
-                      <strong>Company:</strong>
+                      <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Company:</span>
                       <span>{t.companyName}</span>
                     </>
                   )}
-                  <strong>Progress:</strong>
+                  <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Progress:</span>
                   <span>{t.totalHoursRendered.toFixed(1)} / {t.requiredHours} hrs ({pct}%)</span>
                 </div>
               </div>
 
               <div className="form-group" style={{ marginBottom: "1rem" }}>
-                <label style={{ fontSize: "0.85rem", fontWeight: 600 }}>Enter trainee&apos;s password to confirm deletion</label>
+                <label>Enter trainee&apos;s password to confirm deletion</label>
                 <input
                   type="password"
                   placeholder="Password"
@@ -332,7 +397,9 @@ export default function HomePage() {
               </div>
 
               {deleteError && (
-                <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem" }}>{deleteError}</p>
+                <div style={{ background: "var(--danger-light)", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", padding: "0.5rem 0.75rem", marginBottom: "0.75rem" }}>
+                  <p style={{ color: "var(--danger)", fontSize: "0.84rem", margin: 0 }}>{deleteError}</p>
+                </div>
               )}
 
               <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
@@ -340,7 +407,7 @@ export default function HomePage() {
                   Cancel
                 </button>
                 <button className="btn btn-danger" onClick={handleDelete} disabled={deleteLoading || !deletePassword.trim()}>
-                  {deleteLoading ? "Verifying…" : "Delete"}
+                  {deleteLoading ? "Verifying..." : "Delete Permanently"}
                 </button>
               </div>
             </div>
@@ -352,8 +419,15 @@ export default function HomePage() {
       {deleteSuccess && (
         <div className="modal-overlay" onClick={() => setDeleteSuccess(null)}>
           <div className="modal-content" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ marginBottom: "0.5rem", color: "#16a34a" }}>Trainee Deleted</h2>
-            <p style={{ fontSize: "0.9rem", marginBottom: "1rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--success-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div>
+                <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem", color: "var(--success-text)" }}>Trainee Deleted</h2>
+              </div>
+            </div>
+            <p style={{ fontSize: "0.9rem", marginBottom: "1.25rem", color: "var(--text-secondary)" }}>
               <strong>{deleteSuccess}</strong> and all associated logs and supervisors have been permanently deleted.
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -366,28 +440,44 @@ export default function HomePage() {
       {/* Import result modal */}
       {(importResult || importError) && (
         <div className="modal-overlay" onClick={() => { setImportResult(null); setImportError(null); }}>
-          <div className="modal-content" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
             {importError ? (
               <>
-                <h2 style={{ marginBottom: "0.5rem", color: "var(--danger)" }}>Import Failed</h2>
-                <p style={{ fontSize: "0.9rem", marginBottom: "1rem" }}>{importError}</p>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+                  <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                  </div>
+                  <h2 style={{ fontSize: "1.15rem", color: "var(--danger)" }}>Import Failed</h2>
+                </div>
+                <p style={{ fontSize: "0.9rem", marginBottom: "1.25rem", color: "var(--text-secondary)" }}>{importError}</p>
               </>
             ) : importResult && (
               <>
-                <h2 style={{ marginBottom: "0.5rem", color: "#16a34a" }}>Import Successful</h2>
-                <p style={{ fontSize: "0.9rem", marginBottom: "0.75rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+                  <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--success-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  </div>
+                  <h2 style={{ fontSize: "1.15rem", color: "var(--success-text)" }}>Import Successful</h2>
+                </div>
+                <p style={{ fontSize: "0.9rem", marginBottom: "0.75rem", color: "var(--text-secondary)" }}>
                   The CSV file has been imported successfully.
                 </p>
-                <div style={{ background: "var(--bg)", borderRadius: "6px", padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.9rem" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.3rem 0.75rem" }}>
-                    <strong>Trainees:</strong>
-                    <span>{importResult.trainees}</span>
-                    <strong>Supervisors:</strong>
-                    <span>{importResult.supervisors}</span>
-                    <strong>Log Entries:</strong>
-                    <span>{importResult.logs}</span>
-                    <strong>Skipped:</strong>
-                    <span>{importResult.skipped}</span>
+                <div className="stat-row" style={{ marginBottom: "1.25rem" }}>
+                  <div className="stat-item">
+                    <div className="label">Trainees</div>
+                    <div className="value">{importResult.trainees}</div>
+                  </div>
+                  <div className="stat-item">
+                    <div className="label">Supervisors</div>
+                    <div className="value">{importResult.supervisors}</div>
+                  </div>
+                  <div className="stat-item">
+                    <div className="label">Log Entries</div>
+                    <div className="value">{importResult.logs}</div>
+                  </div>
+                  <div className="stat-item">
+                    <div className="label">Skipped</div>
+                    <div className="value">{importResult.skipped}</div>
                   </div>
                 </div>
               </>
@@ -404,18 +494,25 @@ export default function HomePage() {
       {/* Super password gate modal for Export / Import */}
       {pendingAction && (
         <div className="modal-overlay" onClick={closeActionModal}>
-          <div className="modal-content" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ marginBottom: "0.25rem" }}>
-              {pendingAction === "export" ? "Export All CSV" : "Import CSV"}
-            </h2>
-            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
-              Enter secret code to proceed.
-            </p>
+          <div className="modal-content" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--primary-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </div>
+              <div>
+                <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>
+                  {pendingAction === "export" ? "Export All CSV" : "Import CSV"}
+                </h2>
+                <p style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>
+                  Enter the secret code to proceed
+                </p>
+              </div>
+            </div>
             <div className="form-group" style={{ marginBottom: "0.75rem" }}>
-              <label>CODE</label>
+              <label>Code</label>
               <input
                 type="password"
-                placeholder="••••••••"
+                placeholder="Enter secret code"
                 value={actionPassword}
                 onChange={(e) => { setActionPassword(e.target.value); setActionPasswordError(""); }}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleActionVerify(); } }}
@@ -423,7 +520,9 @@ export default function HomePage() {
               />
             </div>
             {actionPasswordError && (
-              <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem" }}>{actionPasswordError}</p>
+              <div style={{ background: "var(--danger-light)", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", padding: "0.5rem 0.75rem", marginBottom: "0.75rem" }}>
+                <p style={{ color: "var(--danger)", fontSize: "0.84rem", margin: 0 }}>{actionPasswordError}</p>
+              </div>
             )}
             <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
               <button className="btn btn-outline" onClick={closeActionModal} disabled={actionPasswordLoading}>
@@ -434,7 +533,7 @@ export default function HomePage() {
                 disabled={actionPasswordLoading || !actionPassword.trim()}
                 onClick={handleActionVerify}
               >
-                {actionPasswordLoading ? "Verifying…" : "Continue"}
+                {actionPasswordLoading ? "Verifying..." : "Continue"}
               </button>
             </div>
           </div>
@@ -445,8 +544,13 @@ export default function HomePage() {
       {exportSuccess && (
         <div className="modal-overlay" onClick={() => setExportSuccess(false)}>
           <div className="modal-content" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ marginBottom: "0.5rem", color: "#16a34a" }}>Export Successful</h2>
-            <p style={{ fontSize: "0.9rem", marginBottom: "1rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--success-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <h2 style={{ fontSize: "1.15rem", color: "var(--success-text)" }}>Export Successful</h2>
+            </div>
+            <p style={{ fontSize: "0.9rem", marginBottom: "1.25rem", color: "var(--text-secondary)" }}>
               All trainee data has been exported to CSV. Your download should begin shortly.
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>

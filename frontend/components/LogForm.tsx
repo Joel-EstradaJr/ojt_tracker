@@ -69,9 +69,6 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
   const refreshOffset = useCallback(async () => {
     try {
       const res = await fetchOffset(traineeId);
-      // In edit mode the server's getAvailableOffset doesn't exclude the
-      // current log — but the update endpoint does, so we just show the
-      // "bank" here and let the server cap it correctly.
       setAvailableOffset(res.availableOffset);
     } catch { /* silent */ }
   }, [traineeId]);
@@ -214,9 +211,29 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
     : availableOffset;
 
   return (
-    <div className="card" style={{ marginBottom: "1.5rem", border: isEditing ? "2px solid var(--primary)" : undefined }}>
+    <div className="card" style={{ marginBottom: "1.5rem", position: "relative", overflow: "hidden" }}>
+      {/* Accent bar for edit mode */}
+      {isEditing && (
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "3px", background: "var(--primary)" }} />
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-        <h3>{isEditing ? "Edit Log Entry" : "Add Log Entry"}</h3>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+          <div style={{
+            width: "2rem", height: "2rem", borderRadius: "var(--radius-sm)",
+            background: isEditing ? "var(--primary-light)" : "var(--success-light)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            {isEditing ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            )}
+          </div>
+          <h3 style={{ fontSize: "1.05rem", fontWeight: 600 }}>
+            {isEditing ? "Edit Log Entry" : "Add Log Entry"}
+          </h3>
+        </div>
         {isEditing && onCancelEdit && (
           <button type="button" className="btn btn-outline" style={{ fontSize: "0.8rem", padding: "0.3rem 0.7rem" }} onClick={onCancelEdit}>
             Cancel Edit
@@ -247,18 +264,10 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
               <button
                 type="button"
                 onClick={() => setNoLunch(!noLunch)}
-                style={{
-                  fontSize: "0.72rem",
-                  padding: "0.15rem 0.45rem",
-                  borderRadius: "4px",
-                  border: `1px solid ${noLunch ? "var(--danger)" : "var(--border)"}`,
-                  background: noLunch ? "var(--danger)" : "transparent",
-                  color: noLunch ? "#fff" : "var(--text-muted)",
-                  cursor: "pointer",
-                  lineHeight: 1.4,
-                }}
+                className={noLunch ? "badge badge-warning" : "badge badge-info"}
+                style={{ cursor: "pointer", fontSize: "0.68rem", padding: "0.1rem 0.4rem", border: "none" }}
               >
-                No Lunch
+                {noLunch ? "No Lunch" : "Has Lunch"}
               </button>
             </label>
             <input type="time" value={lunchStart} onChange={(e) => setLunchStart(e.target.value)} disabled={noLunch} style={{ opacity: noLunch ? 0.4 : 1 }} />
@@ -282,16 +291,33 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
 
         {/* Preview: calculated hours & overtime */}
         {previewHours && (
-          <div style={{ display: "flex", gap: "1.5rem", margin: "0.5rem 0 0.25rem", fontSize: "0.82rem", color: "var(--text-muted)" }}>
-            <span>Hours: <strong style={{ color: "var(--text)" }}>{previewHours.hoursWorked}</strong></span>
-            <span>Overtime: <strong style={{ color: previewHours.overtime > 0 ? "var(--primary)" : "var(--text)" }}>{previewHours.overtime}</strong></span>
+          <div style={{
+            display: "flex", gap: "1.5rem", margin: "0.65rem 0 0.25rem",
+            fontSize: "0.82rem", color: "var(--text-muted)",
+            padding: "0.5rem 0.75rem",
+            background: "var(--primary-lighter)",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--primary-light)",
+          }}>
+            <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Hours: <strong style={{ color: "var(--text)" }}>{previewHours.hoursWorked}</strong>
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={previewHours.overtime > 0 ? "var(--primary)" : "var(--text-faint)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+              Overtime: <strong style={{ color: previewHours.overtime > 0 ? "var(--primary)" : "var(--text)" }}>{previewHours.overtime}</strong>
+            </span>
           </div>
         )}
 
         {/* Offset section */}
-        <div style={{ background: "var(--bg)", borderRadius: "6px", padding: "0.6rem 0.75rem", margin: "0.5rem 0 0.75rem" }}>
+        <div style={{
+          background: "var(--bg-subtle)", borderRadius: "var(--radius-sm)",
+          padding: "0.65rem 0.85rem", margin: "0.65rem 0 0.85rem",
+          border: "1px solid var(--border)",
+        }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.85rem", cursor: "pointer" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem", cursor: "pointer", fontWeight: 500 }}>
               <input
                 type="checkbox"
                 checked={applyOffset}
@@ -300,15 +326,16 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
                   if (!e.target.checked) setOffsetAmount("");
                 }}
                 disabled={effectiveAvailable <= 0}
+                style={{ width: "1rem", height: "1rem", accentColor: "var(--primary)" }}
               />
               Apply Offset
             </label>
-            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-              Available: <strong>{effectiveAvailable.toFixed(2)}</strong> hrs
+            <span className="badge badge-info" style={{ fontSize: "0.74rem" }}>
+              Available: {effectiveAvailable.toFixed(2)} hrs
             </span>
             {applyOffset && effectiveAvailable > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
-                <label style={{ fontSize: "0.82rem" }}>Hours to apply:</label>
+                <label style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Hours to apply:</label>
                 <input
                   type="number"
                   step="0.25"
@@ -317,7 +344,7 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
                   value={offsetAmount}
                   onChange={(e) => setOffsetAmount(e.target.value)}
                   placeholder={`max ${effectiveAvailable}`}
-                  style={{ width: "6rem", padding: "0.25rem 0.4rem", fontSize: "0.85rem" }}
+                  style={{ width: "6rem", padding: "0.3rem 0.45rem", fontSize: "0.85rem" }}
                 />
               </div>
             )}
@@ -334,10 +361,32 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
           />
         </div>
 
-        {error && <p style={{ color: "var(--danger)", marginBottom: "0.5rem", fontSize: "0.85rem" }}>{error}</p>}
+        {error && (
+          <div style={{
+            padding: "0.6rem 0.85rem", borderRadius: "var(--radius-sm)",
+            background: "var(--danger-light)", border: "1px solid var(--danger)",
+            color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.65rem",
+            display: "flex", alignItems: "center", gap: "0.4rem",
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            {error}
+          </div>
+        )}
 
-        <button type="submit" className="btn btn-primary" disabled={loading}>
-          {loading ? "Saving…" : isEditing ? "Update Log" : "Add Log"}
+        <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
+          {loading ? (
+            "Saving\u2026"
+          ) : isEditing ? (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Update Log
+            </>
+          ) : (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Log
+            </>
+          )}
         </button>
       </form>
     </div>

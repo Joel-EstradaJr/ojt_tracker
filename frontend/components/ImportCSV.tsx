@@ -1,8 +1,7 @@
 "use client";
 
 // ============================================================
-// ImportCSV — a file-upload button that sends a CSV to the
-// backend import endpoint for the given trainee.
+// ImportCSV -- file-upload button for CSV import
 // ============================================================
 
 import { useRef, useState } from "react";
@@ -30,7 +29,6 @@ export default function ImportCSV({ traineeId, onImported }: Props) {
       alert(err instanceof Error ? err.message : "Import failed.");
     } finally {
       setLoading(false);
-      // Reset file input so the same file can be re-uploaded
       if (fileRef.current) fileRef.current.value = "";
     }
   };
@@ -48,8 +46,10 @@ export default function ImportCSV({ traineeId, onImported }: Props) {
         className="btn btn-outline"
         disabled={loading}
         onClick={() => fileRef.current?.click()}
+        style={{ gap: "0.35rem" }}
       >
-        {loading ? "Importing…" : "Import CSV"}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        {loading ? "Importing\u2026" : "Import CSV"}
       </button>
     </>
   );
