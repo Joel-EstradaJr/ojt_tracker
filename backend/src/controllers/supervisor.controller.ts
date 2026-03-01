@@ -66,7 +66,7 @@ export const getSupervisorsByTrainee = async (req: Request, res: Response) => {
 // ── Update a supervisor ──────────────────────────────────────
 export const updateSupervisor = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const { supervisorId: id } = req.params;
     const { lastName, firstName, middleName, suffix, contactNumber, email } = req.body;
 
     const supervisor = await prisma.supervisor.update({
@@ -91,7 +91,7 @@ export const updateSupervisor = async (req: Request, res: Response) => {
 // ── Delete a supervisor ──────────────────────────────────────
 export const deleteSupervisor = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const { supervisorId: id } = req.params;
     await prisma.supervisor.delete({ where: { id } });
     return res.json({ message: "Supervisor deleted." });
   } catch (err) {

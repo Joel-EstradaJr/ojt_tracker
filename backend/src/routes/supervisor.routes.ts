@@ -20,10 +20,10 @@ router.post("/:traineeId", requireAuth, sanitizeBody, validateSupervisor, create
 // GET  /supervisors/:traineeId  — list supervisors for trainee
 router.get("/:traineeId", requireAuth, getSupervisorsByTrainee);
 
-// PUT  /supervisors/entry/:id   — update a supervisor
-router.put("/entry/:id", requireAuth, sanitizeBody, validateSupervisor, updateSupervisor);
+// PUT  /supervisors/entry/:supervisorId   — update a supervisor
+router.put("/entry/:supervisorId", requireAuth, sanitizeBody, validateSupervisor, updateSupervisor);
 
-// DELETE /supervisors/entry/:id — remove a supervisor
-router.delete("/entry/:id", requireAuth, deleteSupervisor);
+// DELETE /supervisors/entry/:supervisorId — remove a supervisor
+router.delete("/entry/:supervisorId", requireAuth, deleteSupervisor);
 
 export default router;
