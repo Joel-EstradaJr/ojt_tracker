@@ -1,63 +1,31 @@
 // ============================================================
-// Email Utility — sends verification codes via Gmail SMTP
-// using Nodemailer. Requires SMTP_EMAIL and SMTP_PASSWORD
-// environment variables (use a Gmail App Password).
+// Email Utility — sends verification codes via Resend HTTP API.
+// Railway blocks outbound SMTP on non-Pro plans, so we use
+// Resend's HTTPS-based API instead of direct Gmail SMTP.
+//
+// Requires RESEND_API_KEY environment variable.
+// Optionally RESEND_FROM to set the sender address (must be
+// a verified domain on Resend, or use "onboarding@resend.dev"
+// for testing).
 // ============================================================
 
-import nodemailer from "nodemailer";
-import SMTPTransport from "nodemailer/lib/smtp-transport";
-import dns from "dns";
+import { Resend } from "resend";
 
-// Force Node.js DNS to resolve IPv4 first — Railway containers
-// cannot reach Gmail SMTP over IPv6 (ENETUNREACH).
-dns.setDefaultResultOrder("ipv4first");
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Monkey-patch dns.lookup to force family:4 (IPv4) everywhere.
-// This is the nuclear option — guarantees Nodemailer (and any
-// other code) can never resolve to an IPv6 address.
-const _origLookup = dns.lookup;
-(dns as any).lookup = function (
-  hostname: string,
-  options: any,
-  callback: any
-) {
-  if (typeof options === "function") {
-    callback = options;
-    options = { family: 4 };
-  } else if (typeof options === "number") {
-    options = { family: 4 };
-  } else {
-    options = { ...options, family: 4 };
-  }
-  return (_origLookup as Function).call(dns, hostname, options, callback);
-};
-
-const transportOpts: SMTPTransport.Options = {
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false, // STARTTLS on 587
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD, // Gmail App Password (16 chars, no spaces)
-  },
-  // Explicit timeouts so broken connections fail fast instead of hanging
-  connectionTimeout: 10_000, // 10 s to establish TCP connection
-  greetingTimeout: 10_000,   // 10 s to receive SMTP greeting
-  socketTimeout: 30_000,     // 30 s for any subsequent socket inactivity
-};
-
-const transporter = nodemailer.createTransport(transportOpts);
-
-// Verify SMTP credentials once at startup so deployment logs show whether
-// Gmail is reachable from Railway.
-transporter.verify()
-  .then(() => console.log("✅ SMTP connection verified — Gmail is reachable"))
-  .catch((err) => console.error("❌ SMTP verification failed:", err));
+// Sender address — use a verified Resend domain, or the shared
+// "onboarding@resend.dev" address for free-tier / testing.
+const FROM =
+  process.env.RESEND_FROM || "OJT Progress Tracker <onboarding@resend.dev>";
 
 /**
  * Send a 6-digit password-reset verification code to the given email.
  */
-export async function sendResetCode(to: string, code: string, displayName: string): Promise<void> {
+export async function sendResetCode(
+  to: string,
+  code: string,
+  displayName: string
+): Promise<void> {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
       <h2 style="color: #1e293b; margin-bottom: 8px;">OJT Progress Tracker</h2>
@@ -77,19 +45,26 @@ export async function sendResetCode(to: string, code: string, displayName: strin
     </div>
   `;
 
-  await transporter.sendMail({
-    from: `"OJT Progress Tracker" <${process.env.SMTP_EMAIL}>`,
-    to,
+  const { error } = await resend.emails.send({
+    from: FROM,
+    to: [to],
     subject: "Password Reset Code — OJT Progress Tracker",
     html,
   });
+
+  if (error) {
+    throw new Error(`Resend error: ${error.message}`);
+  }
 }
 
 /**
  * Send a 6-digit email-ownership verification code (used during
  * trainee creation or when editing the trainee email address).
  */
-export async function sendEmailVerificationCode(to: string, code: string): Promise<void> {
+export async function sendEmailVerificationCode(
+  to: string,
+  code: string
+): Promise<void> {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
       <h2 style="color: #1e293b; margin-bottom: 8px;">OJT Progress Tracker</h2>
@@ -108,10 +83,14 @@ export async function sendEmailVerificationCode(to: string, code: string): Promi
     </div>
   `;
 
-  await transporter.sendMail({
-    from: `"OJT Progress Tracker" <${process.env.SMTP_EMAIL}>`,
-    to,
+  const { error } = await resend.emails.send({
+    from: FROM,
+    to: [to],
     subject: "Email Verification Code — OJT Progress Tracker",
     html,
   });
+
+  if (error) {
+    throw new Error(`Resend error: ${error.message}`);
+  }
 }

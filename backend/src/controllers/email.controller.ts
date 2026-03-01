@@ -42,25 +42,8 @@ export async function sendVerification(req: Request, res: Response) {
       },
     });
 
-    // Attempt to send the email with a timeout guard.
-    // If SMTP responds within 25 s the email is confirmed sent.
-    // If it takes longer we still respond (code is in DB) and the
-    // send continues in the background.
-    const emailPromise = sendEmailVerificationCode(email, code);
-    const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 25_000));
-
-    const result = await Promise.race([
-      emailPromise.then(() => "sent" as const),
-      timeout,
-    ]);
-
-    // If we timed out, keep the send going in the background
-    if (result === "timeout") {
-      emailPromise.catch((err) =>
-        console.error("Background email send failed:", err)
-      );
-      console.warn("Email send timed out — response sent, email may still arrive.");
-    }
+    // Send the email via Resend HTTP API (fast, not blocked by Railway)
+    await sendEmailVerificationCode(email, code);
 
     return res.json({ message: "Verification code sent." });
   } catch (err) {
