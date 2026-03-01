@@ -17,9 +17,13 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // ── Middleware ────────────────────────────────────────────────
+// Strip surrounding quotes from FRONTEND_URL in case they were
+// entered literally in a deployment dashboard (Railway, etc.)
+const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/^["']|["']$/g, "");
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: FRONTEND_URL,
     credentials: true,
   })
 );
