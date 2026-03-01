@@ -150,7 +150,7 @@ export default function HomePage() {
       <div className="hero-header">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
           <div>
-            <h1>OJT Progress Tracker</h1>
+            <h1>OJT Progress Tracker  :  for Nerie Ann Ganda</h1>
             <p>Manage trainee hours, accomplishments, and progress reports</p>
           </div>
           <ThemeToggle />

@@ -496,6 +496,8 @@ button {
   z-index: 1;
 }
 
+.logs-table th[style*="cursor"] { transition: color 0.15s ease, background 0.15s ease; }
+.logs-table th[style*="cursor"]:hover { color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--bg-subtle)); }
 .logs-table th:first-child { border-radius: var(--radius-sm) 0 0 0; }
 .logs-table th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
 

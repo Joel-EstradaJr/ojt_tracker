@@ -35,6 +35,28 @@ export default function TraineeDashboard() {
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
 
+  // Filter & Sort
+  const [sortField, setSortField] = useState<"date" | "timeIn" | "lunchStart" | "lunchEnd" | "timeOut" | "hoursWorked" | "overtime" | "offsetUsed">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterMinHours, setFilterMinHours] = useState("");
+  const [filterMaxHours, setFilterMaxHours] = useState("");
+  const [filterOvertime, setFilterOvertime] = useState<"all" | "yes" | "no">("all");
+  const [filterOffset, setFilterOffset] = useState<"all" | "yes" | "no">("all");
+  const [filterAccomplishment, setFilterAccomplishment] = useState("");
+
+  const handleSort = (field: typeof sortField) => {
+    if (sortField === field) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("desc"); }
+    setCurrentPage(1);
+  };
+
+  const hasActiveFilters = !!(filterDateFrom || filterDateTo || filterMinHours || filterMaxHours || filterOvertime !== "all" || filterOffset !== "all" || filterAccomplishment);
+  const activeFilterCount = [filterDateFrom, filterDateTo, filterMinHours, filterMaxHours, filterOvertime !== "all" ? "1" : "", filterOffset !== "all" ? "1" : "", filterAccomplishment].filter(Boolean).length;
+  const clearFilters = () => { setFilterDateFrom(""); setFilterDateTo(""); setFilterMinHours(""); setFilterMaxHours(""); setFilterOvertime("all"); setFilterOffset("all"); setFilterAccomplishment(""); setCurrentPage(1); };
+
   // Load trainee + logs
   const loadData = useCallback(async () => {
     try {
@@ -209,19 +231,19 @@ export default function TraineeDashboard() {
             <div className="value">{totalHours.toFixed(1)}</div>
           </div>
           <div className="stat-item">
-            <div className="label">Remaining</div>
+            <div className="label">Remaining Hours</div>
             <div className="value">{remaining.toFixed(1)}</div>
           </div>
           <div className="stat-item">
-            <div className="label">Overtime</div>
+            <div className="label">Overtime Hours</div>
             <div className="value">{totalOvertime.toFixed(2)}</div>
           </div>
           <div className="stat-item">
-            <div className="label">Offset Used</div>
+            <div className="label">Offset Hours Used</div>
             <div className="value">{totalOffsetUsed.toFixed(2)}</div>
           </div>
           <div className="stat-item">
-            <div className="label">Available Offset</div>
+            <div className="label">Available Offset Hours</div>
             <div className="value">{availableOffset.toFixed(2)}</div>
           </div>
         </div>
@@ -292,20 +314,60 @@ export default function TraineeDashboard() {
           <p>Start tracking your OJT hours by adding your first log entry above.</p>
         </div>
       ) : (() => {
-        const sortedLogs = [...logs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        // Apply filters
+        let filtered = [...logs];
+        if (filterDateFrom) filtered = filtered.filter(l => l.date >= filterDateFrom);
+        if (filterDateTo) filtered = filtered.filter(l => l.date <= filterDateTo);
+        if (filterMinHours) filtered = filtered.filter(l => l.hoursWorked >= Number(filterMinHours));
+        if (filterMaxHours) filtered = filtered.filter(l => l.hoursWorked <= Number(filterMaxHours));
+        if (filterOvertime === "yes") filtered = filtered.filter(l => l.overtime > 0);
+        else if (filterOvertime === "no") filtered = filtered.filter(l => l.overtime === 0);
+        if (filterOffset === "yes") filtered = filtered.filter(l => l.offsetUsed > 0);
+        else if (filterOffset === "no") filtered = filtered.filter(l => l.offsetUsed === 0);
+        if (filterAccomplishment) { const q = filterAccomplishment.toLowerCase(); filtered = filtered.filter(l => l.accomplishment.toLowerCase().includes(q)); }
+
+        // Apply sort
+        const sortedLogs = [...filtered].sort((a, b) => {
+          let cmp = 0;
+          switch (sortField) {
+            case "date": cmp = new Date(a.date).getTime() - new Date(b.date).getTime(); break;
+            case "timeIn": cmp = new Date(a.timeIn).getTime() - new Date(b.timeIn).getTime(); break;
+            case "lunchStart": cmp = new Date(a.lunchStart).getTime() - new Date(b.lunchStart).getTime(); break;
+            case "lunchEnd": cmp = new Date(a.lunchEnd).getTime() - new Date(b.lunchEnd).getTime(); break;
+            case "timeOut": cmp = new Date(a.timeOut).getTime() - new Date(b.timeOut).getTime(); break;
+            case "hoursWorked": cmp = a.hoursWorked - b.hoursWorked; break;
+            case "overtime": cmp = a.overtime - b.overtime; break;
+            case "offsetUsed": cmp = a.offsetUsed - b.offsetUsed; break;
+          }
+          return sortDir === "asc" ? cmp : -cmp;
+        });
+
         const totalPages = Math.max(1, Math.ceil(sortedLogs.length / pageSize));
         const safePage = Math.min(currentPage, totalPages);
         const startIdx = (safePage - 1) * pageSize;
         const paginatedLogs = sortedLogs.slice(startIdx, startIdx + pageSize);
-        const showFrom = startIdx + 1;
+        const showFrom = sortedLogs.length > 0 ? startIdx + 1 : 0;
         const showTo = Math.min(startIdx + pageSize, sortedLogs.length);
+
+        const sortTh = (field: typeof sortField, label: string) => (
+          <th key={field} onClick={() => handleSort(field)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
+              {label}
+              {sortField === field ? (
+                <span style={{ fontSize: "0.7rem", lineHeight: 1 }}>{sortDir === "asc" ? "\u25B2" : "\u25BC"}</span>
+              ) : (
+                <span style={{ fontSize: "0.7rem", opacity: 0.3, lineHeight: 1 }}>{"\u21C5"}</span>
+              )}
+            </span>
+          </th>
+        );
 
         return (
         <>
         {/* Page size selector */}
         <div className="pagination-bar">
           <div className="pagination-info">
-            Showing <strong>{showFrom}</strong>-<strong>{showTo}</strong> of <strong>{sortedLogs.length}</strong> entries
+            Showing <strong>{showFrom}</strong>&ndash;<strong>{showTo}</strong> of <strong>{sortedLogs.length}</strong>{hasActiveFilters && <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>{" "}(filtered from {logs.length})</span>} entries
           </div>
           <div className="pagination-size">
             <label htmlFor="pageSize">Rows per page:</label>
@@ -321,18 +383,82 @@ export default function TraineeDashboard() {
           </div>
         </div>
 
+        {/* Filter Controls */}
+        <div style={{ marginTop: "0.75rem" }}>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+            <button type="button" className={`btn ${showFilters ? "btn-primary" : "btn-outline"}`} onClick={() => setShowFilters(f => !f)} style={{ gap: "0.35rem", fontSize: "0.82rem" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+              Filters
+              {activeFilterCount > 0 && <span className="badge badge-primary" style={{ marginLeft: "0.2rem", padding: "0.1rem 0.4rem", fontSize: "0.7rem", minWidth: "1.1rem", textAlign: "center" }}>{activeFilterCount}</span>}
+            </button>
+            {hasActiveFilters && (
+              <button type="button" className="btn btn-ghost" onClick={clearFilters} style={{ fontSize: "0.8rem", gap: "0.25rem", color: "var(--danger)" }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                Clear all
+              </button>
+            )}
+            {hasActiveFilters && (
+              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                {sortedLogs.length} of {logs.length} entries match
+              </span>
+            )}
+          </div>
+          {showFilters && (
+            <div style={{ marginTop: "0.5rem", padding: "0.75rem", background: "var(--bg-subtle)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "0.5rem" }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: "0.78rem" }}>Date From</label>
+                  <input type="date" value={filterDateFrom} onChange={(e) => { setFilterDateFrom(e.target.value); setCurrentPage(1); }} style={{ fontSize: "0.82rem" }} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: "0.78rem" }}>Date To</label>
+                  <input type="date" value={filterDateTo} onChange={(e) => { setFilterDateTo(e.target.value); setCurrentPage(1); }} style={{ fontSize: "0.82rem" }} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: "0.78rem" }}>Min Hours</label>
+                  <input type="number" min="0" step="0.5" value={filterMinHours} onChange={(e) => { setFilterMinHours(e.target.value); setCurrentPage(1); }} placeholder="0" style={{ fontSize: "0.82rem" }} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: "0.78rem" }}>Max Hours</label>
+                  <input type="number" min="0" step="0.5" value={filterMaxHours} onChange={(e) => { setFilterMaxHours(e.target.value); setCurrentPage(1); }} placeholder={"\u221E"} style={{ fontSize: "0.82rem" }} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: "0.78rem" }}>Overtime</label>
+                  <select value={filterOvertime} onChange={(e) => { setFilterOvertime(e.target.value as "all" | "yes" | "no"); setCurrentPage(1); }} style={{ fontSize: "0.82rem" }}>
+                    <option value="all">All</option>
+                    <option value="yes">With Overtime</option>
+                    <option value="no">No Overtime</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: "0.78rem" }}>Offset Used</label>
+                  <select value={filterOffset} onChange={(e) => { setFilterOffset(e.target.value as "all" | "yes" | "no"); setCurrentPage(1); }} style={{ fontSize: "0.82rem" }}>
+                    <option value="all">All</option>
+                    <option value="yes">With Offset</option>
+                    <option value="no">No Offset</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 0, gridColumn: "1 / -1" }}>
+                  <label style={{ fontSize: "0.78rem" }}>Accomplishment</label>
+                  <input type="text" value={filterAccomplishment} onChange={(e) => { setFilterAccomplishment(e.target.value); setCurrentPage(1); }} placeholder={"Search accomplishments\u2026"} style={{ fontSize: "0.82rem" }} />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         <div style={{ overflowX: "auto", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", marginTop: "0.75rem" }}>
           <table className="logs-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Time In</th>
-                <th>Lunch Start</th>
-                <th>Lunch End</th>
-                <th>Time Out</th>
-                <th>Hours Worked</th>
-                <th>Overtime</th>
-                <th>Offset Used</th>
+                {sortTh("date", "Date")}
+                {sortTh("timeIn", "Time In")}
+                {sortTh("lunchStart", "Lunch Start")}
+                {sortTh("lunchEnd", "Lunch End")}
+                {sortTh("timeOut", "Time Out")}
+                {sortTh("hoursWorked", "Hours Worked")}
+                {sortTh("overtime", "Overtime")}
+                {sortTh("offsetUsed", "Offset Used")}
                 <th>Accomplishment</th>
                 <th style={{ textAlign: "center" }}>Actions</th>
               </tr>
@@ -370,17 +496,29 @@ export default function TraineeDashboard() {
                       <td className="accomplishment-cell">
                         <div className="accomplishment-content">{log.accomplishment}</div>
                       </td>
-                      <td style={{ whiteSpace: "nowrap", textAlign: "center" }}>
-                        <button className="btn btn-outline" style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", marginRight: "0.35rem" }} onClick={() => setEditingLog(log)}>
-                          Edit
-                        </button>
-                        <button className="btn btn-danger" style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem" }} onClick={() => setDeletingLog(log)}>
-                          Delete
-                        </button>
+                      <td style={{ textAlign: "center" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", alignItems: "center" }}>
+                          <button className="btn btn-outline" style={{ padding: "0.25rem 0.5rem", fontSize: "0.75rem", width: "100%" }} onClick={() => setEditingLog(log)}>
+                            Edit
+                          </button>
+                          <button className="btn btn-danger" style={{ padding: "0.25rem 0.5rem", fontSize: "0.75rem", width: "100%" }} onClick={() => setDeletingLog(log)}>
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
                 })}
+                {paginatedLogs.length === 0 && (
+                  <tr>
+                    <td colSpan={10} style={{ textAlign: "center", padding: "2rem 1rem", color: "var(--text-muted)", fontSize: "0.88rem" }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3 }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        No entries match the current filters.
+                      </div>
+                    </td>
+                  </tr>
+                )}
             </tbody>
           </table>
         </div>
