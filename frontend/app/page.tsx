@@ -7,7 +7,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { Trainee } from "@/types";
-import { fetchTrainees, deleteTrainee, verifyPassword, downloadAllCSV, importAllCSV } from "@/lib/api";
+import { fetchTrainees, deleteTrainee, verifyPassword, verifySuperPassword, downloadAllCSV, importAllCSV } from "@/lib/api";
 import TraineeCard from "@/components/TraineeCard";
 import PasswordModal from "@/components/PasswordModal";
 import CreateTraineeForm from "@/components/CreateTraineeForm";
@@ -25,6 +25,13 @@ export default function HomePage() {
   const [editPasswordLoading, setEditPasswordLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
+
+  // Super-password gate for Export / Import
+  const [pendingAction, setPendingAction] = useState<"export" | "import" | null>(null);
+  const [actionPassword, setActionPassword] = useState("");
+  const [actionPasswordError, setActionPasswordError] = useState("");
+  const [actionPasswordLoading, setActionPasswordLoading] = useState(false);
+  const [exportSuccess, setExportSuccess] = useState(false);
 
   // Import result modal
   const [importResult, setImportResult] = useState<{ trainees: number; supervisors: number; logs: number; skipped: number } | null>(null);
@@ -104,18 +111,49 @@ export default function HomePage() {
     }
   };
 
+  const closeActionModal = () => {
+    if (!actionPasswordLoading) {
+      setPendingAction(null);
+      setActionPassword("");
+      setActionPasswordError("");
+    }
+  };
+
+  const handleActionVerify = async () => {
+    if (!pendingAction || !actionPassword.trim()) return;
+    setActionPasswordLoading(true);
+    setActionPasswordError("");
+    try {
+      await verifySuperPassword(actionPassword);
+      const action = pendingAction;
+      setPendingAction(null);
+      setActionPassword("");
+      setActionPasswordError("");
+      if (action === "export") {
+        downloadAllCSV();
+        setExportSuccess(true);
+      } else {
+        importRef.current?.click();
+      }
+    } catch (err) {
+      setActionPasswordError(err instanceof Error ? err.message : "Incorrect password.");
+    } finally {
+      setActionPasswordLoading(false);
+    }
+  };
+
   return (
     <div className="container">
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
         <h1>OJT Progress Tracker</h1>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-          <button className="btn btn-outline" onClick={downloadAllCSV}>
+          <button className="btn btn-outline" onClick={() => setPendingAction("export")}>
             Export All CSV
           </button>
           <button
             className="btn btn-outline"
-            onClick={() => importRef.current?.click()}
+            onClick={() => setPendingAction("import")}
             disabled={importLoading}
           >
             {importLoading ? "Importing…" : "Import CSV"}
@@ -336,7 +374,10 @@ export default function HomePage() {
               </>
             ) : importResult && (
               <>
-                <h2 style={{ marginBottom: "0.5rem", color: "#16a34a" }}>Import Complete</h2>
+                <h2 style={{ marginBottom: "0.5rem", color: "#16a34a" }}>Import Successful</h2>
+                <p style={{ fontSize: "0.9rem", marginBottom: "0.75rem" }}>
+                  The CSV file has been imported successfully.
+                </p>
                 <div style={{ background: "var(--bg)", borderRadius: "6px", padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.9rem" }}>
                   <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.3rem 0.75rem" }}>
                     <strong>Trainees:</strong>
@@ -355,6 +396,61 @@ export default function HomePage() {
               <button className="btn btn-primary" onClick={() => { setImportResult(null); setImportError(null); }}>
                 OK
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Super password gate modal for Export / Import */}
+      {pendingAction && (
+        <div className="modal-overlay" onClick={closeActionModal}>
+          <div className="modal-content" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ marginBottom: "0.25rem" }}>
+              {pendingAction === "export" ? "Export All CSV" : "Import CSV"}
+            </h2>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
+              Enter password to proceed.
+            </p>
+            <div className="form-group" style={{ marginBottom: "0.75rem" }}>
+              <label>Password</label>
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={actionPassword}
+                onChange={(e) => { setActionPassword(e.target.value); setActionPasswordError(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleActionVerify(); } }}
+                autoFocus
+              />
+            </div>
+            {actionPasswordError && (
+              <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem" }}>{actionPasswordError}</p>
+            )}
+            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+              <button className="btn btn-outline" onClick={closeActionModal} disabled={actionPasswordLoading}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={actionPasswordLoading || !actionPassword.trim()}
+                onClick={handleActionVerify}
+              >
+                {actionPasswordLoading ? "Verifying…" : "Continue"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export success modal */}
+      {exportSuccess && (
+        <div className="modal-overlay" onClick={() => setExportSuccess(false)}>
+          <div className="modal-content" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ marginBottom: "0.5rem", color: "#16a34a" }}>Export Successful</h2>
+            <p style={{ fontSize: "0.9rem", marginBottom: "1rem" }}>
+              All trainee data has been exported to CSV. Your download should begin shortly.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn btn-primary" onClick={() => setExportSuccess(false)}>OK</button>
             </div>
           </div>
         </div>

@@ -200,6 +200,18 @@ export async function importCSV(traineeId: string, file: File) {
 
 // ── Bulk Export / Import (full database) ─────────────────────
 
+// ── Auth ──────────────────────────────────────────────────────
+
+export async function verifySuperPassword(password: string) {
+  const hashed = await sha256(password);
+  return request<{ message: string }>("/api/auth/verify-super", {
+    method: "POST",
+    body: JSON.stringify({ password: hashed }),
+  });
+}
+
+// ── Bulk Export / Import (full database) ─────────────────────
+
 export function downloadAllCSV() {
   window.open(`${BASE}/api/export/all`, "_blank");
 }
