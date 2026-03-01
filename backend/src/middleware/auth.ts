@@ -73,8 +73,8 @@ export function setSessionCookie(res: Response, traineeId: string): void {
 
   res.cookie("ojt_session", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    secure: true,
+    sameSite: "none",
     path: "/",
     maxAge: maxAgeMs,
   });
@@ -86,8 +86,8 @@ export function setSessionCookie(res: Response, traineeId: string): void {
 export function clearSessionCookie(res: Response): void {
   res.clearCookie("ojt_session", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    secure: true,
+    sameSite: "none",
     path: "/",
   });
 }
