@@ -42,8 +42,11 @@ export async function sendVerification(req: Request, res: Response) {
       },
     });
 
-    // Send the email
-    await sendEmailVerificationCode(email, code);
+    // Send the email in the background — don't block the HTTP response.
+    // This prevents Vercel proxy timeouts on slow SMTP delivery.
+    sendEmailVerificationCode(email, code).catch((err) =>
+      console.error("Background email send failed:", err)
+    );
 
     return res.json({ message: "Verification code sent." });
   } catch (err) {
