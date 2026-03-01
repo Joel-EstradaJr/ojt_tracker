@@ -5,26 +5,34 @@
 // ============================================================
 
 import nodemailer from "nodemailer";
+import SMTPTransport from "nodemailer/lib/smtp-transport";
 import dns from "dns";
-import net from "net";
 
 // Force Node.js DNS to resolve IPv4 first — Railway containers
 // cannot reach Gmail SMTP over IPv6 (ENETUNREACH).
 dns.setDefaultResultOrder("ipv4first");
 
-// Custom DNS lookup that only returns IPv4 addresses
-const dnsLookupIPv4: typeof dns.lookup = (hostname, options, callback) => {
-  // Normalise overloaded signature
+// Monkey-patch dns.lookup to force family:4 (IPv4) everywhere.
+// This is the nuclear option — guarantees Nodemailer (and any
+// other code) can never resolve to an IPv6 address.
+const _origLookup = dns.lookup;
+(dns as any).lookup = function (
+  hostname: string,
+  options: any,
+  callback: any
+) {
   if (typeof options === "function") {
     callback = options;
     options = { family: 4 };
+  } else if (typeof options === "number") {
+    options = { family: 4 };
   } else {
-    options = typeof options === "number" ? { family: 4 } : { ...options, family: 4 };
+    options = { ...options, family: 4 };
   }
-  return dns.lookup(hostname, options, callback as dns.LookupCallback);
+  return (_origLookup as Function).call(dns, hostname, options, callback);
 };
 
-const transporter = nodemailer.createTransport({
+const transportOpts: SMTPTransport.Options = {
   host: "smtp.gmail.com",
   port: 587,
   secure: false, // STARTTLS on 587
@@ -32,9 +40,9 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_EMAIL,
     pass: process.env.SMTP_PASSWORD, // Gmail App Password (16 chars, no spaces)
   },
-  // Force IPv4 — Railway has no IPv6 outbound
-  dnsLookup: dnsLookupIPv4 as unknown as typeof net.Socket.prototype.connect,
-});
+};
+
+const transporter = nodemailer.createTransport(transportOpts);
 
 /**
  * Send a 6-digit password-reset verification code to the given email.
