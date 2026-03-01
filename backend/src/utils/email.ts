@@ -1,31 +1,37 @@
 // ============================================================
-// Email Utility — sends verification codes via Resend HTTP API.
-// Railway blocks outbound SMTP on non-Pro plans, so we use
-// Resend's HTTPS-based API instead of direct Gmail SMTP.
+// Email Utility — sends verification codes via Gmail SMTP
+// using Nodemailer. Requires SMTP_EMAIL and SMTP_PASSWORD
+// environment variables (use a Gmail App Password).
 //
-// Requires RESEND_API_KEY environment variable.
-// Optionally RESEND_FROM to set the sender address (must be
-// a verified domain on Resend, or use "onboarding@resend.dev"
-// for testing).
+// NOTE: This utility is used by both the backend (local dev)
+// and the frontend Next.js API routes (production on Vercel).
+// Railway blocks outbound SMTP, so in production the backend
+// delegates email delivery to Vercel API routes which call
+// this same utility from Vercel's environment.
 // ============================================================
 
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
+import SMTPTransport from "nodemailer/lib/smtp-transport";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const transportOpts: SMTPTransport.Options = {
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false, // STARTTLS on 587
+  auth: {
+    user: process.env.SMTP_EMAIL,
+    pass: process.env.SMTP_PASSWORD, // Gmail App Password (16 chars, no spaces)
+  },
+  connectionTimeout: 10_000,
+  greetingTimeout: 10_000,
+  socketTimeout: 30_000,
+};
 
-// Sender address — use a verified Resend domain, or the shared
-// "onboarding@resend.dev" address for free-tier / testing.
-const FROM =
-  process.env.RESEND_FROM || "OJT Progress Tracker <onboarding@resend.dev>";
+const transporter = nodemailer.createTransport(transportOpts);
 
 /**
  * Send a 6-digit password-reset verification code to the given email.
  */
-export async function sendResetCode(
-  to: string,
-  code: string,
-  displayName: string
-): Promise<void> {
+export async function sendResetCode(to: string, code: string, displayName: string): Promise<void> {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
       <h2 style="color: #1e293b; margin-bottom: 8px;">OJT Progress Tracker</h2>
@@ -45,26 +51,19 @@ export async function sendResetCode(
     </div>
   `;
 
-  const { error } = await resend.emails.send({
-    from: FROM,
-    to: [to],
+  await transporter.sendMail({
+    from: `"OJT Progress Tracker" <${process.env.SMTP_EMAIL}>`,
+    to,
     subject: "Password Reset Code — OJT Progress Tracker",
     html,
   });
-
-  if (error) {
-    throw new Error(`Resend error: ${error.message}`);
-  }
 }
 
 /**
  * Send a 6-digit email-ownership verification code (used during
  * trainee creation or when editing the trainee email address).
  */
-export async function sendEmailVerificationCode(
-  to: string,
-  code: string
-): Promise<void> {
+export async function sendEmailVerificationCode(to: string, code: string): Promise<void> {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
       <h2 style="color: #1e293b; margin-bottom: 8px;">OJT Progress Tracker</h2>
@@ -83,14 +82,10 @@ export async function sendEmailVerificationCode(
     </div>
   `;
 
-  const { error } = await resend.emails.send({
-    from: FROM,
-    to: [to],
+  await transporter.sendMail({
+    from: `"OJT Progress Tracker" <${process.env.SMTP_EMAIL}>`,
+    to,
     subject: "Email Verification Code — OJT Progress Tracker",
     html,
   });
-
-  if (error) {
-    throw new Error(`Resend error: ${error.message}`);
-  }
 }

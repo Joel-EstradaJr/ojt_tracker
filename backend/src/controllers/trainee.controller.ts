@@ -48,10 +48,10 @@ async function findDuplicateName(
 ) {
   const match = await prisma.trainee.findFirst({
     where: {
-      lastName:   { equals: lastName,   mode: "insensitive" },
-      firstName:  { equals: firstName,  mode: "insensitive" },
+      lastName: { equals: lastName, mode: "insensitive" },
+      firstName: { equals: firstName, mode: "insensitive" },
       middleName: middleName ? { equals: middleName, mode: "insensitive" } : null,
-      suffix:     suffix     ? { equals: suffix,     mode: "insensitive" } : null,
+      suffix: suffix ? { equals: suffix, mode: "insensitive" } : null,
       ...(excludeId ? { id: { not: excludeId } } : {}),
     },
   });
@@ -102,17 +102,17 @@ export const createTrainee = async (req: Request, res: Response) => {
         // Create supervisors inline if provided
         ...(Array.isArray(supervisors) && supervisors.length > 0
           ? {
-              supervisors: {
-                create: supervisors.map((s: Record<string, string>) => ({
-                  lastName: s.lastName,
-                  firstName: s.firstName,
-                  middleName: s.middleName || null,
-                  suffix: s.suffix || null,
-                  contactNumber: s.contactNumber || null,
-                  email: s.email || null,
-                })),
-              },
-            }
+            supervisors: {
+              create: supervisors.map((s: Record<string, string>) => ({
+                lastName: s.lastName,
+                firstName: s.firstName,
+                middleName: s.middleName || null,
+                suffix: s.suffix || null,
+                contactNumber: s.contactNumber || null,
+                email: s.email || null,
+              })),
+            },
+          }
           : {}),
       },
       select: { ...TRAINEE_PUBLIC_SELECT, supervisors: true, logs: { select: { hoursWorked: true } } },
@@ -309,12 +309,25 @@ export const forgotPassword = async (req: Request, res: Response) => {
       },
     });
 
-    // Send the code via email
-    await sendResetCode(trainee.email, code, displayName(trainee));
-
     // Mask the email for the response (show first 3 chars + domain)
     const [local, domain] = trainee.email.split("@");
     const masked = local.slice(0, 3) + "***@" + domain;
+
+    // If called from the Vercel API route with internal key,
+    // return the code — Vercel will handle email delivery.
+    const internalKey = req.headers["x-internal-key"] as string | undefined;
+    if (internalKey && process.env.EMAIL_INTERNAL_KEY && internalKey === process.env.EMAIL_INTERNAL_KEY) {
+      return res.json({
+        message: `Verification code sent to ${masked}.`,
+        maskedEmail: masked,
+        code,
+        displayName: displayName(trainee),
+        email: trainee.email,
+      });
+    }
+
+    // Direct call (local dev) — send email via SMTP
+    await sendResetCode(trainee.email, code, displayName(trainee));
 
     return res.json({ message: `Verification code sent to ${masked}.`, maskedEmail: masked });
   } catch (err) {

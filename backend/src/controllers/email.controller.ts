@@ -42,7 +42,15 @@ export async function sendVerification(req: Request, res: Response) {
       },
     });
 
-    // Send the email via Resend HTTP API (fast, not blocked by Railway)
+    // If called from the Vercel API route with internal key,
+    // return the code — Vercel will handle email delivery.
+    // (Railway blocks outbound SMTP on non-Pro plans.)
+    const internalKey = req.headers["x-internal-key"] as string | undefined;
+    if (internalKey && process.env.EMAIL_INTERNAL_KEY && internalKey === process.env.EMAIL_INTERNAL_KEY) {
+      return res.json({ message: "Verification code stored.", code });
+    }
+
+    // Direct call (local dev) — send email via SMTP
     await sendEmailVerificationCode(email, code);
 
     return res.json({ message: "Verification code sent." });
