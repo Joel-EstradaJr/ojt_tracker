@@ -133,7 +133,7 @@ export const getLogsByTrainee = async (req: Request, res: Response) => {
 // ── Update a log entry ───────────────────────────────────────
 export const updateLog = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const { entryId: id } = req.params;
     const {
       date, timeIn, timeOut, lunchStart, lunchEnd,
       accomplishment, applyOffset, offsetAmount,
@@ -205,7 +205,7 @@ export const updateLog = async (req: Request, res: Response) => {
 // ── Delete a log entry ────────────────────────────────────────
 export const deleteLog = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const { entryId: id } = req.params;
     await prisma.logEntry.delete({ where: { id } });
     // No extra recalculation needed — the deleted row's overtime
     // and offsetUsed are simply removed from the running totals.

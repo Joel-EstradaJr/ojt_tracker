@@ -24,10 +24,10 @@ router.get("/offset/:traineeId", requireAuth, getOffset);
 // GET  /logs/:traineeId    — get all logs for a trainee
 router.get("/:traineeId", requireAuth, getLogsByTrainee);
 
-// PUT  /logs/:id           — update a log entry (validated)
-router.put("/:id", requireAuth, sanitizeBody, validateLogUpdate, updateLog);
+// PUT  /logs/:entryId      — update a log entry (validated)
+router.put("/:entryId", requireAuth, sanitizeBody, validateLogUpdate, updateLog);
 
-// DELETE /logs/entry/:id   — delete a log entry
-router.delete("/entry/:id", requireAuth, deleteLog);
+// DELETE /logs/entry/:entryId — delete a log entry
+router.delete("/entry/:entryId", requireAuth, deleteLog);
 
 export default router;
