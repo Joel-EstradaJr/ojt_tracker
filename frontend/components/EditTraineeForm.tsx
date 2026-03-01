@@ -52,6 +52,12 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // ── Confirmation / result modals ────────────────────────────
+  type FieldChange = { label: string; oldVal: string; newVal: string };
+  const [pendingChanges, setPendingChanges] = useState<FieldChange[]>([]);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [saveResult, setSaveResult] = useState<"success" | "cancelled" | null>(null);
+
   // Load existing supervisors
   const loadSupervisors = useCallback(async () => {
     try {
@@ -153,9 +159,57 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
       }
     }
 
+    // ── Build diff of changed fields ────────────────────────
+    const changes: FieldChange[] = [];
+    const cmp = (label: string, oldV: string, newV: string) => {
+      if (oldV !== newV) changes.push({ label, oldVal: oldV || "(empty)", newVal: newV || "(empty)" });
+    };
+    cmp("Last Name", trainee.lastName, lastName);
+    cmp("First Name", trainee.firstName, firstName);
+    cmp("Middle Name", trainee.middleName ?? "", middleName);
+    cmp("Suffix", trainee.suffix ?? "", suffix);
+    cmp("Email", trainee.email, email);
+    cmp("Contact Number", trainee.contactNumber, contactNumber);
+    cmp("School", trainee.school, school);
+    cmp("Company Name", trainee.companyName, companyName);
+    cmp("Required Hours", String(trainee.requiredHours), requiredHours);
+
+    // Supervisor changes
+    for (const sup of existingSupervisors) {
+      if (deletedIds.has(sup.id)) {
+        changes.push({ label: `Remove Supervisor`, oldVal: sup.displayName, newVal: "(deleted)" });
+        continue;
+      }
+      const ed = editedSupervisors[sup.id];
+      const prefix = `Supervisor "${sup.displayName}"`;
+      cmp(`${prefix} Last Name`, sup.lastName, ed.lastName);
+      cmp(`${prefix} First Name`, sup.firstName, ed.firstName);
+      cmp(`${prefix} Middle Name`, sup.middleName ?? "", ed.middleName ?? "");
+      cmp(`${prefix} Suffix`, sup.suffix ?? "", ed.suffix ?? "");
+      cmp(`${prefix} Contact`, sup.contactNumber ?? "", ed.contactNumber ?? "");
+      cmp(`${prefix} Email`, sup.email ?? "", ed.email ?? "");
+    }
+
+    for (let i = 0; i < newSupervisors.length; i++) {
+      const s = newSupervisors[i];
+      const name = `${s.firstName} ${s.lastName}`.trim() || `#${i + 1}`;
+      changes.push({ label: "Add Supervisor", oldVal: "(none)", newVal: name });
+    }
+
+    if (changes.length === 0) {
+      setError("No changes detected.");
+      return;
+    }
+
+    setPendingChanges(changes);
+    setShowConfirm(true);
+  };
+
+  // ── Execute the actual save ─────────────────────────────────
+  const executeSave = async () => {
+    setShowConfirm(false);
     setLoading(true);
     try {
-      // 1. Update trainee info
       await updateTrainee(trainee.id, {
         lastName,
         firstName,
@@ -168,23 +222,20 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
         requiredHours: Number(requiredHours),
       });
 
-      // 2. Delete removed supervisors
       for (const id of deletedIds) {
         await deleteSupervisor(id);
       }
 
-      // 3. Update existing supervisors
       for (const sup of existingSupervisors) {
         if (deletedIds.has(sup.id)) continue;
         await updateSupervisor(sup.id, editedSupervisors[sup.id]);
       }
 
-      // 4. Create new supervisors
       for (const s of newSupervisors) {
         await createSupervisor(trainee.id, s);
       }
 
-      onUpdated();
+      setSaveResult("success");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to update trainee.");
     } finally {
@@ -266,6 +317,71 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
   );
 
   return (
+    <>
+    {/* ── Confirmation modal (review changes) ────────────── */}
+    {showConfirm && (
+      <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => { setShowConfirm(false); setSaveResult("cancelled"); }}>
+        <div className="modal-content" style={{ maxWidth: 500, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+          <h2 style={{ marginBottom: "0.5rem" }}>Confirm Changes</h2>
+          <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>
+            The following {pendingChanges.length} field{pendingChanges.length > 1 ? "s" : ""} will be updated:
+          </p>
+          <div style={{ background: "var(--bg)", borderRadius: "6px", padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.85rem" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}>
+                  <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>Field</th>
+                  <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>Old Value</th>
+                  <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>New Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingChanges.map((c, i) => (
+                  <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                    <td style={{ padding: "0.35rem 0.5rem", fontWeight: 500 }}>{c.label}</td>
+                    <td style={{ padding: "0.35rem 0.5rem", color: "var(--danger)", wordBreak: "break-word" }}>{c.oldVal}</td>
+                    <td style={{ padding: "0.35rem 0.5rem", color: "#16a34a", wordBreak: "break-word" }}>{c.newVal}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+            <button className="btn btn-outline" onClick={() => { setShowConfirm(false); setSaveResult("cancelled"); }}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" onClick={executeSave} disabled={loading}>
+              {loading ? "Saving…" : "Confirm"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Save result modal ──────────────────────────────── */}
+    {saveResult && (
+      <div className="modal-overlay" style={{ zIndex: 1200 }} onClick={() => { if (saveResult === "success") onUpdated(); setSaveResult(null); }}>
+        <div className="modal-content" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+          {saveResult === "success" ? (
+            <>
+              <h2 style={{ marginBottom: "0.5rem", color: "#16a34a" }}>Changes Saved</h2>
+              <p style={{ fontSize: "0.9rem", marginBottom: "1rem" }}>
+                All changes to <strong>{trainee.displayName}</strong> have been saved successfully.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 style={{ marginBottom: "0.5rem", color: "var(--text-muted)" }}>Edit Cancelled</h2>
+              <p style={{ fontSize: "0.9rem", marginBottom: "1rem" }}>No changes were saved. You can continue editing.</p>
+            </>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button className="btn btn-primary" onClick={() => { if (saveResult === "success") onUpdated(); setSaveResult(null); }}>OK</button>
+          </div>
+        </div>
+      </div>
+    )}
+
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" style={{ maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
         <h2 style={{ marginBottom: "1rem" }}>Edit Trainee</h2>
@@ -379,5 +495,6 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
         </form>
       </div>
     </div>
+    </>
   );
 }

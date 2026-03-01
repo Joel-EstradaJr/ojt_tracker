@@ -38,6 +38,7 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
   const [companyName, setCompanyName] = useState("");
   const [requiredHours, setRequiredHours] = useState("500");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   // Supervisors (dynamic list)
   const [supervisors, setSupervisors] = useState<SupervisorInput[]>([]);
@@ -63,8 +64,13 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
     setError("");
 
     // Client-side required-field check
-    if (!lastName || !firstName || !email || !contactNumber || !school || !companyName || !requiredHours || !password) {
+    if (!lastName || !firstName || !email || !contactNumber || !school || !companyName || !requiredHours || !password || !confirmPassword) {
       setError("All required fields must be filled.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
       return;
     }
 
@@ -166,14 +172,30 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
             <input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value))} placeholder="Company where OJT is rendered" />
           </div>
 
+          <div className="form-group">
+            <label>Required Hours *</label>
+            <input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} />
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
-            <div className="form-group">
-              <label>Required Hours *</label>
-              <input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} />
-            </div>
             <div className="form-group">
               <label>Password *</label>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Set a unique password" />
+            </div>
+            <div className="form-group">
+              <label>Confirm Password *</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter password"
+                style={confirmPassword ? { borderColor: password === confirmPassword ? "#16a34a" : "var(--danger)" } : undefined}
+              />
+              {confirmPassword && (
+                <span style={{ fontSize: "0.78rem", marginTop: "0.25rem", color: password === confirmPassword ? "#16a34a" : "var(--danger)" }}>
+                  {password === confirmPassword ? "✓ Passwords match" : "✗ Passwords do not match"}
+                </span>
+              )}
             </div>
           </div>
 

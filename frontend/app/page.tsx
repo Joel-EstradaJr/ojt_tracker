@@ -19,6 +19,10 @@ export default function HomePage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editingTrainee, setEditingTrainee] = useState<Trainee | null>(null);
+  const [pendingEditTrainee, setPendingEditTrainee] = useState<Trainee | null>(null);
+  const [editPassword, setEditPassword] = useState("");
+  const [editPasswordError, setEditPasswordError] = useState("");
+  const [editPasswordLoading, setEditPasswordLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -145,7 +149,7 @@ export default function HomePage() {
             key={t.id}
             trainee={t}
             onClick={() => setSelectedId(t.id)}
-            onEdit={() => setEditingTrainee(t)}
+            onEdit={() => setPendingEditTrainee(t)}
             onDelete={() => setDeletingTrainee(t)}
           />
         ))}
@@ -168,6 +172,72 @@ export default function HomePage() {
             loadTrainees();
           }}
         />
+      )}
+
+      {/* Edit password gate modal */}
+      {pendingEditTrainee && !editingTrainee && (
+        <div className="modal-overlay" onClick={() => { if (!editPasswordLoading) { setPendingEditTrainee(null); setEditPassword(""); setEditPasswordError(""); } }}>
+          <div className="modal-content" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ marginBottom: "0.25rem" }}>Edit Trainee</h2>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
+              Enter <strong>{pendingEditTrainee.displayName}&apos;s</strong> password to continue.
+            </p>
+            <div className="form-group" style={{ marginBottom: "0.75rem" }}>
+              <label>Password</label>
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={editPassword}
+                onChange={(e) => { setEditPassword(e.target.value); setEditPasswordError(""); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (!editPassword.trim()) return;
+                    setEditPasswordLoading(true);
+                    setEditPasswordError("");
+                    verifyPassword(pendingEditTrainee!.id, editPassword)
+                      .then(() => {
+                        setEditingTrainee(pendingEditTrainee);
+                        setPendingEditTrainee(null);
+                        setEditPassword("");
+                        setEditPasswordError("");
+                      })
+                      .catch((err: unknown) => setEditPasswordError(err instanceof Error ? err.message : "Incorrect password."))
+                      .finally(() => setEditPasswordLoading(false));
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            {editPasswordError && (
+              <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem" }}>{editPasswordError}</p>
+            )}
+            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+              <button className="btn btn-outline" onClick={() => { setPendingEditTrainee(null); setEditPassword(""); setEditPasswordError(""); }} disabled={editPasswordLoading}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={editPasswordLoading || !editPassword.trim()}
+                onClick={() => {
+                  setEditPasswordLoading(true);
+                  setEditPasswordError("");
+                  verifyPassword(pendingEditTrainee!.id, editPassword)
+                    .then(() => {
+                      setEditingTrainee(pendingEditTrainee);
+                      setPendingEditTrainee(null);
+                      setEditPassword("");
+                      setEditPasswordError("");
+                    })
+                    .catch((err: unknown) => setEditPasswordError(err instanceof Error ? err.message : "Incorrect password."))
+                    .finally(() => setEditPasswordLoading(false));
+                }}
+              >
+                {editPasswordLoading ? "Verifying…" : "Continue"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Edit trainee modal */}
