@@ -33,6 +33,7 @@ model Trainee {
   // Relations
   logs        LogEntry[]
   supervisors Supervisor[]
+  resetCodes  PasswordResetCode[]
 }
 
 // ── Supervisor ───────────────────────────────────────────────
@@ -81,5 +82,21 @@ model LogEntry {
   trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
 
   @@unique([traineeId, date]) // one log per trainee per date
+  @@index([traineeId])
+}
+
+// ── PasswordResetCode ────────────────────────────────────────
+// Stores a 6-digit verification code sent via email for
+// the forgot-password flow. Expires after 10 minutes.
+model PasswordResetCode {
+  id        String   @id @default(uuid())
+  traineeId String
+  code      String   // 6-digit code
+  expiresAt DateTime // code expiration timestamp
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+
   @@index([traineeId])
 }

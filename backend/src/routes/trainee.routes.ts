@@ -9,6 +9,8 @@ import {
   getAllTrainees,
   getTraineeById,
   verifyTraineePassword,
+  forgotPassword,
+  verifyResetCode,
   resetPassword,
   deleteTrainee,
 } from "../controllers/trainee.controller";
@@ -31,7 +33,13 @@ router.get("/:id", getTraineeById);
 // POST /trainees/:id/verify — verify password to unlock logs
 router.post("/:id/verify", verifyTraineePassword);
 
-// PUT  /trainees/:id/reset-password — reset a forgotten password
+// POST /trainees/:id/forgot-password — send a reset code to email
+router.post("/:id/forgot-password", forgotPassword);
+
+// POST /trainees/:id/verify-reset-code — verify the emailed code
+router.post("/:id/verify-reset-code", verifyResetCode);
+
+// PUT  /trainees/:id/reset-password — reset password (requires verified token)
 router.put("/:id/reset-password", resetPassword);
 
 // DELETE /trainees/:id    — delete trainee + cascading logs & supervisors

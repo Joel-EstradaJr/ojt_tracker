@@ -81,11 +81,24 @@ export async function verifyPassword(id: string, password: string) {
   });
 }
 
-export async function resetPassword(id: string, newPassword: string) {
+export async function resetPassword(id: string, newPassword: string, resetToken: string) {
   const hashed = await sha256(newPassword);
   return request<{ message: string }>(`/api/trainees/${id}/reset-password`, {
     method: "PUT",
-    body: JSON.stringify({ newPassword: hashed }),
+    body: JSON.stringify({ newPassword: hashed, resetToken }),
+  });
+}
+
+export function forgotPassword(id: string) {
+  return request<{ message: string; maskedEmail: string }>(`/api/trainees/${id}/forgot-password`, {
+    method: "POST",
+  });
+}
+
+export function verifyResetCode(id: string, code: string) {
+  return request<{ message: string; resetToken: string }>(`/api/trainees/${id}/verify-reset-code`, {
+    method: "POST",
+    body: JSON.stringify({ code }),
   });
 }
 

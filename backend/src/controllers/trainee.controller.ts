@@ -7,6 +7,7 @@ import { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import prisma from "../utils/prisma";
+import { sendResetCode } from "../utils/email";
 
 const SALT_ROUNDS = 10;
 
@@ -261,14 +262,112 @@ export const verifyTraineePassword = async (req: Request, res: Response) => {
   }
 };
 
-// ── Reset trainee password ────────────────────────────────────
+// ── Forgot password — send a 6-digit code to the trainee's email ──
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const trainee = await prisma.trainee.findUnique({ where: { id } });
+    if (!trainee) {
+      return res.status(404).json({ error: "Trainee not found." });
+    }
+
+    // Generate a random 6-digit code
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+
+    // Invalidate any existing unused codes for this trainee
+    await prisma.passwordResetCode.updateMany({
+      where: { traineeId: id, used: false },
+      data: { used: true },
+    });
+
+    // Store new code with 10-minute expiry
+    await prisma.passwordResetCode.create({
+      data: {
+        traineeId: id,
+        code,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      },
+    });
+
+    // Send the code via email
+    await sendResetCode(trainee.email, code, displayName(trainee));
+
+    // Mask the email for the response (show first 3 chars + domain)
+    const [local, domain] = trainee.email.split("@");
+    const masked = local.slice(0, 3) + "***@" + domain;
+
+    return res.json({ message: `Verification code sent to ${masked}.`, maskedEmail: masked });
+  } catch (err) {
+    console.error("forgotPassword error:", err);
+    return res.status(500).json({ error: "Failed to send verification code. Please try again." });
+  }
+};
+
+// ── Verify the 6-digit reset code ────────────────────────────
+export const verifyResetCode = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { code } = req.body;
+
+    if (!code || typeof code !== "string") {
+      return res.status(400).json({ error: "Verification code is required." });
+    }
+
+    const resetCode = await prisma.passwordResetCode.findFirst({
+      where: {
+        traineeId: id,
+        code: code.trim(),
+        used: false,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!resetCode) {
+      return res.status(401).json({ error: "Invalid or expired verification code." });
+    }
+
+    // Mark code as used
+    await prisma.passwordResetCode.update({
+      where: { id: resetCode.id },
+      data: { used: true },
+    });
+
+    // Return a short-lived token (the resetCode id) to authorize the password change
+    return res.json({ message: "Code verified.", resetToken: resetCode.id });
+  } catch (err) {
+    console.error("verifyResetCode error:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+};
+
+// ── Reset trainee password (requires verified reset token) ────
 export const resetPassword = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { newPassword } = req.body;
+    const { newPassword, resetToken } = req.body;
 
     if (!newPassword || newPassword.trim().length < 4) {
       return res.status(400).json({ error: "New password must be at least 4 characters." });
+    }
+
+    if (!resetToken) {
+      return res.status(400).json({ error: "Reset token is required." });
+    }
+
+    // Verify the reset token is valid (used code belonging to this trainee, created within last 15 min)
+    const resetCode = await prisma.passwordResetCode.findFirst({
+      where: {
+        id: resetToken,
+        traineeId: id,
+        used: true,
+        createdAt: { gt: new Date(Date.now() - 15 * 60 * 1000) },
+      },
+    });
+
+    if (!resetCode) {
+      return res.status(401).json({ error: "Invalid or expired reset token. Please request a new code." });
     }
 
     const trainee = await prisma.trainee.findUnique({ where: { id } });
@@ -278,6 +377,9 @@ export const resetPassword = async (req: Request, res: Response) => {
 
     const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
     await prisma.trainee.update({ where: { id }, data: { passwordHash } });
+
+    // Clean up all reset codes for this trainee
+    await prisma.passwordResetCode.deleteMany({ where: { traineeId: id } });
 
     return res.json({ message: "Password reset successfully." });
   } catch (err) {
