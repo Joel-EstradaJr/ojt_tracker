@@ -56,6 +56,8 @@ export interface LogEntry {
   lunchEnd: string;
   timeOut: string;
   hoursWorked: number;
+  overtime: number;
+  offsetUsed: number;
   accomplishment: string;
   createdAt: string;
 }
@@ -64,4 +66,7 @@ export interface LogEntry {
 export interface LogsResponse {
   logs: LogEntry[];
   totalHours: number;
+  totalOvertime: number;
+  totalOffsetUsed: number;
+  availableOffset: number;
 }

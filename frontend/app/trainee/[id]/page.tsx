@@ -12,6 +12,7 @@ import { Trainee, LogEntry } from "@/types";
 import { fetchTrainee, fetchLogs, deleteLog, downloadExport } from "@/lib/api";
 import LogForm from "@/components/LogForm";
 import ImportCSV from "@/components/ImportCSV";
+import { calculateExpectedEndDate } from "@/lib/ph-holidays";
 
 export default function TraineeDashboard() {
   const { id } = useParams<{ id: string }>();
@@ -20,10 +21,17 @@ export default function TraineeDashboard() {
   const [trainee, setTrainee] = useState<Trainee | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [totalHours, setTotalHours] = useState(0);
+  const [totalOvertime, setTotalOvertime] = useState(0);
+  const [totalOffsetUsed, setTotalOffsetUsed] = useState(0);
+  const [availableOffset, setAvailableOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [editingLog, setEditingLog] = useState<LogEntry | null>(null);
   const [deletingLog, setDeletingLog] = useState<LogEntry | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Pagination
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Load trainee + logs
   const loadData = useCallback(async () => {
@@ -32,6 +40,9 @@ export default function TraineeDashboard() {
       setTrainee(t);
       setLogs(logsRes.logs);
       setTotalHours(logsRes.totalHours);
+      setTotalOvertime(logsRes.totalOvertime);
+      setTotalOffsetUsed(logsRes.totalOffsetUsed);
+      setAvailableOffset(logsRes.availableOffset);
     } catch (err) {
       console.error(err);
     } finally {
@@ -66,7 +77,11 @@ export default function TraineeDashboard() {
   }
 
   const remaining = Math.max(0, trainee.requiredHours - totalHours);
+  const remainingDays = Math.ceil(remaining / 8);
   const percent = Math.min(100, Math.round((totalHours / trainee.requiredHours) * 100));
+  const expectedEndDate = remaining > 0
+    ? calculateExpectedEndDate(remainingDays)
+    : null;
 
   return (
     <div className="container">
@@ -108,9 +123,24 @@ export default function TraineeDashboard() {
           </div>
           <p style={{ marginTop: "0.4rem", fontSize: "0.85rem" }}>
             <strong>{totalHours.toFixed(1)}</strong> / {trainee.requiredHours} hrs rendered
-            &nbsp;|&nbsp; <strong>{remaining.toFixed(1)}</strong> hrs remaining
+            &nbsp;|&nbsp; <strong>{remaining.toFixed(1)}</strong> hrs (<strong>{remainingDays}</strong> day{remainingDays !== 1 ? "s" : ""}) remaining
             &nbsp;|&nbsp; {percent}%
           </p>
+          <p style={{ marginTop: "0.25rem", fontSize: "0.82rem", color: "var(--text-muted)" }}>
+            Total Overtime: <strong>{totalOvertime.toFixed(2)}</strong> hrs
+            &nbsp;|&nbsp; Offset Used: <strong>{totalOffsetUsed.toFixed(2)}</strong> hrs
+            &nbsp;|&nbsp; Available Offset: <strong>{availableOffset.toFixed(2)}</strong> hrs
+          </p>
+          {expectedEndDate && (
+            <p style={{ marginTop: "0.25rem", fontSize: "0.82rem", color: "var(--primary)", fontWeight: 600 }}>
+              Expected End Date: {expectedEndDate.toLocaleDateString("en-PH", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+            </p>
+          )}
+          {remaining <= 0 && (
+            <p style={{ marginTop: "0.25rem", fontSize: "0.82rem", color: "#16a34a", fontWeight: 600 }}>
+              ✓ OJT hours completed!
+            </p>
+          )}
         </div>
       </div>
 
@@ -129,12 +159,41 @@ export default function TraineeDashboard() {
       </div>
 
       {/* Add / Edit Log Form */}
-      <LogForm traineeId={id} onCreated={loadData} editingLog={editingLog} onCancelEdit={() => setEditingLog(null)} />
+      <LogForm traineeId={id} onCreated={loadData} editingLog={editingLog} onCancelEdit={() => setEditingLog(null)} availableOffset={availableOffset} />
 
       {/* Logs Table */}
       {logs.length === 0 ? (
         <p style={{ marginTop: "1rem", color: "var(--text-muted)" }}>No logs recorded yet.</p>
-      ) : (
+      ) : (() => {
+        const sortedLogs = [...logs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        const totalPages = Math.max(1, Math.ceil(sortedLogs.length / pageSize));
+        const safePage = Math.min(currentPage, totalPages);
+        const startIdx = (safePage - 1) * pageSize;
+        const paginatedLogs = sortedLogs.slice(startIdx, startIdx + pageSize);
+        const showFrom = startIdx + 1;
+        const showTo = Math.min(startIdx + pageSize, sortedLogs.length);
+
+        return (
+        <>
+        {/* Page size selector */}
+        <div className="pagination-bar">
+          <div className="pagination-info">
+            Showing <strong>{showFrom}</strong>–<strong>{showTo}</strong> of <strong>{sortedLogs.length}</strong> entries
+          </div>
+          <div className="pagination-size">
+            <label htmlFor="pageSize">Rows per page:</label>
+            <select
+              id="pageSize"
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+            >
+              {[5, 10, 20, 50, 100].map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         <div style={{ overflowX: "auto" }}>
           <table className="logs-table">
             <thead>
@@ -145,25 +204,28 @@ export default function TraineeDashboard() {
                 <th>Lunch End</th>
                 <th>Time Out</th>
                 <th>Hours Worked</th>
+                <th>Overtime</th>
+                <th>Offset Used</th>
                 <th>Accomplishment</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {[...logs]
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                .map((log) => {
+              {paginatedLogs.map((log) => {
                   const d = new Date(log.date);
                   const dateStr = d.toLocaleDateString("en-PH", { timeZone: "Asia/Manila" });
                   const dayName = d.toLocaleDateString("en-PH", { timeZone: "Asia/Manila", weekday: "long" });
                   const timeFmt = (iso: string) =>
                     new Date(iso).toLocaleTimeString("en-PH", { timeZone: "Asia/Manila", hour: "2-digit", minute: "2-digit" });
 
-                  const hrs = Math.floor(log.hoursWorked);
-                  const mins = Math.round((log.hoursWorked - hrs) * 60);
-                  const hoursLabel = mins === 0
-                    ? `${hrs} hr${hrs !== 1 ? "s" : ""}`
-                    : `${hrs} hr${hrs !== 1 ? "s" : ""} ${mins} min${mins !== 1 ? "s" : ""}`;
+                  const formatH = (v: number) => {
+                    const h = Math.floor(v);
+                    const m = Math.round((v - h) * 60);
+                    return m === 0
+                      ? `${h} hr${h !== 1 ? "s" : ""}`
+                      : `${h} hr${h !== 1 ? "s" : ""} ${m} min${m !== 1 ? "s" : ""}`;
+                  };
+                  const hoursLabel = formatH(log.hoursWorked);
 
                   return (
                     <tr key={log.id}>
@@ -176,6 +238,8 @@ export default function TraineeDashboard() {
                       <td>{timeFmt(log.lunchEnd)}</td>
                       <td>{timeFmt(log.timeOut)}</td>
                       <td style={{ whiteSpace: "nowrap" }}>{hoursLabel}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{log.overtime > 0 ? formatH(log.overtime) : "—"}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{log.offsetUsed > 0 ? formatH(log.offsetUsed) : "—"}</td>
                       <td className="accomplishment-cell">
                         <div className="accomplishment-content">{log.accomplishment}</div>
                       </td>
@@ -193,7 +257,75 @@ export default function TraineeDashboard() {
             </tbody>
           </table>
         </div>
-      )}
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="pagination-controls">
+            <button
+              className="btn btn-outline pagination-btn"
+              disabled={safePage <= 1}
+              onClick={() => setCurrentPage(1)}
+              title="First page"
+            >
+              «
+            </button>
+            <button
+              className="btn btn-outline pagination-btn"
+              disabled={safePage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              title="Previous page"
+            >
+              ‹
+            </button>
+
+            {(() => {
+              const pages: (number | string)[] = [];
+              const maxVisible = 5;
+              let start = Math.max(1, safePage - Math.floor(maxVisible / 2));
+              let end = start + maxVisible - 1;
+              if (end > totalPages) {
+                end = totalPages;
+                start = Math.max(1, end - maxVisible + 1);
+              }
+              if (start > 1) { pages.push(1); if (start > 2) pages.push("..."); }
+              for (let i = start; i <= end; i++) pages.push(i);
+              if (end < totalPages) { if (end < totalPages - 1) pages.push("..."); pages.push(totalPages); }
+              return pages.map((p, idx) =>
+                typeof p === "string" ? (
+                  <span key={`ellipsis-${idx}`} className="pagination-ellipsis">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    className={`btn pagination-btn ${p === safePage ? "pagination-btn-active" : "btn-outline"}`}
+                    onClick={() => setCurrentPage(p)}
+                  >
+                    {p}
+                  </button>
+                )
+              );
+            })()}
+
+            <button
+              className="btn btn-outline pagination-btn"
+              disabled={safePage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              title="Next page"
+            >
+              ›
+            </button>
+            <button
+              className="btn btn-outline pagination-btn"
+              disabled={safePage >= totalPages}
+              onClick={() => setCurrentPage(totalPages)}
+              title="Last page"
+            >
+              »
+            </button>
+          </div>
+        )}
+        </>
+        );
+      })()}
 
       {/* Delete Confirmation Modal */}
       {deletingLog && (() => {
@@ -203,11 +335,14 @@ export default function TraineeDashboard() {
         const dayName = d.toLocaleDateString("en-PH", { timeZone: "Asia/Manila", weekday: "long" });
         const timeFmt = (iso: string) =>
           new Date(iso).toLocaleTimeString("en-PH", { timeZone: "Asia/Manila", hour: "2-digit", minute: "2-digit" });
-        const hrs = Math.floor(dl.hoursWorked);
-        const mins = Math.round((dl.hoursWorked - hrs) * 60);
-        const hoursLabel = mins === 0
-          ? `${hrs} hr${hrs !== 1 ? "s" : ""}`
-          : `${hrs} hr${hrs !== 1 ? "s" : ""} ${mins} min${mins !== 1 ? "s" : ""}`;
+        const fmtH = (v: number) => {
+          const h = Math.floor(v);
+          const m = Math.round((v - h) * 60);
+          return m === 0
+            ? `${h} hr${h !== 1 ? "s" : ""}`
+            : `${h} hr${h !== 1 ? "s" : ""} ${m} min${m !== 1 ? "s" : ""}`;
+        };
+        const hoursLabel = fmtH(dl.hoursWorked);
 
         return (
           <div className="modal-overlay" onClick={() => !deleteLoading && setDeletingLog(null)}>
@@ -231,6 +366,8 @@ export default function TraineeDashboard() {
                   <span>{timeFmt(dl.timeOut)}</span>
                   <strong>Hours Worked:</strong>
                   <span>{hoursLabel}</span>
+                  {dl.overtime > 0 && (<><strong>Overtime:</strong><span>{fmtH(dl.overtime)}</span></>)}
+                  {dl.offsetUsed > 0 && (<><strong>Offset Used:</strong><span>{fmtH(dl.offsetUsed)}</span></>)}
                   <strong>Accomplishment:</strong>
                   <span style={{ whiteSpace: "pre-wrap", maxHeight: "6rem", overflowY: "auto" }}>{dl.accomplishment}</span>
                 </div>

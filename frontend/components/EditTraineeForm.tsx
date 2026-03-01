@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { updateTrainee, fetchSupervisors, createSupervisor, updateSupervisor, deleteSupervisor } from "@/lib/api";
 import { Trainee, Supervisor, SupervisorInput } from "@/types";
+import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
 
 interface Props {
   trainee: Trainee;
@@ -117,14 +118,23 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
       return;
     }
 
+    // Content-quality checks
+    const lnErr = validateName("Last name", lastName, true);    if (lnErr) { setError(lnErr); return; }
+    const fnErr = validateName("First name", firstName, true);   if (fnErr) { setError(fnErr); return; }
+    const mnErr = validateName("Middle name", middleName, false); if (mnErr) { setError(mnErr); return; }
+    if (!isValidEmail(email)) { setError("Please enter a valid email address (e.g. name@example.com)."); return; }
+    if (!phoneCharsOnly(contactNumber)) { setError("Contact number must contain only digits, +, -, (, ), and spaces."); return; }
+    if (!isValidPhone(contactNumber)) { setError("Contact number must have at least 7 digits."); return; }
+    const schErr = validateInstitution("School", school);       if (schErr) { setError(schErr); return; }
+    const coErr = validateInstitution("Company name", companyName); if (coErr) { setError(coErr); return; }
+
     // Validate edited existing supervisors (not deleted)
     for (const sup of existingSupervisors) {
       if (deletedIds.has(sup.id)) continue;
       const s = editedSupervisors[sup.id];
-      if (!s.lastName || !s.firstName) {
-        setError(`Supervisor "${sup.displayName}": Last Name and First Name are required.`);
-        return;
-      }
+      const sLn = validateName(`Supervisor "${sup.displayName}" last name`, s.lastName, true);  if (sLn) { setError(sLn); return; }
+      const sFn = validateName(`Supervisor "${sup.displayName}" first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
+      const sMn = validateName(`Supervisor "${sup.displayName}" middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
       if (!s.contactNumber?.trim() && !s.email?.trim()) {
         setError(`Supervisor "${sup.displayName}": At least one of Contact Number or Email is required.`);
         return;
@@ -134,10 +144,9 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
     // Validate new supervisors
     for (let i = 0; i < newSupervisors.length; i++) {
       const s = newSupervisors[i];
-      if (!s.lastName || !s.firstName) {
-        setError(`New Supervisor #${i + 1}: Last Name and First Name are required.`);
-        return;
-      }
+      const sLn = validateName(`New Supervisor #${i + 1} last name`, s.lastName, true);  if (sLn) { setError(sLn); return; }
+      const sFn = validateName(`New Supervisor #${i + 1} first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
+      const sMn = validateName(`New Supervisor #${i + 1} middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
       if (!s.contactNumber?.trim() && !s.email?.trim()) {
         setError(`New Supervisor #${i + 1}: At least one of Contact Number or Email is required.`);
         return;
@@ -226,15 +235,15 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem" }}>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}>
           <label>Last Name *</label>
-          <input value={s.lastName} onChange={(e) => onChange("lastName", e.target.value)} />
+          <input value={s.lastName} onChange={(e) => onChange("lastName", sanitizeInput(e.target.value))} />
         </div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}>
           <label>First Name *</label>
-          <input value={s.firstName} onChange={(e) => onChange("firstName", e.target.value)} />
+          <input value={s.firstName} onChange={(e) => onChange("firstName", sanitizeInput(e.target.value))} />
         </div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}>
           <label>Middle Name</label>
-          <input value={s.middleName ?? ""} onChange={(e) => onChange("middleName", e.target.value)} />
+          <input value={s.middleName ?? ""} onChange={(e) => onChange("middleName", sanitizeInput(e.target.value))} />
         </div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}>
           <label>Suffix</label>
@@ -246,7 +255,7 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
         </div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}>
           <label>Contact Number</label>
-          <input value={s.contactNumber ?? ""} onChange={(e) => onChange("contactNumber", e.target.value)} />
+          <input value={s.contactNumber ?? ""} onChange={(e) => onChange("contactNumber", sanitizeInput(e.target.value))} />
         </div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}>
           <label>Email</label>
@@ -266,15 +275,15 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
             <div className="form-group">
               <label>Last Name *</label>
-              <input value={lastName} onChange={(e) => setLastName(e.target.value)} />
+              <input value={lastName} onChange={(e) => setLastName(sanitizeInput(e.target.value))} />
             </div>
             <div className="form-group">
               <label>First Name *</label>
-              <input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+              <input value={firstName} onChange={(e) => setFirstName(sanitizeInput(e.target.value))} />
             </div>
             <div className="form-group">
               <label>Middle Name</label>
-              <input value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
+              <input value={middleName} onChange={(e) => setMiddleName(sanitizeInput(e.target.value))} />
             </div>
             <div className="form-group">
               <label>Suffix</label>
@@ -294,19 +303,19 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
             </div>
             <div className="form-group">
               <label>Contact Number *</label>
-              <input value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} />
+              <input value={contactNumber} onChange={(e) => setContactNumber(sanitizeInput(e.target.value))} />
             </div>
           </div>
 
           {/* ── School, Company, Hours ────────────────── */}
           <div className="form-group">
             <label>School *</label>
-            <input value={school} onChange={(e) => setSchool(e.target.value)} />
+            <input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value))} />
           </div>
 
           <div className="form-group">
             <label>Company / Institution Name *</label>
-            <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+            <input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value))} />
           </div>
 
           <div className="form-group">

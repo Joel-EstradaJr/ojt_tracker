@@ -9,6 +9,7 @@ import { format } from "date-fns";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import prisma from "../utils/prisma";
+import { calculateExpectedEndDate } from "../utils/ph-holidays";
 
 // ── Helper: fetch trainee + logs ─────────────────────────────
 async function getTraineeWithLogs(traineeId: string) {
@@ -45,11 +46,11 @@ export const exportCSV = async (req: Request, res: Response) => {
     if (!trainee) return res.status(404).json({ error: "Trainee not found." });
 
     const name = displayName(trainee);
-    const header = "Date,Time In,Lunch Start,Lunch End,Time Out,Hours Worked,Accomplishment\n";
+    const header = "Date,Time In,Lunch Start,Lunch End,Time Out,Hours Worked,Overtime,Offset Used,Accomplishment\n";
     const rows = trainee.logs
       .map(
         (l) =>
-          `${format(l.date, "yyyy-MM-dd")},${format(l.timeIn, "HH:mm")},${format(l.lunchStart, "HH:mm")},${format(l.lunchEnd, "HH:mm")},${format(l.timeOut, "HH:mm")},${l.hoursWorked},"${(l.accomplishment ?? "").replace(/"/g, '""')}"`
+          `${format(l.date, "yyyy-MM-dd")},${format(l.timeIn, "HH:mm")},${format(l.lunchStart, "HH:mm")},${format(l.lunchEnd, "HH:mm")},${format(l.timeOut, "HH:mm")},${l.hoursWorked},${l.overtime},${l.offsetUsed},"${(l.accomplishment ?? "").replace(/"/g, '""')}"`
       )
       .join("\n");
 
@@ -81,6 +82,8 @@ export const exportExcel = async (req: Request, res: Response) => {
       { header: "Lunch End", key: "lunchEnd", width: 14 },
       { header: "Time Out", key: "timeOut", width: 12 },
       { header: "Hours Worked", key: "hoursWorked", width: 14 },
+      { header: "Overtime", key: "overtime", width: 12 },
+      { header: "Offset Used", key: "offsetUsed", width: 14 },
       { header: "Accomplishment", key: "accomplishment", width: 40 },
     ];
 
@@ -92,9 +95,23 @@ export const exportExcel = async (req: Request, res: Response) => {
         lunchEnd: format(l.lunchEnd, "HH:mm"),
         timeOut: format(l.timeOut, "HH:mm"),
         hoursWorked: l.hoursWorked,
+        overtime: l.overtime,
+        offsetUsed: l.offsetUsed,
         accomplishment: l.accomplishment ?? "",
       });
     });
+
+    // Summary row
+    const totalHrs = trainee.logs.reduce((s, l) => s + l.hoursWorked, 0);
+    const remainHrs = Math.max(0, trainee.requiredHours - totalHrs);
+    const remainDays = Math.ceil(remainHrs / 8);
+    sheet.addRow({});
+    sheet.addRow({ date: "Total Hours", timeIn: totalHrs.toFixed(2) });
+    sheet.addRow({ date: "Remaining", timeIn: `${remainHrs.toFixed(1)} hrs (${remainDays} days)` });
+    if (remainHrs > 0) {
+      const endDate = calculateExpectedEndDate(remainDays);
+      sheet.addRow({ date: "Expected End Date", timeIn: format(endDate, "MMMM d, yyyy (EEEE)") });
+    }
 
     res.setHeader(
       "Content-Type",
@@ -132,16 +149,27 @@ export const exportPDF = async (req: Request, res: Response) => {
     doc.moveDown(1);
 
     const totalHours = trainee.logs.reduce((s, l) => s + l.hoursWorked, 0);
+    const totalOT = trainee.logs.reduce((s, l) => s + l.overtime, 0);
     doc.fontSize(10);
 
     trainee.logs.forEach((l) => {
       doc.text(
-        `${format(l.date, "yyyy-MM-dd")}  |  ${format(l.timeIn, "HH:mm")} – ${format(l.timeOut, "HH:mm")}  |  Lunch: ${format(l.lunchStart, "HH:mm")}–${format(l.lunchEnd, "HH:mm")}  |  ${l.hoursWorked} hrs  |  ${l.accomplishment ?? ""}`
+        `${format(l.date, "yyyy-MM-dd")}  |  ${format(l.timeIn, "HH:mm")} – ${format(l.timeOut, "HH:mm")}  |  Lunch: ${format(l.lunchStart, "HH:mm")}–${format(l.lunchEnd, "HH:mm")}  |  ${l.hoursWorked} hrs  |  OT: ${l.overtime}  |  Offset: ${l.offsetUsed}  |  ${l.accomplishment ?? ""}`
       );
     });
 
     doc.moveDown(1);
-    doc.fontSize(12).text(`Total Hours: ${totalHours.toFixed(2)} / ${trainee.requiredHours}`);
+    doc.fontSize(12).text(`Total Hours: ${totalHours.toFixed(2)} / ${trainee.requiredHours}  |  Total Overtime: ${totalOT.toFixed(2)}`);
+
+    const remainHrs = Math.max(0, trainee.requiredHours - totalHours);
+    const remainDays = Math.ceil(remainHrs / 8);
+    doc.text(`Remaining: ${remainHrs.toFixed(1)} hrs (${remainDays} day${remainDays !== 1 ? "s" : ""})`);
+    if (remainHrs > 0) {
+      const endDate = calculateExpectedEndDate(remainDays);
+      doc.text(`Expected End Date: ${format(endDate, "MMMM d, yyyy (EEEE)")}`);
+    } else {
+      doc.text("OJT hours completed!");
+    }
 
     doc.end();
   } catch (err) {

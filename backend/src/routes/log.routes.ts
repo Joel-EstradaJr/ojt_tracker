@@ -8,19 +8,23 @@ import {
   getLogsByTrainee,
   updateLog,
   deleteLog,
+  getOffset,
 } from "../controllers/log.controller";
-import { validateLogEntry } from "../middleware/validate";
+import { validateLogEntry, validateLogUpdate, sanitizeBody } from "../middleware/validate";
 
 const router = Router();
 
 // POST /logs               — create a new log entry (validated)
-router.post("/", validateLogEntry, createLog);
+router.post("/", sanitizeBody, validateLogEntry, createLog);
+
+// GET  /logs/offset/:traineeId — get available offset for a trainee
+router.get("/offset/:traineeId", getOffset);
 
 // GET  /logs/:traineeId    — get all logs for a trainee
 router.get("/:traineeId", getLogsByTrainee);
 
-// PUT  /logs/:id           — update a log entry
-router.put("/:id", updateLog);
+// PUT  /logs/:id           — update a log entry (validated)
+router.put("/:id", sanitizeBody, validateLogUpdate, updateLog);
 
 // DELETE /logs/entry/:id   — delete a log entry
 router.delete("/entry/:id", deleteLog);

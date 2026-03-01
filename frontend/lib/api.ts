@@ -3,6 +3,8 @@
 // Uses the Next.js rewrite so all calls go to /api/…
 // ============================================================
 
+import { sha256 } from "./hash";
+
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -31,7 +33,7 @@ export function fetchTrainee(id: string) {
   return request<import("@/types").Trainee>(`/api/trainees/${id}`);
 }
 
-export function createTrainee(data: {
+export async function createTrainee(data: {
   lastName: string;
   firstName: string;
   middleName?: string;
@@ -44,9 +46,10 @@ export function createTrainee(data: {
   password: string;
   supervisors?: import("@/types").SupervisorInput[];
 }) {
+  const hashedPassword = await sha256(data.password);
   return request<import("@/types").Trainee>("/api/trainees", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: JSON.stringify({ ...data, password: hashedPassword }),
   });
 }
 
@@ -70,17 +73,19 @@ export function updateTrainee(
   });
 }
 
-export function verifyPassword(id: string, password: string) {
+export async function verifyPassword(id: string, password: string) {
+  const hashed = await sha256(password);
   return request<import("@/types").Trainee>(`/api/trainees/${id}/verify`, {
     method: "POST",
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ password: hashed }),
   });
 }
 
-export function resetPassword(id: string, newPassword: string) {
+export async function resetPassword(id: string, newPassword: string) {
+  const hashed = await sha256(newPassword);
   return request<{ message: string }>(`/api/trainees/${id}/reset-password`, {
     method: "PUT",
-    body: JSON.stringify({ newPassword }),
+    body: JSON.stringify({ newPassword: hashed }),
   });
 }
 
@@ -122,6 +127,10 @@ export function fetchLogs(traineeId: string) {
   return request<import("@/types").LogsResponse>(`/api/logs/${traineeId}`);
 }
 
+export function fetchOffset(traineeId: string) {
+  return request<{ availableOffset: number }>(`/api/logs/offset/${traineeId}`);
+}
+
 export function createLog(data: {
   traineeId: string;
   date: string;
@@ -130,6 +139,8 @@ export function createLog(data: {
   lunchEnd: string;
   timeOut: string;
   accomplishment: string;
+  applyOffset?: boolean;
+  offsetAmount?: number;
 }) {
   return request<import("@/types").LogEntry>("/api/logs", {
     method: "POST",
@@ -146,6 +157,8 @@ export function updateLog(
     lunchEnd: string;
     timeOut: string;
     accomplishment: string;
+    applyOffset?: boolean;
+    offsetAmount?: number;
   }
 ) {
   return request<import("@/types").LogEntry>(`/api/logs/${id}`, {
@@ -183,4 +196,27 @@ export async function importCSV(traineeId: string, file: File) {
   }
 
   return res.json() as Promise<{ imported: number }>;
+}
+
+// ── Bulk Export / Import (full database) ─────────────────────
+
+export function downloadAllCSV() {
+  window.open(`${BASE}/api/export/all`, "_blank");
+}
+
+export async function importAllCSV(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+
+  const res = await fetch(`${BASE}/api/import/all`, {
+    method: "POST",
+    body: form,
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+
+  return res.json() as Promise<{ trainees: number; supervisors: number; logs: number; skipped: number }>;
 }

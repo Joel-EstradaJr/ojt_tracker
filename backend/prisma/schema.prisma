@@ -60,16 +60,19 @@ model Supervisor {
 
 // ── LogEntry ─────────────────────────────────────────────────
 // A single day's time-log record for a trainee.
-// Now includes lunch break fields for accurate hour calculation.
+// Now includes lunch break fields for accurate hour calculation,
+// overtime tracking, and offset (applying previous overtime).
 model LogEntry {
-  id          String   @id @default(uuid())
-  traineeId   String
-  date        DateTime // calendar date of the log
-  timeIn      DateTime // clock-in timestamp
-  lunchStart  DateTime // lunch break start (default 12:00 PM)
-  lunchEnd    DateTime // lunch break end   (default 1:00 PM)
-  timeOut     DateTime // clock-out timestamp
-  hoursWorked Float    // (timeOut - timeIn) - (lunchEnd - lunchStart)
+  id             String   @id @default(uuid())
+  traineeId      String
+  date           DateTime // calendar date of the log
+  timeIn         DateTime // clock-in timestamp
+  lunchStart     DateTime // lunch break start (default 12:00 PM)
+  lunchEnd       DateTime // lunch break end   (default 1:00 PM)
+  timeOut        DateTime // clock-out timestamp
+  hoursWorked    Float    // (timeOut - timeIn) - (lunchEnd - lunchStart)
+  overtime       Float    @default(0) // max(hoursWorked - 8, 0)
+  offsetUsed     Float    @default(0) // hours deducted from accumulated OT bank
   accomplishment String   // required freeform text
 
   createdAt DateTime @default(now())

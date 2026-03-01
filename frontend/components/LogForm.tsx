@@ -3,12 +3,14 @@
 // ============================================================
 // LogForm — form to add a new or edit an existing time-log
 // entry for a trainee. Includes lunch break fields, "Now"
-// buttons, and "No Lunch" toggle.
+// buttons, "No Lunch" toggle, and overtime/offset controls.
 // ============================================================
 
-import { useState, useEffect } from "react";
-import { createLog, updateLog } from "@/lib/api";
+import { useState, useEffect, useCallback } from "react";
+import { createLog, updateLog, fetchOffset } from "@/lib/api";
 import { LogEntry } from "@/types";
+import DatePicker from "@/components/DatePicker";
+import { sanitizeInput, validateAccomplishment } from "@/lib/sanitize";
 
 interface Props {
   traineeId: string;
@@ -17,6 +19,8 @@ interface Props {
   editingLog?: LogEntry | null;
   /** Called when user cancels editing */
   onCancelEdit?: () => void;
+  /** Available offset passed from parent (kept in sync after each load) */
+  availableOffset?: number;
 }
 
 /** Extract HH:mm from an ISO date string in local TZ */
@@ -35,7 +39,9 @@ function isNoLunch(log: LogEntry): boolean {
   return new Date(log.lunchStart).getTime() === new Date(log.lunchEnd).getTime();
 }
 
-export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit }: Props) {
+const STANDARD_HOURS = 8;
+
+export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit, availableOffset: parentOffset }: Props) {
   const today = new Date().toISOString().slice(0, 10);
 
   const [date, setDate] = useState(today);
@@ -45,8 +51,46 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
   const [noLunch, setNoLunch] = useState(false);
   const [timeOut, setTimeOut] = useState("17:00");
   const [accomplishment, setAccomplishment] = useState("");
+
+  // Offset controls
+  const [applyOffset, setApplyOffset] = useState(false);
+  const [offsetAmount, setOffsetAmount] = useState("");
+  const [availableOffset, setAvailableOffset] = useState(parentOffset ?? 0);
+
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Keep in sync with parent prop
+  useEffect(() => {
+    if (parentOffset !== undefined) setAvailableOffset(parentOffset);
+  }, [parentOffset]);
+
+  // Refresh available offset when entering edit mode (exclude self)
+  const refreshOffset = useCallback(async () => {
+    try {
+      const res = await fetchOffset(traineeId);
+      // In edit mode the server's getAvailableOffset doesn't exclude the
+      // current log — but the update endpoint does, so we just show the
+      // "bank" here and let the server cap it correctly.
+      setAvailableOffset(res.availableOffset);
+    } catch { /* silent */ }
+  }, [traineeId]);
+
+  // Compute a preview of hours based on current field values
+  const previewHours = (() => {
+    if (!timeIn || !timeOut || !date) return null;
+    try {
+      const tIn = new Date(`${date}T${timeIn}:00`).getTime();
+      const tOut = new Date(`${date}T${timeOut}:00`).getTime();
+      const lS = noLunch ? tIn : new Date(`${date}T${lunchStart}:00`).getTime();
+      const lE = noLunch ? tIn : new Date(`${date}T${lunchEnd}:00`).getTime();
+      const mins = (tOut - tIn) / 60000 - (lE - lS) / 60000;
+      if (mins < 0) return null;
+      const hw = parseFloat((mins / 60).toFixed(2));
+      const ot = parseFloat(Math.max(0, hw - STANDARD_HOURS).toFixed(2));
+      return { hoursWorked: hw, overtime: ot };
+    } catch { return null; }
+  })();
 
   // When editingLog changes, populate all fields
   useEffect(() => {
@@ -64,7 +108,16 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
         setLunchStart(isoToTime(editingLog.lunchStart));
         setLunchEnd(isoToTime(editingLog.lunchEnd));
       }
+      // Restore offset state from the log being edited
+      if (editingLog.offsetUsed > 0) {
+        setApplyOffset(true);
+        setOffsetAmount(String(editingLog.offsetUsed));
+      } else {
+        setApplyOffset(false);
+        setOffsetAmount("");
+      }
       setError("");
+      refreshOffset();
     } else {
       // Reset to defaults when switching back to create mode
       setDate(today);
@@ -74,9 +127,11 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
       setNoLunch(false);
       setTimeOut("17:00");
       setAccomplishment("");
+      setApplyOffset(false);
+      setOffsetAmount("");
       setError("");
     }
-  }, [editingLog, today]);
+  }, [editingLog, today, refreshOffset]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +139,12 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
 
     if (!date || !timeIn || !timeOut || !accomplishment.trim()) {
       setError("Date, Time In, Time Out, and Accomplishment are required.");
+      return;
+    }
+    const accErr = validateAccomplishment(accomplishment);
+    if (accErr) { setError(accErr); return; }
+    if (date > today) {
+      setError("Date cannot be in the future.");
       return;
     }
     if (!noLunch && (!lunchStart || !lunchEnd)) {
@@ -97,10 +158,13 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
     const lunchStartISO = noLunch ? timeInISO : new Date(`${date}T${lunchStart}:00`).toISOString();
     const lunchEndISO = noLunch ? timeInISO : new Date(`${date}T${lunchEnd}:00`).toISOString();
 
+    const offsetPayload = applyOffset
+      ? { applyOffset: true, offsetAmount: offsetAmount ? parseFloat(offsetAmount) : undefined }
+      : {};
+
     setLoading(true);
     try {
       if (editingLog) {
-        // ── Update existing log ──────────────────
         await updateLog(editingLog.id, {
           date: new Date(date).toISOString(),
           timeIn: timeInISO,
@@ -108,9 +172,9 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
           lunchEnd: lunchEndISO,
           timeOut: timeOutISO,
           accomplishment,
+          ...offsetPayload,
         });
       } else {
-        // ── Create new log ───────────────────────
         await createLog({
           traineeId,
           date: new Date(date).toISOString(),
@@ -119,12 +183,22 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
           lunchEnd: lunchEndISO,
           timeOut: timeOutISO,
           accomplishment,
+          ...offsetPayload,
         });
       }
-      // After success, reset form and notify parent
+      // Reset form to defaults and notify parent
+      setDate(today);
+      setTimeIn("08:00");
+      setLunchStart("12:00");
+      setLunchEnd("13:00");
+      setNoLunch(false);
+      setTimeOut("17:00");
       setAccomplishment("");
+      setApplyOffset(false);
+      setOffsetAmount("");
+      setError("");
       onCreated();
-      if (editingLog && onCancelEdit) onCancelEdit(); // exit edit mode
+      if (editingLog && onCancelEdit) onCancelEdit();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : `Failed to ${editingLog ? "update" : "create"} log.`);
     } finally {
@@ -133,6 +207,11 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
   };
 
   const isEditing = !!editingLog;
+
+  // In edit mode, the effective available offset = server bank + what THIS log already used
+  const effectiveAvailable = isEditing && editingLog
+    ? parseFloat((availableOffset + editingLog.offsetUsed).toFixed(2))
+    : availableOffset;
 
   return (
     <div className="card" style={{ marginBottom: "1.5rem", border: isEditing ? "2px solid var(--primary)" : undefined }}>
@@ -149,7 +228,7 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.75rem" }}>
           <div className="form-group">
             <label>Date</label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <DatePicker value={date} onChange={setDate} max={today} />
           </div>
 
           <div className="form-group">
@@ -179,7 +258,7 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
                   lineHeight: 1.4,
                 }}
               >
-                {noLunch ? "No Lunch" : "No Lunch"}
+                No Lunch
               </button>
             </label>
             <input type="time" value={lunchStart} onChange={(e) => setLunchStart(e.target.value)} disabled={noLunch} style={{ opacity: noLunch ? 0.4 : 1 }} />
@@ -201,12 +280,56 @@ export default function LogForm({ traineeId, onCreated, editingLog, onCancelEdit
           </div>
         </div>
 
+        {/* Preview: calculated hours & overtime */}
+        {previewHours && (
+          <div style={{ display: "flex", gap: "1.5rem", margin: "0.5rem 0 0.25rem", fontSize: "0.82rem", color: "var(--text-muted)" }}>
+            <span>Hours: <strong style={{ color: "var(--text)" }}>{previewHours.hoursWorked}</strong></span>
+            <span>Overtime: <strong style={{ color: previewHours.overtime > 0 ? "var(--primary)" : "var(--text)" }}>{previewHours.overtime}</strong></span>
+          </div>
+        )}
+
+        {/* Offset section */}
+        <div style={{ background: "var(--bg)", borderRadius: "6px", padding: "0.6rem 0.75rem", margin: "0.5rem 0 0.75rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.85rem", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={applyOffset}
+                onChange={(e) => {
+                  setApplyOffset(e.target.checked);
+                  if (!e.target.checked) setOffsetAmount("");
+                }}
+                disabled={effectiveAvailable <= 0}
+              />
+              Apply Offset
+            </label>
+            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+              Available: <strong>{effectiveAvailable.toFixed(2)}</strong> hrs
+            </span>
+            {applyOffset && effectiveAvailable > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                <label style={{ fontSize: "0.82rem" }}>Hours to apply:</label>
+                <input
+                  type="number"
+                  step="0.25"
+                  min="0"
+                  max={effectiveAvailable}
+                  value={offsetAmount}
+                  onChange={(e) => setOffsetAmount(e.target.value)}
+                  placeholder={`max ${effectiveAvailable}`}
+                  style={{ width: "6rem", padding: "0.25rem 0.4rem", fontSize: "0.85rem" }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="form-group">
           <label>Accomplishment *</label>
           <textarea
             rows={3}
             value={accomplishment}
-            onChange={(e) => setAccomplishment(e.target.value)}
+            onChange={(e) => setAccomplishment(sanitizeInput(e.target.value))}
             placeholder="What did you accomplish today?"
           />
         </div>

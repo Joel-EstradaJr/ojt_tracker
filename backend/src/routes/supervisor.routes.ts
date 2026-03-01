@@ -9,18 +9,18 @@ import {
   updateSupervisor,
   deleteSupervisor,
 } from "../controllers/supervisor.controller";
-import { validateSupervisor } from "../middleware/validate";
+import { validateSupervisor, sanitizeBody } from "../middleware/validate";
 
 const router = Router();
 
 // POST /supervisors/:traineeId  — add supervisor to trainee
-router.post("/:traineeId", validateSupervisor, createSupervisor);
+router.post("/:traineeId", sanitizeBody, validateSupervisor, createSupervisor);
 
 // GET  /supervisors/:traineeId  — list supervisors for trainee
 router.get("/:traineeId", getSupervisorsByTrainee);
 
 // PUT  /supervisors/entry/:id   — update a supervisor
-router.put("/entry/:id", validateSupervisor, updateSupervisor);
+router.put("/entry/:id", sanitizeBody, validateSupervisor, updateSupervisor);
 
 // DELETE /supervisors/entry/:id — remove a supervisor
 router.delete("/entry/:id", deleteSupervisor);

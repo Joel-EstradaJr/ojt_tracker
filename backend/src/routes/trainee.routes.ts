@@ -12,15 +12,15 @@ import {
   resetPassword,
   deleteTrainee,
 } from "../controllers/trainee.controller";
-import { validateTrainee, validateTraineeUpdate } from "../middleware/validate";
+import { validateTrainee, validateTraineeUpdate, sanitizeBody } from "../middleware/validate";
 
 const router = Router();
 
 // POST /trainees          — create a new trainee
-router.post("/", validateTrainee, createTrainee);
+router.post("/", sanitizeBody, validateTrainee, createTrainee);
 
 // PUT  /trainees/:id      — update trainee info
-router.put("/:id", validateTraineeUpdate, updateTrainee);
+router.put("/:id", sanitizeBody, validateTraineeUpdate, updateTrainee);
 
 // GET  /trainees          — list all trainees (card view)
 router.get("/", getAllTrainees);

@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { createTrainee } from "@/lib/api";
 import { SupervisorInput } from "@/types";
+import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
 
 interface Props {
   onClose: () => void;
@@ -67,13 +68,22 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
       return;
     }
 
+    // Content-quality checks
+    const lnErr = validateName("Last name", lastName, true);    if (lnErr) { setError(lnErr); return; }
+    const fnErr = validateName("First name", firstName, true);   if (fnErr) { setError(fnErr); return; }
+    const mnErr = validateName("Middle name", middleName, false); if (mnErr) { setError(mnErr); return; }
+    if (!isValidEmail(email)) { setError("Please enter a valid email address (e.g. name@example.com)."); return; }
+    if (!phoneCharsOnly(contactNumber)) { setError("Contact number must contain only digits, +, -, (, ), and spaces."); return; }
+    if (!isValidPhone(contactNumber)) { setError("Contact number must have at least 7 digits."); return; }
+    const schErr = validateInstitution("School", school);       if (schErr) { setError(schErr); return; }
+    const coErr = validateInstitution("Company name", companyName); if (coErr) { setError(coErr); return; }
+
     // Validate each supervisor has at least email or contactNumber
     for (let i = 0; i < supervisors.length; i++) {
       const s = supervisors[i];
-      if (!s.lastName || !s.firstName) {
-        setError(`Supervisor #${i + 1}: Last Name and First Name are required.`);
-        return;
-      }
+      const sLn = validateName(`Supervisor #${i + 1} last name`, s.lastName, true);  if (sLn) { setError(sLn); return; }
+      const sFn = validateName(`Supervisor #${i + 1} first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
+      const sMn = validateName(`Supervisor #${i + 1} middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
       if (!s.contactNumber?.trim() && !s.email?.trim()) {
         setError(`Supervisor #${i + 1}: At least one of Contact Number or Email is required.`);
         return;
@@ -113,15 +123,15 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
             <div className="form-group">
               <label>Last Name *</label>
-              <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Dela Cruz" />
+              <input value={lastName} onChange={(e) => setLastName(sanitizeInput(e.target.value))} placeholder="Dela Cruz" />
             </div>
             <div className="form-group">
               <label>First Name *</label>
-              <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Juan" />
+              <input value={firstName} onChange={(e) => setFirstName(sanitizeInput(e.target.value))} placeholder="Juan" />
             </div>
             <div className="form-group">
               <label>Middle Name</label>
-              <input value={middleName} onChange={(e) => setMiddleName(e.target.value)} placeholder="Santos" />
+              <input value={middleName} onChange={(e) => setMiddleName(sanitizeInput(e.target.value))} placeholder="Santos" />
             </div>
             <div className="form-group">
               <label>Suffix</label>
@@ -141,19 +151,19 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
             </div>
             <div className="form-group">
               <label>Contact Number *</label>
-              <input value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} placeholder="09171234567" />
+              <input value={contactNumber} onChange={(e) => setContactNumber(sanitizeInput(e.target.value))} placeholder="09171234567" />
             </div>
           </div>
 
           {/* ── School, Company, Hours ────────────────── */}
           <div className="form-group">
             <label>School *</label>
-            <input value={school} onChange={(e) => setSchool(e.target.value)} placeholder="University of…" />
+            <input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value))} placeholder="University of…" />
           </div>
 
           <div className="form-group">
             <label>Company / Institution Name *</label>
-            <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Company where OJT is rendered" />
+            <input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value))} placeholder="Company where OJT is rendered" />
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
@@ -189,15 +199,15 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem" }}>
                   <div className="form-group" style={{ marginBottom: "0.4rem" }}>
                     <label>Last Name *</label>
-                    <input value={s.lastName} onChange={(e) => updateSupervisor(idx, "lastName", e.target.value)} />
+                    <input value={s.lastName} onChange={(e) => updateSupervisor(idx, "lastName", sanitizeInput(e.target.value))} />
                   </div>
                   <div className="form-group" style={{ marginBottom: "0.4rem" }}>
                     <label>First Name *</label>
-                    <input value={s.firstName} onChange={(e) => updateSupervisor(idx, "firstName", e.target.value)} />
+                    <input value={s.firstName} onChange={(e) => updateSupervisor(idx, "firstName", sanitizeInput(e.target.value))} />
                   </div>
                   <div className="form-group" style={{ marginBottom: "0.4rem" }}>
                     <label>Middle Name</label>
-                    <input value={s.middleName ?? ""} onChange={(e) => updateSupervisor(idx, "middleName", e.target.value)} />
+                    <input value={s.middleName ?? ""} onChange={(e) => updateSupervisor(idx, "middleName", sanitizeInput(e.target.value))} />
                   </div>
                   <div className="form-group" style={{ marginBottom: "0.4rem" }}>
                     <label>Suffix</label>
@@ -209,7 +219,7 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
                   </div>
                   <div className="form-group" style={{ marginBottom: "0.4rem" }}>
                     <label>Contact Number</label>
-                    <input value={s.contactNumber ?? ""} onChange={(e) => updateSupervisor(idx, "contactNumber", e.target.value)} />
+                    <input value={s.contactNumber ?? ""} onChange={(e) => updateSupervisor(idx, "contactNumber", sanitizeInput(e.target.value))} />
                   </div>
                   <div className="form-group" style={{ marginBottom: "0.4rem" }}>
                     <label>Email</label>

@@ -1,129 +1,171 @@
 // ============================================================
 // Validation Middleware
-// Reusable validators for trainee, supervisor, and log data.
+// Zod-powered validators for trainee, supervisor, and log data.
 // ============================================================
 
 import { Request, Response, NextFunction } from "express";
+import {
+  createTraineeSchema,
+  updateTraineeSchema,
+  supervisorSchema,
+  createLogSchema,
+  updateLogSchema,
+  sanitizeString,
+  formatZodErrors,
+} from "../schemas/validation";
 
-// ── Email regex ──────────────────────────────────────────────
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// ── Sanitisation middleware ───────────────────────────────────
+// Strip XSS / injection chars from every string in req.body.
 
-// ── Validate Trainee payload ─────────────────────────────────
+/**
+ * Express middleware — sanitises all string values in req.body
+ * before they reach the route handler. Runs on every mutating route.
+ */
+export function sanitizeBody(req: Request, _res: Response, next: NextFunction) {
+  if (req.body && typeof req.body === "object") {
+    for (const key of Object.keys(req.body)) {
+      const v = req.body[key];
+      if (typeof v === "string") {
+        req.body[key] = sanitizeString(v);
+      }
+      // Handle nested arrays (e.g. supervisors[])
+      if (Array.isArray(v)) {
+        req.body[key] = v.map((item: Record<string, unknown>) => {
+          if (item && typeof item === "object") {
+            const cleaned: Record<string, unknown> = { ...item };
+            for (const k of Object.keys(cleaned)) {
+              if (typeof cleaned[k] === "string") {
+                cleaned[k] = sanitizeString(cleaned[k] as string);
+              }
+            }
+            return cleaned;
+          }
+          return item;
+        });
+      }
+    }
+  }
+  next();
+}
+
+// ── Validate Trainee (create) ────────────────────────────────
 export function validateTrainee(req: Request, res: Response, next: NextFunction) {
-  const { lastName, firstName, email, contactNumber, school, companyName, requiredHours, password } = req.body;
-
-  const errors: string[] = [];
-
-  if (!lastName?.trim()) errors.push("lastName is required.");
-  if (!firstName?.trim()) errors.push("firstName is required.");
-  if (!email?.trim()) errors.push("email is required.");
-  else if (!EMAIL_RE.test(email)) errors.push("email must be a valid format.");
-  if (!contactNumber?.trim()) errors.push("contactNumber is required.");
-  if (!school?.trim()) errors.push("school is required.");
-  if (!companyName?.trim()) errors.push("companyName is required.");
-  if (!requiredHours || Number(requiredHours) <= 0) errors.push("requiredHours must be a positive number.");
-  if (!password?.trim()) errors.push("password is required.");
-
-  if (errors.length) {
-    return res.status(400).json({ error: errors.join(" ") });
+  const result = createTraineeSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: formatZodErrors(result.error) });
   }
-
+  // Replace body with parsed + trimmed values
+  req.body = result.data;
   next();
 }
 
-// ── Validate Trainee update payload (password not required) ──
+// ── Validate Trainee (update — no password) ──────────────────
 export function validateTraineeUpdate(req: Request, res: Response, next: NextFunction) {
-  const { lastName, firstName, email, contactNumber, school, companyName, requiredHours } = req.body;
-
-  const errors: string[] = [];
-
-  if (!lastName?.trim()) errors.push("lastName is required.");
-  if (!firstName?.trim()) errors.push("firstName is required.");
-  if (!email?.trim()) errors.push("email is required.");
-  else if (!EMAIL_RE.test(email)) errors.push("email must be a valid format.");
-  if (!contactNumber?.trim()) errors.push("contactNumber is required.");
-  if (!school?.trim()) errors.push("school is required.");
-  if (!companyName?.trim()) errors.push("companyName is required.");
-  if (!requiredHours || Number(requiredHours) <= 0) errors.push("requiredHours must be a positive number.");
-
-  if (errors.length) {
-    return res.status(400).json({ error: errors.join(" ") });
+  const result = updateTraineeSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: formatZodErrors(result.error) });
   }
-
+  req.body = result.data;
   next();
 }
 
-// ── Validate Supervisor payload ──────────────────────────────
-// At least one of contactNumber or email must be provided.
+// ── Validate Supervisor ──────────────────────────────────────
 export function validateSupervisor(req: Request, res: Response, next: NextFunction) {
-  const { lastName, firstName, contactNumber, email } = req.body;
-
-  const errors: string[] = [];
-
-  if (!lastName?.trim()) errors.push("lastName is required.");
-  if (!firstName?.trim()) errors.push("firstName is required.");
-
-  // Business rule: at least one contact method required
-  if (!contactNumber?.trim() && !email?.trim()) {
-    errors.push("At least one of contactNumber or email must be provided.");
+  const result = supervisorSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: formatZodErrors(result.error) });
   }
-
-  if (email?.trim() && !EMAIL_RE.test(email)) {
-    errors.push("email must be a valid format.");
-  }
-
-  if (errors.length) {
-    return res.status(400).json({ error: errors.join(" ") });
-  }
-
+  req.body = result.data;
   next();
 }
 
-// ── Validate Log Entry payload ───────────────────────────────
-// Enforces all time ordering rules on the server side.
+// ── Validate Log Entry (create) ──────────────────────────────
 export function validateLogEntry(req: Request, res: Response, next: NextFunction) {
-  const { traineeId, date, timeIn, timeOut, lunchStart, lunchEnd, accomplishment } = req.body;
+  const result = createLogSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: formatZodErrors(result.error) });
+  }
 
+  // Additional time-ordering validations that are hard to express in Zod
+  const { date, timeIn, timeOut, lunchStart, lunchEnd } = result.data;
   const errors: string[] = [];
 
-  if (!traineeId) errors.push("traineeId is required.");
-  if (!date) errors.push("date is required.");
-  if (!timeIn) errors.push("timeIn is required.");
-  if (!timeOut) errors.push("timeOut is required.");
-  if (!lunchStart) errors.push("lunchStart is required.");
-  if (!lunchEnd) errors.push("lunchEnd is required.");
-  if (!accomplishment?.trim()) errors.push("accomplishment is required.");
-
-  if (errors.length) {
-    return res.status(400).json({ error: errors.join(" ") });
-  }
+  // Prevent future dates
+  const entryDate = new Date(date);
+  entryDate.setHours(0, 0, 0, 0);
+  const todayDate = new Date();
+  todayDate.setHours(0, 0, 0, 0);
+  if (entryDate > todayDate) errors.push("Date cannot be in the future.");
 
   const tIn = new Date(timeIn).getTime();
   const tOut = new Date(timeOut).getTime();
   const lStart = new Date(lunchStart).getTime();
   const lEnd = new Date(lunchEnd).getTime();
 
-  // Time ordering rules
-  if (tOut <= tIn) errors.push("timeOut must be after timeIn.");
+  if (tOut <= tIn) errors.push("Time Out must be after Time In.");
 
   // Allow no-lunch case: lunchStart === lunchEnd
   const hasLunch = lStart !== lEnd;
   if (hasLunch) {
-    if (lStart <= tIn) errors.push("lunchStart must be after timeIn.");
-    if (lEnd >= tOut) errors.push("lunchEnd must be before timeOut.");
-    if (lEnd <= lStart) errors.push("lunchEnd must be after lunchStart.");
+    if (lStart <= tIn) errors.push("Lunch Start must be after Time In.");
+    if (lEnd >= tOut) errors.push("Lunch End must be before Time Out.");
+    if (lEnd <= lStart) errors.push("Lunch End must be after Lunch Start.");
   }
 
-  // Calculate hours to ensure non-negative
   const totalMinutes = (tOut - tIn) / 60000;
   const lunchMinutes = hasLunch ? (lEnd - lStart) / 60000 : 0;
   const worked = totalMinutes - lunchMinutes;
-
-  if (worked < 0) errors.push("hoursWorked cannot be negative.");
+  if (worked < 0) errors.push("Hours worked cannot be negative.");
 
   if (errors.length) {
     return res.status(400).json({ error: errors.join(" ") });
   }
 
+  req.body = result.data;
+  next();
+}
+
+// ── Validate Log Entry (update) ──────────────────────────────
+export function validateLogUpdate(req: Request, res: Response, next: NextFunction) {
+  const result = updateLogSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: formatZodErrors(result.error) });
+  }
+
+  // If all time fields are present, run ordering checks
+  const d = result.data;
+  if (d.date && d.timeIn && d.timeOut && d.lunchStart && d.lunchEnd) {
+    const errors: string[] = [];
+
+    const entryDate = new Date(d.date);
+    entryDate.setHours(0, 0, 0, 0);
+    const todayDate = new Date();
+    todayDate.setHours(0, 0, 0, 0);
+    if (entryDate > todayDate) errors.push("Date cannot be in the future.");
+
+    const tIn = new Date(d.timeIn).getTime();
+    const tOut = new Date(d.timeOut).getTime();
+    const lStart = new Date(d.lunchStart).getTime();
+    const lEnd = new Date(d.lunchEnd).getTime();
+
+    if (tOut <= tIn) errors.push("Time Out must be after Time In.");
+
+    const hasLunch = lStart !== lEnd;
+    if (hasLunch) {
+      if (lStart <= tIn) errors.push("Lunch Start must be after Time In.");
+      if (lEnd >= tOut) errors.push("Lunch End must be before Time Out.");
+      if (lEnd <= lStart) errors.push("Lunch End must be after Lunch Start.");
+    }
+
+    const totalMinutes = (tOut - tIn) / 60000;
+    const lunchMinutes = hasLunch ? (lEnd - lStart) / 60000 : 0;
+    if (totalMinutes - lunchMinutes < 0) errors.push("Hours worked cannot be negative.");
+
+    if (errors.length) {
+      return res.status(400).json({ error: errors.join(" ") });
+    }
+  }
+
+  req.body = result.data;
   next();
 }
