@@ -1,0 +1,82 @@
+// ============================================================
+// Prisma Schema — OJT Progress Tracker
+// Provider: PostgreSQL
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Trainee ──────────────────────────────────────────────────
+// Represents an OJT trainee with structured name fields,
+// contact info, school, company, and a hashed password.
+model Trainee {
+  id            String   @id @default(uuid())
+  lastName      String
+  firstName     String
+  middleName    String?  // optional
+  suffix        String?  // optional (e.g. Jr., III)
+  email         String   @unique
+  contactNumber String
+  school        String
+  companyName   String   // company/institution where trainee renders OJT
+  requiredHours Int      // total hours the trainee must complete
+  passwordHash  String   // bcrypt hash of the trainee-specific password
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  logs        LogEntry[]
+  supervisors Supervisor[]
+}
+
+// ── Supervisor ───────────────────────────────────────────────
+// Each trainee can have multiple supervisors.
+// At least one of contactNumber or email must be provided
+// (enforced at application level).
+model Supervisor {
+  id            String  @id @default(uuid())
+  traineeId     String
+  lastName      String
+  firstName     String
+  middleName    String? // optional
+  suffix        String? // optional
+  contactNumber String? // at least one of contactNumber/email required
+  email         String? // at least one of contactNumber/email required
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relation back to trainee (cascade delete)
+  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+
+  @@index([traineeId])
+}
+
+// ── LogEntry ─────────────────────────────────────────────────
+// A single day's time-log record for a trainee.
+// Now includes lunch break fields for accurate hour calculation.
+model LogEntry {
+  id          String   @id @default(uuid())
+  traineeId   String
+  date        DateTime // calendar date of the log
+  timeIn      DateTime // clock-in timestamp
+  lunchStart  DateTime // lunch break start (default 12:00 PM)
+  lunchEnd    DateTime // lunch break end   (default 1:00 PM)
+  timeOut     DateTime // clock-out timestamp
+  hoursWorked Float    // (timeOut - timeIn) - (lunchEnd - lunchStart)
+  accomplishment String   // required freeform text
+
+  createdAt DateTime @default(now())
+
+  // Relation back to the owning trainee (cascade delete)
+  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+
+  @@unique([traineeId, date]) // one log per trainee per date
+  @@index([traineeId])
+}
