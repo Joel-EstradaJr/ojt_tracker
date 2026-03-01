@@ -144,6 +144,18 @@ export default function HomePage() {
     }
   };
 
+  // Search & sort
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  // Filter and sort trainees by name
+  const filteredTrainees = trainees
+    .filter((t) => t.displayName.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      const cmp = a.displayName.localeCompare(b.displayName);
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
   return (
     <div className="container">
       {/* Hero Header */}
@@ -183,6 +195,31 @@ export default function HomePage() {
         </div>
       </div>
 
+      {/* Search & Sort bar */}
+      {!loading && trainees.length > 0 && (
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "1.25rem" }}>
+          <div style={{ position: "relative", flex: 1, maxWidth: "360px" }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)", opacity: 0.4, pointerEvents: "none" }}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <input
+              type="text"
+              placeholder="Search by name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ paddingLeft: "2.25rem", width: "100%" }}
+            />
+          </div>
+          <button
+            className="btn btn-outline"
+            style={{ fontSize: "0.82rem", padding: "0.5rem 0.75rem", whiteSpace: "nowrap" }}
+            onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+            title={sortDir === "asc" ? "Sorted A → Z" : "Sorted Z → A"}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5h10M11 9h7M11 13h4M3 17l3 3 3-3M6 18V4" /></svg>
+            {sortDir === "asc" ? "A → Z" : "Z → A"}
+          </button>
+        </div>
+      )}
+
       {/* Loading skeleton */}
       {loading && (
         <div className="skeleton">
@@ -220,10 +257,17 @@ export default function HomePage() {
         </motion.div>
       )}
 
+      {/* No search results */}
+      {!loading && trainees.length > 0 && filteredTrainees.length === 0 && (
+        <div style={{ textAlign: "center", padding: "2rem 1rem", color: "var(--text-muted)" }}>
+          <p style={{ fontSize: "0.95rem" }}>No trainees match &ldquo;{searchQuery}&rdquo;</p>
+        </div>
+      )}
+
       {/* Trainee cards grid */}
       <div className="trainee-grid">
         <AnimatePresence>
-          {trainees.map((t, idx) => (
+          {filteredTrainees.map((t, idx) => (
             <motion.div
               key={t.id}
               initial={{ opacity: 0, y: 20 }}
