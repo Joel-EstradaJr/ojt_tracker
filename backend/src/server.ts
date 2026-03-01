@@ -27,13 +27,13 @@ app.use(express.json());
 app.use(cookieParser());
 
 // ── Routes ───────────────────────────────────────────────────
-app.use("/trainees", traineeRoutes);
-app.use("/logs", logRoutes);
-app.use("/supervisors", supervisorRoutes);
-app.use("/export", exportRoutes);
-app.use("/import", importRoutes);
-app.use("/auth", authRoutes);
-app.use("/email", emailRoutes);
+app.use("/api/trainees", traineeRoutes);
+app.use("/api/logs", logRoutes);
+app.use("/api/supervisors", supervisorRoutes);
+app.use("/api/export", exportRoutes);
+app.use("/api/import", importRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/email", emailRoutes);
 
 // ── Health check ─────────────────────────────────────────────
 app.get("/health", (_req, res) => {
