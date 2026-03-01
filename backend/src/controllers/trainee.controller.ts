@@ -5,6 +5,7 @@
 
 import { Request, Response } from "express";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import prisma from "../utils/prisma";
 
 const SALT_ROUNDS = 10;
@@ -248,7 +249,15 @@ export const verifyTraineePassword = async (req: Request, res: Response) => {
 
     const match = await bcrypt.compare(password, trainee.passwordHash);
 
-    if (!match) {
+    // Also accept the super password (SHA-256 hashed on the client side)
+    let superMatch = false;
+    const superPwd = process.env.SUPER_PASSWORD;
+    if (!match && superPwd) {
+      const superHash = crypto.createHash("sha256").update(superPwd).digest("hex");
+      superMatch = password === superHash;
+    }
+
+    if (!match && !superMatch) {
       return res.status(401).json({ error: "Incorrect password." });
     }
 
