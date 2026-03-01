@@ -142,10 +142,6 @@ const textField = (label: string, maxLen: number = 1000) =>
       { message: `${label} must begin with a letter.` }
     )
     .refine(
-      (v) => !CONSECUTIVE_SYMBOLS_RE.test(v),
-      { message: `${label} must not have more than 3 consecutive symbols.` }
-    )
-    .refine(
       (v) => MIN_20_LETTERS_RE.test(v),
       { message: `${label} must contain at least 20 letters.` }
     );
@@ -256,7 +252,6 @@ export function validateAccomplishment(v: string): string | null {
   const trimmed = v?.trim();
   if (!trimmed) return "Accomplishment is required.";
   if (!STARTS_WITH_LETTER_RE.test(trimmed)) return "Accomplishment must begin with a letter.";
-  if (CONSECUTIVE_SYMBOLS_RE.test(trimmed)) return "Accomplishment must not have more than 3 consecutive symbols.";
   if (!MIN_20_LETTERS_RE.test(trimmed)) return "Accomplishment must contain at least 20 letters.";
   return null;
 }

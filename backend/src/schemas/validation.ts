@@ -182,7 +182,7 @@ const MIN_20_LETTERS_RE = new RegExp(`([${LETTER}].*){20,}`);
 // Must start with a letter
 const STARTS_WITH_LETTER_RE = new RegExp(`^[${LETTER}]`);
 
-/** Accomplishment / remarks: any standard text, max 1000 chars, min 20 letters, max 3 consecutive symbols, must start with a letter. */
+/** Accomplishment / remarks: any standard text, max 1000 chars, min 20 letters, must start with a letter. */
 const textField = (label: string, maxLen: number = 1000) =>
   z
     .string()
@@ -192,10 +192,6 @@ const textField = (label: string, maxLen: number = 1000) =>
     .refine(
       (v) => STARTS_WITH_LETTER_RE.test(v),
       { message: `${label} must begin with a letter.` }
-    )
-    .refine(
-      (v) => !CONSECUTIVE_SYMBOLS_RE.test(v),
-      { message: `${label} must not have more than 3 consecutive symbols.` }
     )
     .refine(
       (v) => MIN_20_LETTERS_RE.test(v),
