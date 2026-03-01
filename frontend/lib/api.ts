@@ -92,10 +92,19 @@ export async function resetPassword(id: string, newPassword: string, resetToken:
   });
 }
 
-export function forgotPassword(id: string) {
-  return request<{ message: string; maskedEmail: string }>(`/api/trainees/${id}/forgot-password`, {
+export async function forgotPassword(id: string) {
+  // Call relative path to hit the Vercel API route (not Railway directly)
+  // because Railway blocks SMTP — email is sent from Vercel.
+  const res = await fetch(`/api/trainees/${id}/forgot-password`, {
     method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
   });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+  return res.json() as Promise<{ message: string; maskedEmail: string }>;
 }
 
 export function verifyResetCode(id: string, code: string) {
@@ -112,19 +121,36 @@ export function deleteTrainee(id: string) {
 }
 
 // ── Email verification endpoints ─────────────────────────────
+// These use fetch() directly (no BASE prefix) so they always hit
+// the Vercel API routes, which handle email sending via SMTP.
+// Railway blocks outbound SMTP, so emails must be sent from Vercel.
 
-export function sendEmailVerification(email: string) {
-  return request<{ message: string }>("/api/email/send-verification", {
+export async function sendEmailVerification(email: string) {
+  const res = await fetch("/api/email/send-verification", {
     method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
   });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+  return res.json() as Promise<{ message: string }>;
 }
 
-export function verifyEmailCode(email: string, code: string) {
-  return request<{ message: string; verificationToken: string }>("/api/email/verify-code", {
+export async function verifyEmailCode(email: string, code: string) {
+  const res = await fetch("/api/email/verify-code", {
     method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, code }),
   });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+  return res.json() as Promise<{ message: string; verificationToken: string }>;
 }
 
 // ── Supervisor endpoints ─────────────────────────────────────
