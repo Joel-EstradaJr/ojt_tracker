@@ -1,11 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Allow API calls to the backend during development
+  // Proxy /api/* requests to the backend (works both locally and on Vercel)
   async rewrites() {
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:4000";
     return [
       {
         source: "/api/:path*",
-        destination: "http://localhost:4000/:path*",
+        destination: `${backendUrl}/:path*`,
       },
     ];
   },
