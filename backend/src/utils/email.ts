@@ -40,9 +40,19 @@ const transportOpts: SMTPTransport.Options = {
     user: process.env.SMTP_EMAIL,
     pass: process.env.SMTP_PASSWORD, // Gmail App Password (16 chars, no spaces)
   },
+  // Explicit timeouts so broken connections fail fast instead of hanging
+  connectionTimeout: 10_000, // 10 s to establish TCP connection
+  greetingTimeout: 10_000,   // 10 s to receive SMTP greeting
+  socketTimeout: 30_000,     // 30 s for any subsequent socket inactivity
 };
 
 const transporter = nodemailer.createTransport(transportOpts);
+
+// Verify SMTP credentials once at startup so deployment logs show whether
+// Gmail is reachable from Railway.
+transporter.verify()
+  .then(() => console.log("✅ SMTP connection verified — Gmail is reachable"))
+  .catch((err) => console.error("❌ SMTP verification failed:", err));
 
 /**
  * Send a 6-digit password-reset verification code to the given email.
