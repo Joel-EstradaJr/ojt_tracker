@@ -9,6 +9,7 @@ import crypto from "crypto";
 import prisma from "../utils/prisma";
 import { sendResetCode } from "../utils/email";
 import { isEmailVerified } from "./email.controller";
+import { setSessionCookie } from "../middleware/auth";
 
 const SALT_ROUNDS = 10;
 
@@ -268,6 +269,9 @@ export const verifyTraineePassword = async (req: Request, res: Response) => {
     if (!match && !superMatch) {
       return res.status(401).json({ error: "Incorrect password." });
     }
+
+    // Issue session cookie
+    setSessionCookie(res, trainee.id);
 
     const { passwordHash: _ph, ...safe } = trainee;
     return res.json({ ...safe, displayName: displayName(trainee) });

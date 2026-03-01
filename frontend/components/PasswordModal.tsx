@@ -16,11 +16,13 @@ import {
 interface Props {
   traineeId: string;
   onClose: () => void;
+  /** Called after a successful login; if provided, replaces the default router.push */
+  onAuthenticated?: () => void;
 }
 
 type Step = "login" | "codeSent" | "newPassword";
 
-export default function PasswordModal({ traineeId, onClose }: Props) {
+export default function PasswordModal({ traineeId, onClose, onAuthenticated }: Props) {
   const router = useRouter();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -40,7 +42,11 @@ export default function PasswordModal({ traineeId, onClose }: Props) {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault(); setError(""); setLoading(true);
-    try { await verifyPassword(traineeId, password); router.push(`/trainee/${traineeId}`); }
+    try {
+      await verifyPassword(traineeId, password);
+      if (onAuthenticated) onAuthenticated();
+      else router.push(`/trainee/${traineeId}`);
+    }
     catch (err: unknown) { setError(err instanceof Error ? err.message : "Incorrect password."); }
     finally { setLoading(false); }
   };

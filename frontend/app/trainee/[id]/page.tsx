@@ -10,9 +10,10 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Trainee, LogEntry } from "@/types";
-import { fetchTrainee, fetchLogs, deleteLog, downloadExport } from "@/lib/api";
+import { fetchTrainee, fetchLogs, deleteLog, downloadExport, checkSession, logout } from "@/lib/api";
 import LogForm from "@/components/LogForm";
 import ImportCSV from "@/components/ImportCSV";
+import PasswordModal from "@/components/PasswordModal";
 import { calculateExpectedEndDate } from "@/lib/ph-holidays";
 import { ThemeToggle } from "@/components/ThemeProvider";
 
@@ -30,6 +31,11 @@ export default function TraineeDashboard() {
   const [editingLog, setEditingLog] = useState<LogEntry | null>(null);
   const [deletingLog, setDeletingLog] = useState<LogEntry | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Session auth
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [showLockConfirm, setShowLockConfirm] = useState(false);
 
   // Pagination
   const [pageSize, setPageSize] = useState(10);
@@ -74,9 +80,62 @@ export default function TraineeDashboard() {
     }
   }, [id]);
 
+  // Schedule auto-lock when session expires
+  const scheduleAutoLock = useCallback((expiresAt?: number) => {
+    if (!expiresAt) return;
+    const remaining = expiresAt - Date.now();
+    if (remaining <= 0) {
+      setAuthenticated(false);
+      setTrainee(null);
+      setLogs([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setAuthenticated(false);
+      setTrainee(null);
+      setLogs([]);
+    }, remaining);
+    return timer;
+  }, []);
+
+  // Check session then load data
   useEffect(() => {
+    let cancelled = false;
+    let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+    (async () => {
+      try {
+        const res = await checkSession(id);
+        if (!cancelled && res.authenticated) {
+          setAuthenticated(true);
+          expiryTimer = scheduleAutoLock(res.expiresAt);
+          loadData();
+        }
+      } catch {
+        // not authenticated – show password modal
+      } finally {
+        if (!cancelled) setAuthChecking(false);
+      }
+    })();
+    return () => { cancelled = true; if (expiryTimer) clearTimeout(expiryTimer); };
+  }, [id, loadData, scheduleAutoLock]);
+
+  const handleAuthenticated = useCallback(async () => {
+    setAuthenticated(true);
+    setAuthChecking(false);
+    // Fetch fresh session to get expiresAt for auto-lock timer
+    try {
+      const res = await checkSession(id);
+      if (res.expiresAt) scheduleAutoLock(res.expiresAt);
+    } catch { /* timer won't be set, acceptable fallback */ }
     loadData();
-  }, [loadData]);
+  }, [id, loadData, scheduleAutoLock]);
+
+  const handleLogout = useCallback(async () => {
+    try { await logout(); } catch { /* ignore */ }
+    setAuthenticated(false);
+    setTrainee(null);
+    setLogs([]);
+  }, []);
 
   const handleDelete = async () => {
     if (!deletingLog) return;
@@ -91,6 +150,32 @@ export default function TraineeDashboard() {
       setDeleteLoading(false);
     }
   };
+
+  // ── Auth gate ──────────────────────────────────────────────
+  if (authChecking) {
+    return (
+      <div className="container">
+        <div className="skeleton">
+          <div className="skeleton-card" style={{ height: "120px" }}>
+            <div className="skeleton-line medium" />
+            <div className="skeleton-line short" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authenticated) {
+    return (
+      <div className="container" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+        <PasswordModal
+          traineeId={id}
+          onClose={() => router.push("/")}
+          onAuthenticated={handleAuthenticated}
+        />
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -153,7 +238,13 @@ export default function TraineeDashboard() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
           Back
         </button>
-        <ThemeToggle />
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <ThemeToggle />
+          <button className="btn btn-ghost" onClick={() => setShowLockConfirm(true)} title="Lock session" style={{ gap: "0.35rem", fontSize: "0.84rem" }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Log Out
+          </button>
+        </div>
       </motion.div>
 
       {/* Trainee header card */}
@@ -592,6 +683,27 @@ export default function TraineeDashboard() {
         );
       })()}
       </motion.div>
+
+      {/* Lock Session Confirmation Modal */}
+      {showLockConfirm && (
+        <div className="modal-overlay" onClick={() => setShowLockConfirm(false)}>
+          <div className="modal-content" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--warning-light, #fff3cd)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warning, #e6a817)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </div>
+              <div>
+                <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Lock Session?</h2>
+                <p style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>You will need to re-enter the password to access this dashboard again.</p>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+              <button className="btn btn-outline" onClick={() => setShowLockConfirm(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={() => { setShowLockConfirm(false); handleLogout(); }}>Lock</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {deletingLog && (() => {

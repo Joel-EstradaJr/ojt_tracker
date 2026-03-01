@@ -4,6 +4,7 @@
 
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import traineeRoutes from "./routes/trainee.routes";
 import logRoutes from "./routes/log.routes";
 import supervisorRoutes from "./routes/supervisor.routes";
@@ -23,6 +24,7 @@ app.use(
   })
 );
 app.use(express.json());
+app.use(cookieParser());
 
 // ── Routes ───────────────────────────────────────────────────
 app.use("/trainees", traineeRoutes);

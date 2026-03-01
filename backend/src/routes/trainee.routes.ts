@@ -15,20 +15,21 @@ import {
   deleteTrainee,
 } from "../controllers/trainee.controller";
 import { validateTrainee, validateTraineeUpdate, sanitizeBody } from "../middleware/validate";
+import { requireAuth } from "../middleware/auth";
 
 const router = Router();
 
 // POST /trainees          — create a new trainee
 router.post("/", sanitizeBody, validateTrainee, createTrainee);
 
-// PUT  /trainees/:id      — update trainee info
-router.put("/:id", sanitizeBody, validateTraineeUpdate, updateTrainee);
+// PUT  /trainees/:id      — update trainee info (auth required)
+router.put("/:id", requireAuth, sanitizeBody, validateTraineeUpdate, updateTrainee);
 
 // GET  /trainees          — list all trainees (card view)
 router.get("/", getAllTrainees);
 
-// GET  /trainees/:id      — get single trainee info
-router.get("/:id", getTraineeById);
+// GET  /trainees/:id      — get single trainee info (auth required)
+router.get("/:id", requireAuth, getTraineeById);
 
 // POST /trainees/:id/verify — verify password to unlock logs
 router.post("/:id/verify", verifyTraineePassword);

@@ -9,6 +9,7 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
+    credentials: "include",
     headers: { "Content-Type": "application/json", ...opts?.headers },
     ...opts,
   });
@@ -206,8 +207,26 @@ export function deleteLog(id: string) {
 
 // ── Export helpers (trigger download) ────────────────────────
 
-export function downloadExport(traineeId: string, format: "csv" | "excel" | "pdf") {
-  window.open(`${BASE}/api/export/${format}/${traineeId}`, "_blank");
+export async function downloadExport(traineeId: string, format: "csv" | "excel" | "pdf") {
+  const res = await fetch(`${BASE}/api/export/${format}/${traineeId}`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("content-disposition");
+  const filenameMatch = disposition?.match(/filename="?([^"]+)"?/);
+  const filename = filenameMatch?.[1] ?? `export.${format === "excel" ? "xlsx" : format}`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // ── Import CSV ───────────────────────────────────────────────
@@ -218,6 +237,7 @@ export async function importCSV(traineeId: string, file: File) {
 
   const res = await fetch(`${BASE}/api/import/csv/${traineeId}`, {
     method: "POST",
+    credentials: "include",
     body: form,
   });
 
@@ -239,6 +259,14 @@ export async function verifySuperPassword(password: string) {
     method: "POST",
     body: JSON.stringify({ password: hashed }),
   });
+}
+
+export function checkSession(traineeId: string) {
+  return request<{ authenticated: boolean; expiresAt?: number }>(`/api/auth/session/${traineeId}`);
+}
+
+export function logout() {
+  return request<{ message: string }>("/api/auth/logout", { method: "POST" });
 }
 
 // ── Bulk Export / Import (full database) ─────────────────────
