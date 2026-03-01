@@ -6,10 +6,23 @@
 
 import nodemailer from "nodemailer";
 import dns from "dns";
+import net from "net";
 
 // Force Node.js DNS to resolve IPv4 first — Railway containers
 // cannot reach Gmail SMTP over IPv6 (ENETUNREACH).
 dns.setDefaultResultOrder("ipv4first");
+
+// Custom DNS lookup that only returns IPv4 addresses
+const dnsLookupIPv4: typeof dns.lookup = (hostname, options, callback) => {
+  // Normalise overloaded signature
+  if (typeof options === "function") {
+    callback = options;
+    options = { family: 4 };
+  } else {
+    options = typeof options === "number" ? { family: 4 } : { ...options, family: 4 };
+  }
+  return dns.lookup(hostname, options, callback as dns.LookupCallback);
+};
 
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
@@ -19,6 +32,8 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_EMAIL,
     pass: process.env.SMTP_PASSWORD, // Gmail App Password (16 chars, no spaces)
   },
+  // Force IPv4 — Railway has no IPv6 outbound
+  dnsLookup: dnsLookupIPv4 as unknown as typeof net.Socket.prototype.connect,
 });
 
 /**
