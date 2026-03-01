@@ -86,7 +86,7 @@ const nameField = (label: string, required: boolean) => {
         (v) => !v || !CONSECUTIVE_SPECIALS_RE.test(v),
         { message: `${label} cannot have consecutive punctuation or special characters.` }
       )
-      .transform((v) => v || undefined); // convert empty to undefined
+      .transform((v) => v ? v.toUpperCase() : undefined); // convert empty to undefined, else ALL CAPS
   }
 
   return base
@@ -98,7 +98,8 @@ const nameField = (label: string, required: boolean) => {
     .refine(
       (v) => !CONSECUTIVE_SPECIALS_RE.test(v),
       { message: `${label} cannot have consecutive punctuation or special characters.` }
-    );
+    )
+    .transform((v) => v.toUpperCase()); // ALL CAPS
 };
 
 /** Institution/company field: letters, numbers, common business punctuation. Max 150. */
@@ -115,7 +116,8 @@ const institutionField = (label: string) =>
     .refine(
       (v) => MIN_LETTERS_RE.test(v),
       { message: `${label} must contain at least 2 letters.` }
-    );
+    )
+    .transform((v) => v.toUpperCase()); // ALL CAPS
 
 /** Contact number: may start with +, digits/spaces/hyphens/parens, 7-15 digits. */
 const contactNumberField = (label: string, required: boolean) => {
@@ -208,7 +210,7 @@ export const supervisorInputSchema = z
     lastName: nameField("Supervisor last name", true),
     firstName: nameField("Supervisor first name", true),
     middleName: nameField("Supervisor middle name", false).optional().default(""),
-    suffix: z.string().trim().max(10).optional().default(""),
+    suffix: z.string().trim().max(10).optional().default("").transform((v) => v.toUpperCase()),
     contactNumber: contactNumberField("Supervisor contact number", false).optional().default(""),
     email: emailField("Supervisor email", false).optional().default(""),
   })
@@ -226,7 +228,7 @@ export const createTraineeSchema = z.object({
   lastName: nameField("Last name", true),
   firstName: nameField("First name", true),
   middleName: nameField("Middle name", false).optional().default(""),
-  suffix: z.string().trim().max(10).optional().default(""),
+  suffix: z.string().trim().max(10).optional().default("").transform((v) => v.toUpperCase()),
   email: emailField("Email", true),
   contactNumber: contactNumberField("Contact number", true),
   school: institutionField("School"),
@@ -246,7 +248,7 @@ export const updateTraineeSchema = z.object({
   lastName: nameField("Last name", true),
   firstName: nameField("First name", true),
   middleName: nameField("Middle name", false).optional().default(""),
-  suffix: z.string().trim().max(10).optional().default(""),
+  suffix: z.string().trim().max(10).optional().default("").transform((v) => v.toUpperCase()),
   email: emailField("Email", true),
   contactNumber: contactNumberField("Contact number", true),
   school: institutionField("School"),
@@ -265,7 +267,7 @@ export const supervisorSchema = z
     lastName: nameField("Last name", true),
     firstName: nameField("First name", true),
     middleName: nameField("Middle name", false).optional().default(""),
-    suffix: z.string().trim().max(10).optional().default(""),
+    suffix: z.string().trim().max(10).optional().default("").transform((v) => v.toUpperCase()),
     contactNumber: contactNumberField("Contact number", false).optional().default(""),
     email: emailField("Email", false).optional().default(""),
   })

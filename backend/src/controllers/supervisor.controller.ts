@@ -6,19 +6,11 @@
 import { Request, Response } from "express";
 import prisma from "../utils/prisma";
 
-// Title-case a string
-function titleCase(str: string): string {
-  return str
-    .split(/\s+/)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(" ");
-}
-
-// Build display name for a supervisor (title-cased)
+// Build display name for a supervisor
 function supervisorDisplayName(s: { lastName: string; firstName: string; middleName?: string | null; suffix?: string | null }) {
-  const parts = [titleCase(s.firstName)];
-  if (s.middleName) parts.push(titleCase(s.middleName));
-  parts.push(titleCase(s.lastName));
+  const parts = [s.firstName];
+  if (s.middleName) parts.push(s.middleName);
+  parts.push(s.lastName);
   if (s.suffix) parts.push(s.suffix);
   return parts.join(" ");
 }

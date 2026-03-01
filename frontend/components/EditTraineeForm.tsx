@@ -16,7 +16,7 @@ interface Props {
   onUpdated: () => void;
 }
 
-const SUFFIX_OPTIONS = ["", "Jr.", "Sr.", "II", "III", "IV", "V", "VI", "VII", "VIII"] as const;
+const SUFFIX_OPTIONS = ["", "JR.", "SR.", "II", "III", "IV", "V", "VI", "VII", "VIII"] as const;
 
 const emptySupervisor = (): SupervisorInput => ({
   lastName: "",
@@ -29,14 +29,14 @@ const emptySupervisor = (): SupervisorInput => ({
 
 export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) {
   // ── Trainee fields ──────────────────────────────────────────
-  const [lastName, setLastName] = useState(trainee.lastName);
-  const [firstName, setFirstName] = useState(trainee.firstName);
-  const [middleName, setMiddleName] = useState(trainee.middleName ?? "");
-  const [suffix, setSuffix] = useState(trainee.suffix ?? "");
+  const [lastName, setLastName] = useState(trainee.lastName.toUpperCase());
+  const [firstName, setFirstName] = useState(trainee.firstName.toUpperCase());
+  const [middleName, setMiddleName] = useState((trainee.middleName ?? "").toUpperCase());
+  const [suffix, setSuffix] = useState((trainee.suffix ?? "").toUpperCase());
   const [email, setEmail] = useState(trainee.email);
   const [contactNumber, setContactNumber] = useState(trainee.contactNumber);
-  const [school, setSchool] = useState(trainee.school);
-  const [companyName, setCompanyName] = useState(trainee.companyName);
+  const [school, setSchool] = useState(trainee.school.toUpperCase());
+  const [companyName, setCompanyName] = useState(trainee.companyName.toUpperCase());
   const [requiredHours, setRequiredHours] = useState(String(trainee.requiredHours));
 
   // ── Existing supervisors (from DB) ──────────────────────────
@@ -67,10 +67,10 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
       const map: Record<string, SupervisorInput> = {};
       for (const s of sups) {
         map[s.id] = {
-          lastName: s.lastName,
-          firstName: s.firstName,
-          middleName: s.middleName ?? "",
-          suffix: s.suffix ?? "",
+          lastName: s.lastName.toUpperCase(),
+          firstName: s.firstName.toUpperCase(),
+          middleName: (s.middleName ?? "").toUpperCase(),
+          suffix: (s.suffix ?? "").toUpperCase(),
           contactNumber: s.contactNumber ?? "",
           email: s.email ?? "",
         };
@@ -286,15 +286,15 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem" }}>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}>
           <label>Last Name *</label>
-          <input value={s.lastName} onChange={(e) => onChange("lastName", sanitizeInput(e.target.value))} />
+          <input value={s.lastName} onChange={(e) => onChange("lastName", sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} />
         </div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}>
           <label>First Name *</label>
-          <input value={s.firstName} onChange={(e) => onChange("firstName", sanitizeInput(e.target.value))} />
+          <input value={s.firstName} onChange={(e) => onChange("firstName", sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} />
         </div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}>
           <label>Middle Name</label>
-          <input value={s.middleName ?? ""} onChange={(e) => onChange("middleName", sanitizeInput(e.target.value))} />
+          <input value={s.middleName ?? ""} onChange={(e) => onChange("middleName", sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} />
         </div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}>
           <label>Suffix</label>
@@ -391,15 +391,15 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
             <div className="form-group">
               <label>Last Name *</label>
-              <input value={lastName} onChange={(e) => setLastName(sanitizeInput(e.target.value))} />
+              <input value={lastName} onChange={(e) => setLastName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} />
             </div>
             <div className="form-group">
               <label>First Name *</label>
-              <input value={firstName} onChange={(e) => setFirstName(sanitizeInput(e.target.value))} />
+              <input value={firstName} onChange={(e) => setFirstName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} />
             </div>
             <div className="form-group">
               <label>Middle Name</label>
-              <input value={middleName} onChange={(e) => setMiddleName(sanitizeInput(e.target.value))} />
+              <input value={middleName} onChange={(e) => setMiddleName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} />
             </div>
             <div className="form-group">
               <label>Suffix</label>
@@ -426,12 +426,12 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
           {/* ── School, Company, Hours ────────────────── */}
           <div className="form-group">
             <label>School *</label>
-            <input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value))} />
+            <input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} />
           </div>
 
           <div className="form-group">
             <label>Company / Institution Name *</label>
-            <input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value))} />
+            <input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} />
           </div>
 
           <div className="form-group">

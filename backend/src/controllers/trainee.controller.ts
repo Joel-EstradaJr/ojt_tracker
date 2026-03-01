@@ -10,20 +10,12 @@ import prisma from "../utils/prisma";
 
 const SALT_ROUNDS = 10;
 
-// Helper: title-case a string (capitalise first letter of each word)
-function titleCase(str: string): string {
-  return str
-    .split(/\s+/)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(" ");
-}
-
-// Helper: build a display name from structured fields (title-cased)
+// Helper: build a display name from structured fields
 function displayName(t: { lastName: string; firstName: string; middleName?: string | null; suffix?: string | null }) {
-  const parts = [titleCase(t.firstName)];
-  if (t.middleName) parts.push(titleCase(t.middleName));
-  parts.push(titleCase(t.lastName));
-  if (t.suffix) parts.push(t.suffix); // suffixes like "Jr." stay as-is
+  const parts = [t.firstName];
+  if (t.middleName) parts.push(t.middleName);
+  parts.push(t.lastName);
+  if (t.suffix) parts.push(t.suffix);
   return parts.join(" ");
 }
 

@@ -15,7 +15,7 @@ interface Props {
   onCreated: () => void;
 }
 
-const SUFFIX_OPTIONS = ["", "Jr.", "Sr.", "II", "III", "IV", "V", "VI", "VII", "VIII"] as const;
+const SUFFIX_OPTIONS = ["", "JR.", "SR.", "II", "III", "IV", "V", "VI", "VII", "VIII"] as const;
 
 const emptySupervisor = (): SupervisorInput => ({
   lastName: "",
@@ -129,15 +129,15 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
             <div className="form-group">
               <label>Last Name *</label>
-              <input value={lastName} onChange={(e) => setLastName(sanitizeInput(e.target.value))} placeholder="Dela Cruz" />
+              <input value={lastName} onChange={(e) => setLastName(sanitizeInput(e.target.value).toUpperCase())} placeholder="DELA CRUZ" style={{ textTransform: "uppercase" }} />
             </div>
             <div className="form-group">
               <label>First Name *</label>
-              <input value={firstName} onChange={(e) => setFirstName(sanitizeInput(e.target.value))} placeholder="Juan" />
+              <input value={firstName} onChange={(e) => setFirstName(sanitizeInput(e.target.value).toUpperCase())} placeholder="JUAN" style={{ textTransform: "uppercase" }} />
             </div>
             <div className="form-group">
               <label>Middle Name</label>
-              <input value={middleName} onChange={(e) => setMiddleName(sanitizeInput(e.target.value))} placeholder="Santos" />
+              <input value={middleName} onChange={(e) => setMiddleName(sanitizeInput(e.target.value).toUpperCase())} placeholder="SANTOS" style={{ textTransform: "uppercase" }} />
             </div>
             <div className="form-group">
               <label>Suffix</label>
@@ -164,12 +164,12 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
           {/* ── School, Company, Hours ────────────────── */}
           <div className="form-group">
             <label>School *</label>
-            <input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value))} placeholder="University of…" />
+            <input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value).toUpperCase())} placeholder="UNIVERSITY OF…" style={{ textTransform: "uppercase" }} />
           </div>
 
           <div className="form-group">
             <label>Company / Institution Name *</label>
-            <input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value))} placeholder="Company where OJT is rendered" />
+            <input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value).toUpperCase())} placeholder="COMPANY WHERE OJT IS RENDERED" style={{ textTransform: "uppercase" }} />
           </div>
 
           <div className="form-group">
@@ -221,15 +221,15 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem" }}>
                   <div className="form-group" style={{ marginBottom: "0.4rem" }}>
                     <label>Last Name *</label>
-                    <input value={s.lastName} onChange={(e) => updateSupervisor(idx, "lastName", sanitizeInput(e.target.value))} />
+                    <input value={s.lastName} onChange={(e) => updateSupervisor(idx, "lastName", sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} />
                   </div>
                   <div className="form-group" style={{ marginBottom: "0.4rem" }}>
                     <label>First Name *</label>
-                    <input value={s.firstName} onChange={(e) => updateSupervisor(idx, "firstName", sanitizeInput(e.target.value))} />
+                    <input value={s.firstName} onChange={(e) => updateSupervisor(idx, "firstName", sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} />
                   </div>
                   <div className="form-group" style={{ marginBottom: "0.4rem" }}>
                     <label>Middle Name</label>
-                    <input value={s.middleName ?? ""} onChange={(e) => updateSupervisor(idx, "middleName", sanitizeInput(e.target.value))} />
+                    <input value={s.middleName ?? ""} onChange={(e) => updateSupervisor(idx, "middleName", sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} />
                   </div>
                   <div className="form-group" style={{ marginBottom: "0.4rem" }}>
                     <label>Suffix</label>

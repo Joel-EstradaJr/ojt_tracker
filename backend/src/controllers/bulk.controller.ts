@@ -151,14 +151,14 @@ export const importAllCSV = async (req: Request, res: Response) => {
 
         const trainee = await prisma.trainee.create({
           data: {
-            lastName: row.LastName || "",
-            firstName: row.FirstName || "",
-            middleName: row.MiddleName || null,
-            suffix: row.Suffix || null,
+            lastName: (row.LastName || "").toUpperCase(),
+            firstName: (row.FirstName || "").toUpperCase(),
+            middleName: row.MiddleName ? row.MiddleName.toUpperCase() : null,
+            suffix: row.Suffix ? row.Suffix.toUpperCase() : null,
             email: row.TraineeEmail || "",
             contactNumber: row.ContactNumber || "",
-            school: row.School || "",
-            companyName: row.CompanyName || "",
+            school: (row.School || "").toUpperCase(),
+            companyName: (row.CompanyName || "").toUpperCase(),
             requiredHours: parseInt(row.RequiredHours || "0", 10),
             passwordHash: row.PasswordHash || "",
           },
@@ -175,10 +175,10 @@ export const importAllCSV = async (req: Request, res: Response) => {
         await prisma.supervisor.create({
           data: {
             traineeId,
-            lastName: row.SupervisorLastName || "",
-            firstName: row.SupervisorFirstName || "",
-            middleName: row.SupervisorMiddleName || null,
-            suffix: row.SupervisorSuffix || null,
+            lastName: (row.SupervisorLastName || "").toUpperCase(),
+            firstName: (row.SupervisorFirstName || "").toUpperCase(),
+            middleName: row.SupervisorMiddleName ? row.SupervisorMiddleName.toUpperCase() : null,
+            suffix: row.SupervisorSuffix ? row.SupervisorSuffix.toUpperCase() : null,
             contactNumber: row.SupervisorContact || null,
             email: row.SupervisorEmail || null,
           },
