@@ -6,7 +6,7 @@
 // ============================================================
 
 import { useState } from "react";
-import { createTrainee } from "@/lib/api";
+import { createTrainee, sendEmailVerification, verifyEmailCode } from "@/lib/api";
 import { SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
 
@@ -43,6 +43,14 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
   // Supervisors (dynamic list)
   const [supervisors, setSupervisors] = useState<SupervisorInput[]>([]);
 
+  // Email verification
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [verificationToken, setVerificationToken] = useState("");
+  const [emailCode, setEmailCode] = useState("");
+  const [emailCodeSent, setEmailCodeSent] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailMsg, setEmailMsg] = useState("");
+
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -56,6 +64,59 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
     const updated = [...supervisors];
     updated[idx] = { ...updated[idx], [field]: value };
     setSupervisors(updated);
+  };
+
+  // ── Email change resets verification ──────────────────────
+  const handleEmailChange = (val: string) => {
+    setEmail(val);
+    if (emailVerified || emailCodeSent) {
+      setEmailVerified(false);
+      setVerificationToken("");
+      setEmailCode("");
+      setEmailCodeSent(false);
+      setEmailMsg("");
+    }
+  };
+
+  // ── Send verification code ─────────────────────────────────
+  const handleSendVerification = async () => {
+    setError("");
+    setEmailMsg("");
+    if (!email || !isValidEmail(email)) {
+      setError("Please enter a valid email address first.");
+      return;
+    }
+    setEmailSending(true);
+    try {
+      await sendEmailVerification(email);
+      setEmailCodeSent(true);
+      setEmailMsg("Verification code sent! Check your inbox.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to send verification code.");
+    } finally {
+      setEmailSending(false);
+    }
+  };
+
+  // ── Verify the code ────────────────────────────────────────
+  const handleVerifyEmailCode = async () => {
+    setError("");
+    setEmailMsg("");
+    if (emailCode.length !== 6) {
+      setError("Please enter the 6-digit verification code.");
+      return;
+    }
+    setEmailSending(true);
+    try {
+      const res = await verifyEmailCode(email, emailCode);
+      setVerificationToken(res.verificationToken);
+      setEmailVerified(true);
+      setEmailMsg("Email verified!");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Invalid or expired code.");
+    } finally {
+      setEmailSending(false);
+    }
   };
 
   // ── Submit ──────────────────────────────────────────────────
@@ -79,6 +140,7 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
     const fnErr = validateName("First name", firstName, true);   if (fnErr) { setError(fnErr); return; }
     const mnErr = validateName("Middle name", middleName, false); if (mnErr) { setError(mnErr); return; }
     if (!isValidEmail(email)) { setError("Please enter a valid email address (e.g. name@example.com)."); return; }
+    if (!emailVerified) { setError("Please verify your email address before creating."); return; }
     if (!phoneCharsOnly(contactNumber)) { setError("Contact number must contain only digits, +, -, (, ), and spaces."); return; }
     if (!isValidPhone(contactNumber)) { setError("Contact number must have at least 7 digits."); return; }
     const schErr = validateInstitution("School", school);       if (schErr) { setError(schErr); return; }
@@ -110,6 +172,7 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
         requiredHours: Number(requiredHours),
         password,
         supervisors: supervisors.length > 0 ? supervisors : undefined,
+        verificationToken,
       });
       onCreated();
     } catch (err: unknown) {
@@ -152,8 +215,65 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
           {/* ── Contact fields ───────────────────────── */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
             <div className="form-group">
-              <label>Email *</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="juan@email.com" />
+              <label>Email * {emailVerified && <span style={{ color: "#16a34a", fontSize: "0.8rem" }}>✓ Verified</span>}</label>
+              <div style={{ display: "flex", gap: "0.35rem" }}>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => handleEmailChange(e.target.value)}
+                  placeholder="juan@email.com"
+                  style={{ flex: 1, ...(emailVerified ? { borderColor: "#16a34a" } : {}) }}
+                  disabled={emailVerified}
+                />
+                {!emailVerified && (
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }}
+                    onClick={handleSendVerification}
+                    disabled={emailSending}
+                  >
+                    {emailSending ? "Sending…" : emailCodeSent ? "Resend" : "Verify"}
+                  </button>
+                )}
+                {emailVerified && (
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }}
+                    onClick={() => handleEmailChange(email)}
+                  >
+                    Change
+                  </button>
+                )}
+              </div>
+              {emailCodeSent && !emailVerified && (
+                <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.35rem" }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={emailCode}
+                    onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ""))}
+                    placeholder="6-digit code"
+                    style={{ flex: 1, letterSpacing: "0.3em", textAlign: "center", fontSize: "1rem" }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }}
+                    onClick={handleVerifyEmailCode}
+                    disabled={emailSending}
+                  >
+                    {emailSending ? "Verifying…" : "Confirm"}
+                  </button>
+                </div>
+              )}
+              {emailMsg && (
+                <span style={{ fontSize: "0.78rem", marginTop: "0.25rem", color: emailVerified ? "#16a34a" : "var(--primary)" }}>
+                  {emailMsg}
+                </span>
+              )}
             </div>
             <div className="form-group">
               <label>Contact Number *</label>

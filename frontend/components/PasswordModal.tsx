@@ -273,7 +273,13 @@ export default function PasswordModal({ traineeId, onClose }: Props) {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Re-enter new password"
+                  style={confirmPassword ? { borderColor: newPassword === confirmPassword ? "#16a34a" : "var(--danger)" } : undefined}
                 />
+                {confirmPassword && (
+                  <span style={{ fontSize: "0.78rem", marginTop: "0.25rem", color: newPassword === confirmPassword ? "#16a34a" : "var(--danger)" }}>
+                    {newPassword === confirmPassword ? "✓ Passwords match" : "✗ Passwords do not match"}
+                  </span>
+                )}
               </div>
 
               {error && (

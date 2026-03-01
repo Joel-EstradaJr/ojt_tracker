@@ -8,6 +8,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import prisma from "../utils/prisma";
 import { sendResetCode } from "../utils/email";
+import { isEmailVerified } from "./email.controller";
 
 const SALT_ROUNDS = 10;
 
@@ -62,8 +63,13 @@ export const createTrainee = async (req: Request, res: Response) => {
     const {
       lastName, firstName, middleName, suffix,
       email, contactNumber, school, companyName,
-      requiredHours, password, supervisors,
+      requiredHours, password, supervisors, verificationToken,
     } = req.body;
+
+    // Verify email ownership
+    if (!verificationToken || !(await isEmailVerified(email, verificationToken))) {
+      return res.status(400).json({ error: "Email must be verified before creating a trainee." });
+    }
 
     // Check for duplicate email
     const existing = await prisma.trainee.findUnique({ where: { email } });
@@ -128,7 +134,16 @@ export const updateTrainee = async (req: Request, res: Response) => {
     const {
       lastName, firstName, middleName, suffix,
       email, contactNumber, school, companyName, requiredHours,
+      verificationToken,
     } = req.body;
+
+    // If email changed, verify ownership of the new email
+    const currentTrainee = await prisma.trainee.findUnique({ where: { id } });
+    if (currentTrainee && currentTrainee.email !== email) {
+      if (!verificationToken || !(await isEmailVerified(email, verificationToken))) {
+        return res.status(400).json({ error: "New email must be verified before updating." });
+      }
+    }
 
     // Check duplicate email (but allow same trainee to keep theirs)
     const existing = await prisma.trainee.findUnique({ where: { email } });

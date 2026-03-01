@@ -10,6 +10,7 @@ import supervisorRoutes from "./routes/supervisor.routes";
 import exportRoutes from "./routes/export.routes";
 import importRoutes from "./routes/import.routes";
 import authRoutes from "./routes/auth.routes";
+import emailRoutes from "./routes/email.routes";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -30,6 +31,7 @@ app.use("/supervisors", supervisorRoutes);
 app.use("/export", exportRoutes);
 app.use("/import", importRoutes);
 app.use("/auth", authRoutes);
+app.use("/email", emailRoutes);
 
 // ── Health check ─────────────────────────────────────────────
 app.get("/health", (_req, res) => {

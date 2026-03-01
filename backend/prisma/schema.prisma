@@ -100,3 +100,17 @@ model PasswordResetCode {
 
   @@index([traineeId])
 }
+
+// ── EmailVerificationCode ────────────────────────────────────
+// Stores a 6-digit code sent to an email address to verify
+// ownership before creating or editing a trainee record.
+model EmailVerificationCode {
+  id        String   @id @default(uuid())
+  email     String   // target email to verify
+  code      String   // 6-digit code
+  expiresAt DateTime // code expiration timestamp
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}

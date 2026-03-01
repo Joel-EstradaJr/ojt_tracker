@@ -45,6 +45,7 @@ export async function createTrainee(data: {
   requiredHours: number;
   password: string;
   supervisors?: import("@/types").SupervisorInput[];
+  verificationToken: string;
 }) {
   const hashedPassword = await sha256(data.password);
   return request<import("@/types").Trainee>("/api/trainees", {
@@ -65,6 +66,7 @@ export function updateTrainee(
     school: string;
     companyName: string;
     requiredHours: number;
+    verificationToken?: string;
   }
 ) {
   return request<import("@/types").Trainee>(`/api/trainees/${id}`, {
@@ -105,6 +107,22 @@ export function verifyResetCode(id: string, code: string) {
 export function deleteTrainee(id: string) {
   return request<{ message: string }>(`/api/trainees/${id}`, {
     method: "DELETE",
+  });
+}
+
+// ── Email verification endpoints ─────────────────────────────
+
+export function sendEmailVerification(email: string) {
+  return request<{ message: string }>("/api/email/send-verification", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function verifyEmailCode(email: string, code: string) {
+  return request<{ message: string; verificationToken: string }>("/api/email/verify-code", {
+    method: "POST",
+    body: JSON.stringify({ email, code }),
   });
 }
 

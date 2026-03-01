@@ -409,10 +409,10 @@ export default function HomePage() {
               {pendingAction === "export" ? "Export All CSV" : "Import CSV"}
             </h2>
             <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
-              Enter password to proceed.
+              Enter secret code to proceed.
             </p>
             <div className="form-group" style={{ marginBottom: "0.75rem" }}>
-              <label>Password</label>
+              <label>CODE</label>
               <input
                 type="password"
                 placeholder="••••••••"
