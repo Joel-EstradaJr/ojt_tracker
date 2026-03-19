@@ -19,6 +19,7 @@ export interface Trainee {
   createdAt: string;
   updatedAt: string;
   totalHoursRendered: number;
+  mustChangePassword?: boolean;
   supervisors?: Supervisor[];
 }
 

@@ -5,7 +5,7 @@
 // ============================================================
 
 import { useState, useEffect, useCallback } from "react";
-import { updateTrainee, fetchSupervisors, createSupervisor, updateSupervisor, deleteSupervisor, sendEmailVerification, verifyEmailCode } from "@/lib/api";
+import { updateTrainee, fetchSupervisors, createSupervisor, updateSupervisor, deleteSupervisor, sendEmailVerification, verifyEmailCode, resendTempPassword } from "@/lib/api";
 import { Trainee, Supervisor, SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
 
@@ -54,6 +54,10 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
   const [pendingChanges, setPendingChanges] = useState<FieldChange[]>([]);
   const [showConfirm, setShowConfirm] = useState(false);
   const [saveResult, setSaveResult] = useState<"success" | "cancelled" | null>(null);
+
+  // Resend temp password
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendMsg, setResendMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const loadSupervisors = useCallback(async () => {
     try {
@@ -129,6 +133,30 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
       const sFn = validateName(`New Supervisor #${i + 1} first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
       const sMn = validateName(`New Supervisor #${i + 1} middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
       if (!s.contactNumber?.trim() && !s.email?.trim()) { setError(`New Supervisor #${i + 1}: At least one of Contact Number or Email is required.`); return; }
+    }
+
+    // Check for duplicate supervisors (existing non-deleted + new, by full name)
+    const supKeys = new Set<string>();
+    for (const sup of existingSupervisors) {
+      if (deletedIds.has(sup.id)) continue;
+      const s = editedSupervisors[sup.id];
+      const key = [s.firstName, s.middleName, s.lastName, s.suffix].map((v) => (v ?? "").trim().toLowerCase()).join("|");
+      if (supKeys.has(key)) {
+        const dupName = [s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ");
+        setError(`Duplicate supervisor: "${dupName}". Each supervisor must be unique per trainee.`);
+        return;
+      }
+      supKeys.add(key);
+    }
+    for (let i = 0; i < newSupervisors.length; i++) {
+      const s = newSupervisors[i];
+      const key = [s.firstName, s.middleName, s.lastName, s.suffix].map((v) => (v ?? "").trim().toLowerCase()).join("|");
+      if (supKeys.has(key)) {
+        const dupName = [s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ");
+        setError(`Duplicate supervisor: "${dupName}". Each supervisor must be unique per trainee.`);
+        return;
+      }
+      supKeys.add(key);
     }
 
     const changes: FieldChange[] = [];
@@ -274,6 +302,39 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
           </div>
 
           <form onSubmit={handleSubmit}>
+            {/* Resend Temporary Password — only for users who haven't set their password */}
+            {trainee.mustChangePassword && (
+              <div style={{ background: "var(--warning-light)", border: "1px solid var(--warning)", borderRadius: "var(--radius-sm)", padding: "0.75rem 1rem", marginBottom: "1rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warning-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                  <span style={{ fontSize: "0.82rem", color: "var(--warning-text)" }}>This user hasn&apos;t set their password yet.</span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ fontSize: "0.78rem", padding: "0.35rem 0.7rem", whiteSpace: "nowrap", flexShrink: 0 }}
+                  disabled={resendLoading}
+                  onClick={async () => {
+                    setResendLoading(true); setResendMsg(null);
+                    try {
+                      const res = await resendTempPassword(trainee.id);
+                      setResendMsg({ type: "success", text: res.message });
+                    } catch (err: unknown) {
+                      setResendMsg({ type: "error", text: err instanceof Error ? err.message : "Failed to resend." });
+                    } finally { setResendLoading(false); }
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>
+                  {resendLoading ? "Sending…" : "Resend Temp Password"}
+                </button>
+              </div>
+            )}
+            {resendMsg && (
+              <div style={{ padding: "0.5rem 0.75rem", borderRadius: "var(--radius-xs)", marginBottom: "0.75rem", fontSize: "0.82rem", background: resendMsg.type === "success" ? "var(--success-light)" : "var(--danger-light)", color: resendMsg.type === "success" ? "var(--success-text)" : "var(--danger)", border: `1px solid ${resendMsg.type === "success" ? "var(--success)" : "var(--danger)"}` }}>
+                {resendMsg.text}
+              </div>
+            )}
+
             <div className="form-group">
               <label>Role *</label>
               <select value={role} onChange={(e) => setRole(e.target.value as "admin" | "trainee")}>

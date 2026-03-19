@@ -22,8 +22,11 @@ import {
  * before they reach the route handler. Runs on every mutating route.
  */
 export function sanitizeBody(req: Request, _res: Response, next: NextFunction) {
+  // Password fields must NEVER be sanitized — sanitizeString strips valid password chars (e.g. $)
+  const SKIP_FIELDS = new Set(["password", "confirmPassword", "newPassword"]);
   if (req.body && typeof req.body === "object") {
     for (const key of Object.keys(req.body)) {
+      if (SKIP_FIELDS.has(key)) continue;
       const v = req.body[key];
       if (typeof v === "string") {
         req.body[key] = sanitizeString(v);

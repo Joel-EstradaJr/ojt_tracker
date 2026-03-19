@@ -35,6 +35,7 @@ const TRAINEE_PUBLIC_SELECT = {
   school: true,
   companyName: true,
   requiredHours: true,
+  mustChangePassword: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -61,7 +62,7 @@ async function findDuplicateName(
 
 // Helper: generate a random temporary password (12 chars)
 function generateTempPassword(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#%';
   let result = '';
   for (let i = 0; i < 12; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -116,13 +117,14 @@ export const createTrainee = async (req: Request, res: Response) => {
 
     if (isAdminCreating) {
       tempPasswordPlaintext = generateTempPassword();
-      actualPassword = tempPasswordPlaintext;
+      // SHA-256 hash first to match frontend login flow (frontend sends sha256(password))
+      actualPassword = crypto.createHash("sha256").update(tempPasswordPlaintext).digest("hex");
       mustChangePassword = true;
     } else {
       if (!password) {
         return res.status(400).json({ error: "Password is required." });
       }
-      actualPassword = password;
+      actualPassword = password; // already SHA-256 hashed by frontend
     }
 
     const passwordHash = await bcrypt.hash(actualPassword, SALT_ROUNDS);
@@ -550,6 +552,60 @@ export const deleteTrainee = async (req: Request, res: Response) => {
     return res.json({ message: "Trainee deleted." });
   } catch (err) {
     console.error("deleteTrainee error:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+};
+
+// ── Resend temporary password ─────────────────────────────────
+export const resendTempPassword = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const trainee = await prisma.trainee.findUnique({ where: { id } });
+    if (!trainee) {
+      return res.status(404).json({ error: "Trainee not found." });
+    }
+
+    if (!trainee.mustChangePassword) {
+      return res.status(400).json({ error: "This user has already set their password." });
+    }
+
+    // Generate a new temporary password
+    const tempPassword = generateTempPassword();
+    // SHA-256 hash first to match frontend login flow (frontend sends sha256(password))
+    const hashedForCompare = crypto.createHash("sha256").update(tempPassword).digest("hex");
+    const passwordHash = await bcrypt.hash(hashedForCompare, SALT_ROUNDS);
+
+    // Update the user's password hash
+    await prisma.trainee.update({
+      where: { id },
+      data: { passwordHash },
+    });
+
+    const name = displayName(trainee);
+
+    // If called via Vercel proxy, return temp password for Vercel to send
+    const internalKey = req.headers["x-internal-key"] as string | undefined;
+    if (internalKey && process.env.EMAIL_INTERNAL_KEY && internalKey === process.env.EMAIL_INTERNAL_KEY) {
+      return res.json({
+        message: "Temporary password regenerated.",
+        _tempPassword: tempPassword,
+        _tempEmail: trainee.email,
+        _tempDisplayName: name,
+      });
+    }
+
+    // Direct call (local dev) — send email via SMTP
+    try {
+      await sendTemporaryPassword(trainee.email, tempPassword, name);
+    } catch (emailErr) {
+      console.error("Failed to send temp password email:", emailErr);
+      return res.status(500).json({ error: "Password regenerated but failed to send email. Please try again." });
+    }
+
+    return res.json({ message: `Temporary password sent to ${trainee.email}.` });
+  } catch (err) {
+    console.error("resendTempPassword error:", err);
     return res.status(500).json({ error: "Internal server error." });
   }
 };

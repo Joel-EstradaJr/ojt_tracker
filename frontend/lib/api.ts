@@ -430,6 +430,12 @@ export async function setInitialPassword(traineeId: string, currentPassword: str
   });
 }
 
+export function resendTempPassword(traineeId: string) {
+  return request<{ message: string }>(`/api/trainees/${traineeId}/resend-temp-password`, {
+    method: "POST",
+  });
+}
+
 // ── Bulk Export / Import (full database) ─────────────────────
 
 export function downloadAllCSV() {

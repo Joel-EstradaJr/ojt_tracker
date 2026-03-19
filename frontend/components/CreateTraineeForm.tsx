@@ -132,6 +132,18 @@ export default function CreateTraineeForm({
       }
     }
 
+    // Check for duplicate supervisors (same full name)
+    const supKeys = new Set<string>();
+    for (let i = 0; i < supervisors.length; i++) {
+      const s = supervisors[i];
+      const key = [s.firstName, s.middleName, s.lastName, s.suffix].map((v) => (v ?? "").trim().toLowerCase()).join("|");
+      if (supKeys.has(key)) {
+        const dupName = [s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ");
+        setError(`Duplicate supervisor: "${dupName}". Each supervisor must be unique per trainee.`);
+        return;
+      }
+      supKeys.add(key);
+    }
     setLoading(true);
     try {
       await createTrainee({

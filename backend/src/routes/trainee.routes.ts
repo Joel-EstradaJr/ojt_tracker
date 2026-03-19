@@ -13,6 +13,7 @@ import {
   verifyResetCode,
   resetPassword,
   deleteTrainee,
+  resendTempPassword,
 } from "../controllers/trainee.controller";
 import { validateTrainee, validateTraineeUpdate, sanitizeBody } from "../middleware/validate";
 import { requireAuth, requireAdmin, attachAuthIfPresent } from "../middleware/auth";
@@ -45,5 +46,8 @@ router.put("/:id/reset-password", resetPassword);
 
 // DELETE /trainees/:id    — delete trainee + cascading logs & supervisors
 router.delete("/:id", requireAuth, requireAdmin, deleteTrainee);
+
+// POST /trainees/:id/resend-temp-password — resend temp password (admin only)
+router.post("/:id/resend-temp-password", requireAuth, requireAdmin, resendTempPassword);
 
 export default router;
