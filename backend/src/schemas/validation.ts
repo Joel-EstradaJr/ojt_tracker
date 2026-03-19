@@ -236,9 +236,10 @@ export const createTraineeSchema = z.object({
     .min(1, "Required hours must be at least 1."),
   password: z
     .string()
-    .min(1, "Password is required."),
+    .min(1, "Password is required.")
+    .optional(),
   supervisors: z.array(supervisorInputSchema).optional(),
-  verificationToken: z.string().min(1, "Email verification is required."),
+  verificationToken: z.string().min(1, "Email verification is required.").optional(),
 });
 
 /** Trainee update payload (password not required). */

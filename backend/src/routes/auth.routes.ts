@@ -100,6 +100,7 @@ router.post("/login", async (req: Request, res: Response) => {
       passwordHash: true,
       failedLoginAttempts: true,
       lockedUntil: true,
+      mustChangePassword: true,
     } as const;
 
     let user = isEmailIdentifier
@@ -194,6 +195,17 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     const role = user.role === "admin" ? "admin" : "trainee";
+
+    // If user must change password (admin-created account with temp password)
+    if (user.mustChangePassword) {
+      return res.json({
+        message: "Password change required.",
+        mustChangePassword: true,
+        role,
+        traineeId: user.id,
+      });
+    }
+
     setSessionCookie(res, role === "admin" ? { role: "admin" } : { role: "trainee", traineeId: user.id });
     return res.json({
       message: "Logged in.",
@@ -517,6 +529,88 @@ router.get("/session/:traineeId", (req: Request, res: Response) => {
     });
   } catch {
     return res.status(401).json({ authenticated: false });
+  }
+});
+
+// POST /auth/set-initial-password — set password for admin-created account (first login)
+router.post("/set-initial-password", async (req: Request, res: Response) => {
+  const { traineeId, currentPassword, newPassword, confirmPassword } = req.body as {
+    traineeId?: string;
+    currentPassword?: string;
+    newPassword?: string;
+    confirmPassword?: string;
+  };
+
+  if (!traineeId || !currentPassword || !newPassword || !confirmPassword) {
+    return res.status(400).json({ error: "All fields are required." });
+  }
+
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ error: "Passwords do not match." });
+  }
+
+  if (newPassword.length < 4) {
+    return res.status(400).json({ error: "New password must be at least 4 characters." });
+  }
+
+  try {
+    const user = await prisma.trainee.findUnique({
+      where: { id: traineeId },
+      select: { id: true, role: true, passwordHash: true, mustChangePassword: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    if (!user.mustChangePassword) {
+      return res.status(400).json({ error: "Password change is not required for this account." });
+    }
+
+    // Verify the temporary password
+    const match = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!match) {
+      return res.status(401).json({ error: "Invalid temporary password." });
+    }
+
+    // Ensure new password is different from temp password
+    const sameAsTemp = await bcrypt.compare(newPassword, user.passwordHash);
+    if (sameAsTemp) {
+      return res.status(400).json({ error: "New password must be different from the temporary password." });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await prisma.$transaction([
+      prisma.trainee.update({
+        where: { id: traineeId },
+        data: {
+          passwordHash,
+          mustChangePassword: false,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        },
+      }),
+      prisma.passwordHistory.create({
+        data: {
+          traineeId,
+          passwordHash: user.passwordHash,
+        },
+      }),
+    ]);
+
+    // Set session cookie and log the user in
+    const role = user.role === "admin" ? "admin" : "trainee";
+    setSessionCookie(res, role === "admin" ? { role: "admin" } : { role: "trainee", traineeId: user.id });
+
+    return res.json({
+      message: "Password set successfully.",
+      role,
+      traineeId: role === "trainee" ? user.id : null,
+    });
+  } catch (err) {
+    console.error("set-initial-password error:", err);
+    return res.status(500).json({ error: "Internal server error." });
   }
 });
 

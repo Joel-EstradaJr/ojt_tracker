@@ -28,6 +28,7 @@ model Trainee {
   companyName   String   // company/institution where trainee renders OJT
   requiredHours Int      // total hours the trainee must complete
   passwordHash  String   // bcrypt hash of the trainee-specific password
+  mustChangePassword Boolean @default(false) // true when admin creates user with temp password
   failedLoginAttempts Int      @default(0)
   lockedUntil         DateTime?
   createdAt     DateTime @default(now())
@@ -60,6 +61,7 @@ model Supervisor {
   // Relation back to trainee (cascade delete)
   trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
 
+  @@unique([traineeId, firstName, lastName, middleName, suffix], name: "unique_supervisor_per_trainee")
   @@index([traineeId])
 }
 

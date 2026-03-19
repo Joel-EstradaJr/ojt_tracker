@@ -8,6 +8,7 @@ import {
   getSession,
   isLoginError,
   login,
+  setInitialPassword,
   requestForgotPasswordCode,
   verifyForgotPasswordCode,
   resetForgottenPassword,
@@ -52,6 +53,14 @@ export default function LoginPage() {
   const [forgotLoading, setForgotLoading] = useState(false);
   const lockoutTimerRef = useRef<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+
+  // Forced password change (admin-created account)
+  const [showSetPassword, setShowSetPassword] = useState(false);
+  const [setPasswordTraineeId, setSetPasswordTraineeId] = useState("");
+  const [setPasswordTempPwd, setSetPasswordTempPwd] = useState(""); // the password the user typed at login
+  const [setNewPwd, setSetNewPwd] = useState("");
+  const [setConfirmPwd, setSetConfirmPwd] = useState("");
+  const [setPasswordLoading, setSetPasswordLoading] = useState(false);
 
   const GENERIC_LOGIN_ERROR = "Invalid credentials. Please try again.";
 
@@ -167,6 +176,17 @@ export default function LoginPage() {
       const result = await login(normalizedFullName, password);
       setActiveLockout(null);
       setPermanentLock(null);
+
+      // Check if the user must set a new password (admin-created account)
+      if (result.mustChangePassword && result.traineeId) {
+        setShowSetPassword(true);
+        setSetPasswordTraineeId(result.traineeId);
+        setSetPasswordTempPwd(password);
+        setShowSignUp(false);
+        setShowForgotPassword(false);
+        setError("");
+        return;
+      }
 
       if (result.role === "admin") {
         router.replace("/");
@@ -368,6 +388,42 @@ export default function LoginPage() {
     }
   };
 
+  const handleSetInitialPassword = async () => {
+    setError("");
+
+    if (setNewPwd.length < 4) {
+      setError("New password must be at least 4 characters.");
+      return;
+    }
+
+    if (setNewPwd !== setConfirmPwd) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setSetPasswordLoading(true);
+    try {
+      const result = await setInitialPassword(setPasswordTraineeId, setPasswordTempPwd, setNewPwd, setConfirmPwd);
+      setShowSetPassword(false);
+      setSetNewPwd("");
+      setSetConfirmPwd("");
+      setSetPasswordTempPwd("");
+      setError("");
+
+      if (result.role === "admin") {
+        router.replace("/");
+      } else if (result.traineeId) {
+        router.replace(`/trainee/${result.traineeId}`);
+      } else {
+        setSignupSuccess("Password set successfully. You can now log in.");
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to set password.");
+    } finally {
+      setSetPasswordLoading(false);
+    }
+  };
+
   if (checkingSession) {
     return (
       <div className="container">
@@ -393,13 +449,15 @@ export default function LoginPage() {
           <div className={`auth-panel-inner ${showSignUp ? "is-signup" : "is-centered"}`}>
             <div className="auth-panel-header">
               <div>
-                <h2>{showSignUp ? "Create Account" : showForgotPassword ? "Forgot Password" : "Welcome to OJT Progress Tracker"}</h2>
+                <h2>{showSignUp ? "Create Account" : showForgotPassword ? "Forgot Password" : showSetPassword ? "Set Your Password" : "Welcome to OJT Progress Tracker"}</h2>
                 <p>
                   {showSignUp
                     ? "Register an account to access daily OJT tracking."
                     : showForgotPassword
                       ? "Recover access using your registered full name and email verification code."
-                      : "Sign in with your registered full name and password."}
+                      : showSetPassword
+                        ? "Your account requires a new password. Please set your own password below."
+                        : "Sign in with your registered full name and password."}
                 </p>
               </div>
               <ThemeToggle />
@@ -408,7 +466,7 @@ export default function LoginPage() {
             {showSignUp && (
               <div className="auth-signup-meta">
                 <div className="auth-signup-icon" aria-hidden="true">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><line x1="20" y1="8" x2="20" y2="14" /><line x1="23" y1="11" x2="17" y2="11" /></svg>
                 </div>
                 <div>
                   <h3>Sign Up</h3>
@@ -418,212 +476,262 @@ export default function LoginPage() {
 
             <div className="auth-content-scroll">
 
-            {!showSignUp && !showForgotPassword && (
-              <div className="auth-form-block">
-                <div className="form-group">
-                  <label htmlFor="fullName">Full Name</label>
-                  <input
-                    id="fullName"
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value.toUpperCase())}
-                    placeholder="First Middle Last Suffix"
-                    autoComplete="name"
-                    style={{ textTransform: "uppercase" }}
-                  />
-                </div>
+              {!showSignUp && !showForgotPassword && !showSetPassword && (
+                <div className="auth-form-block">
+                  <div className="form-group">
+                    <label htmlFor="fullName">Full Name</label>
+                    <input
+                      id="fullName"
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value.toUpperCase())}
+                      placeholder="First Middle Last Suffix"
+                      autoComplete="name"
+                      style={{ textTransform: "uppercase" }}
+                    />
+                  </div>
 
-                <div className="form-group">
-                  <label htmlFor="password">Password</label>
-                  <input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter password"
-                    autoComplete="current-password"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleLogin();
-                      }
-                    }}
-                  />
-                </div>
+                  <div className="form-group">
+                    <label htmlFor="password">Password</label>
+                    <input
+                      id="password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter password"
+                      autoComplete="current-password"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleLogin();
+                        }
+                      }}
+                    />
+                  </div>
 
-                <div className="auth-row">
-                  <button type="button" className="btn btn-ghost auth-link-btn" onClick={openForgotPassword}>
-                    Forgot password?
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-primary ${isLoginButtonDisabled ? "btn-login-disabled" : ""}`}
-                    disabled={isLoginButtonDisabled}
-                    onClick={handleLogin}
-                  >
-                    {loading ? "Signing in..." : "Sign In"}
-                  </button>
-                </div>
+                  <div className="auth-row">
+                    <button type="button" className="btn btn-ghost auth-link-btn" onClick={openForgotPassword}>
+                      Forgot password?
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-primary ${isLoginButtonDisabled ? "btn-login-disabled" : ""}`}
+                      disabled={isLoginButtonDisabled}
+                      onClick={handleLogin}
+                    >
+                      {loading ? "Signing in..." : "Sign In"}
+                    </button>
+                  </div>
 
-                <p className="auth-switch-text">
-                  Don&apos;t have an account yet?{" "}
-                  <button
-                    type="button"
-                    className="btn btn-ghost auth-link-btn"
-                    onClick={() => {
-                      setShowSignUp(true);
-                      setShowForgotPassword(false);
+                  <p className="auth-switch-text">
+                    Don&apos;t have an account yet?{" "}
+                    <button
+                      type="button"
+                      className="btn btn-ghost auth-link-btn"
+                      onClick={() => {
+                        setShowSignUp(true);
+                        setShowForgotPassword(false);
+                        setError("");
+                        setSignupSuccess("");
+                      }}
+                    >
+                      Sign up here
+                    </button>
+                  </p>
+                </div>
+              )}
+
+              {showSetPassword && (
+                <div className="auth-form-block">
+                  <div className="form-group">
+                    <label htmlFor="setNewPwd">New Password</label>
+                    <input
+                      id="setNewPwd"
+                      type="password"
+                      value={setNewPwd}
+                      onChange={(e) => setSetNewPwd(e.target.value)}
+                      placeholder="Enter new password"
+                      autoComplete="new-password"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="setConfirmPwd">Confirm New Password</label>
+                    <input
+                      id="setConfirmPwd"
+                      type="password"
+                      value={setConfirmPwd}
+                      onChange={(e) => setSetConfirmPwd(e.target.value)}
+                      placeholder="Re-enter new password"
+                      autoComplete="new-password"
+                      style={setConfirmPwd ? { borderColor: setNewPwd === setConfirmPwd ? "var(--success)" : "var(--danger)" } : undefined}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleSetInitialPassword();
+                        }
+                      }}
+                    />
+                    {setConfirmPwd && (
+                      <span style={{ fontSize: "0.78rem", marginTop: "0.25rem", color: setNewPwd === setConfirmPwd ? "var(--success-text)" : "var(--danger)" }}>
+                        {setNewPwd === setConfirmPwd ? "\u2713 Passwords match" : "\u2717 Passwords do not match"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="auth-row" style={{ justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={handleSetInitialPassword}
+                      disabled={setPasswordLoading}
+                    >
+                      {setPasswordLoading ? "Setting..." : "Set Password"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {showForgotPassword && (
+                <div className="auth-form-block">
+                  {forgotStep === "request" && (
+                    <>
+                      <div className="form-group">
+                        <label htmlFor="forgotFullName">Registered Full Name</label>
+                        <input
+                          id="forgotFullName"
+                          type="text"
+                          value={forgotFullName}
+                          onChange={(e) => setForgotFullName(e.target.value.toUpperCase())}
+                          placeholder="First Middle Last Suffix"
+                          autoComplete="name"
+                          style={{ textTransform: "uppercase" }}
+                        />
+                      </div>
+                      <div className="auth-row" style={{ justifyContent: "flex-end" }}>
+                        <button type="button" className="btn btn-primary" onClick={handleRequestResetCode} disabled={forgotLoading}>
+                          {forgotLoading ? "Sending..." : "Send Code"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {forgotStep === "verify" && (
+                    <>
+                      <div className="form-group">
+                        <label htmlFor="forgotCode">Verification Code</label>
+                        <input
+                          id="forgotCode"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={6}
+                          value={forgotCode}
+                          onChange={(e) => setForgotCode(e.target.value.replace(/\D/g, ""))}
+                          placeholder="000000"
+                          style={{ letterSpacing: "0.4em", textAlign: "center", fontWeight: 700 }}
+                        />
+                      </div>
+                      <div className="auth-row">
+                        <button type="button" className="btn btn-outline" onClick={handleResendResetCode} disabled={forgotLoading}>
+                          {forgotLoading ? "Sending..." : "Resend Code"}
+                        </button>
+                        <button type="button" className="btn btn-primary" onClick={handleVerifyResetCode} disabled={forgotLoading}>
+                          {forgotLoading ? "Verifying..." : "Verify Code"}
+                        </button>
+                      </div>
+                      <p className="auth-switch-text" style={{ marginTop: "0.55rem" }}>
+                        Enter only the latest code. Older codes are automatically expired.
+                      </p>
+                    </>
+                  )}
+
+                  {forgotStep === "reset" && (
+                    <>
+                      <div className="form-group">
+                        <label htmlFor="newPassword">New Password</label>
+                        <input
+                          id="newPassword"
+                          type="password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="Enter new password"
+                          autoComplete="new-password"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label htmlFor="confirmPassword">Confirm New Password</label>
+                        <input
+                          id="confirmPassword"
+                          type="password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          placeholder="Re-enter new password"
+                          autoComplete="new-password"
+                          style={confirmPassword ? { borderColor: newPassword === confirmPassword ? "var(--success)" : "var(--danger)" } : undefined}
+                        />
+                        {confirmPassword && (
+                          <span style={{ fontSize: "0.78rem", marginTop: "0.25rem", color: newPassword === confirmPassword ? "var(--success-text)" : "var(--danger)" }}>
+                            {newPassword === confirmPassword ? "✓ Passwords match" : "✗ Passwords do not match"}
+                          </span>
+                        )}
+                      </div>
+                      <div className="auth-row">
+                        <button type="button" className="btn btn-outline" onClick={() => setForgotStep("verify")}>
+                          Back
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={handleResetForgottenPassword}
+                          disabled={forgotLoading}
+                        >
+                          {forgotLoading ? "Updating..." : "Reset Password"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  <p className="auth-switch-text">
+                    Remembered your password?{" "}
+                    <button type="button" className="btn btn-ghost auth-link-btn" onClick={closeForgotPassword}>
+                      Go back to login
+                    </button>
+                  </p>
+                </div>
+              )}
+
+              {showSignUp && (
+                <>
+                  <CreateTraineeForm
+                    mode="inline"
+                    title="Sign Up"
+                    subtitle="Create a trainee account. Sign-up accounts are always Trainee role."
+                    submitLabel="Create Account"
+                    showRoleField={false}
+                    defaultRole="trainee"
+                    formId="signup-inline-form"
+                    showSubmitActions={false}
+                    showFormHeader={false}
+                    onCreated={() => {
+                      setShowSignUp(false);
+                      setSignupSuccess("Account created successfully. You can now log in.");
                       setError("");
-                      setSignupSuccess("");
                     }}
-                  >
-                    Sign up here
-                  </button>
-                </p>
-              </div>
-            )}
+                  />
+                </>
+              )}
 
-            {showForgotPassword && (
-              <div className="auth-form-block">
-                {forgotStep === "request" && (
-                  <>
-                    <div className="form-group">
-                      <label htmlFor="forgotFullName">Registered Full Name</label>
-                      <input
-                        id="forgotFullName"
-                        type="text"
-                        value={forgotFullName}
-                        onChange={(e) => setForgotFullName(e.target.value.toUpperCase())}
-                        placeholder="First Middle Last Suffix"
-                        autoComplete="name"
-                        style={{ textTransform: "uppercase" }}
-                      />
-                    </div>
-                    <div className="auth-row" style={{ justifyContent: "flex-end" }}>
-                      <button type="button" className="btn btn-primary" onClick={handleRequestResetCode} disabled={forgotLoading}>
-                        {forgotLoading ? "Sending..." : "Send Code"}
-                      </button>
-                    </div>
-                  </>
-                )}
+              {displayError && !showSignUp && (
+                <div style={{ padding: "0.7rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginTop: "0.85rem" }}>
+                  {displayError}
+                </div>
+              )}
 
-                {forgotStep === "verify" && (
-                  <>
-                    <div className="form-group">
-                      <label htmlFor="forgotCode">Verification Code</label>
-                      <input
-                        id="forgotCode"
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={6}
-                        value={forgotCode}
-                        onChange={(e) => setForgotCode(e.target.value.replace(/\D/g, ""))}
-                        placeholder="000000"
-                        style={{ letterSpacing: "0.4em", textAlign: "center", fontWeight: 700 }}
-                      />
-                    </div>
-                    <div className="auth-row">
-                      <button type="button" className="btn btn-outline" onClick={handleResendResetCode} disabled={forgotLoading}>
-                        {forgotLoading ? "Sending..." : "Resend Code"}
-                      </button>
-                      <button type="button" className="btn btn-primary" onClick={handleVerifyResetCode} disabled={forgotLoading}>
-                        {forgotLoading ? "Verifying..." : "Verify Code"}
-                      </button>
-                    </div>
-                    <p className="auth-switch-text" style={{ marginTop: "0.55rem" }}>
-                      Enter only the latest code. Older codes are automatically expired.
-                    </p>
-                  </>
-                )}
-
-                {forgotStep === "reset" && (
-                  <>
-                    <div className="form-group">
-                      <label htmlFor="newPassword">New Password</label>
-                      <input
-                        id="newPassword"
-                        type="password"
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Enter new password"
-                        autoComplete="new-password"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label htmlFor="confirmPassword">Confirm New Password</label>
-                      <input
-                        id="confirmPassword"
-                        type="password"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="Re-enter new password"
-                        autoComplete="new-password"
-                        style={confirmPassword ? { borderColor: newPassword === confirmPassword ? "var(--success)" : "var(--danger)" } : undefined}
-                      />
-                      {confirmPassword && (
-                        <span style={{ fontSize: "0.78rem", marginTop: "0.25rem", color: newPassword === confirmPassword ? "var(--success-text)" : "var(--danger)" }}>
-                          {newPassword === confirmPassword ? "✓ Passwords match" : "✗ Passwords do not match"}
-                        </span>
-                      )}
-                    </div>
-                    <div className="auth-row">
-                      <button type="button" className="btn btn-outline" onClick={() => setForgotStep("verify")}>
-                        Back
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={handleResetForgottenPassword}
-                        disabled={forgotLoading}
-                      >
-                        {forgotLoading ? "Updating..." : "Reset Password"}
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                <p className="auth-switch-text">
-                  Remembered your password?{" "}
-                  <button type="button" className="btn btn-ghost auth-link-btn" onClick={closeForgotPassword}>
-                    Go back to login
-                  </button>
-                </p>
-              </div>
-            )}
-
-            {showSignUp && (
-              <>
-                <CreateTraineeForm
-                  mode="inline"
-                  title="Sign Up"
-                  subtitle="Create a trainee account. Sign-up accounts are always Trainee role."
-                  submitLabel="Create Account"
-                  showRoleField={false}
-                  defaultRole="trainee"
-                  formId="signup-inline-form"
-                  showSubmitActions={false}
-                  showFormHeader={false}
-                  onCreated={() => {
-                    setShowSignUp(false);
-                    setSignupSuccess("Account created successfully. You can now log in.");
-                    setError("");
-                  }}
-                />
-              </>
-            )}
-
-            {displayError && !showSignUp && (
-              <div style={{ padding: "0.7rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginTop: "0.85rem" }}>
-                {displayError}
-              </div>
-            )}
-
-            {(signupSuccess || forgotMessage) && (
-              <div style={{ padding: "0.7rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--success-light)", border: "1px solid var(--success)", color: "var(--success-text)", fontSize: "0.85rem", marginTop: "0.85rem" }}>
-                {signupSuccess || forgotMessage}
-                {showForgotPassword && forgotMaskedEmail ? <span style={{ display: "block", marginTop: "0.35rem" }}>Code target: {forgotMaskedEmail}</span> : null}
-              </div>
-            )}
+              {(signupSuccess || (forgotMessage && !showSetPassword)) && (
+                <div style={{ padding: "0.7rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--success-light)", border: "1px solid var(--success)", color: "var(--success-text)", fontSize: "0.85rem", marginTop: "0.85rem" }}>
+                  {signupSuccess || forgotMessage}
+                  {showForgotPassword && forgotMaskedEmail ? <span style={{ display: "block", marginTop: "0.35rem" }}>Code target: {forgotMaskedEmail}</span> : null}
+                </div>
+              )}
             </div>
 
             {showSignUp && (
@@ -643,7 +751,7 @@ export default function LoginPage() {
                     </button>
                   </p>
                   <button type="submit" form="signup-inline-form" className="btn btn-primary auth-signup-submit" style={{ gap: "0.35rem" }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                     Create Account
                   </button>
                 </div>

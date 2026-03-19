@@ -184,7 +184,7 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
         <div className="form-group" style={{ marginBottom: "0.4rem" }}><label>Last Name *</label><input value={s.lastName} onChange={(e) => onChange("lastName", sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}><label>First Name *</label><input value={s.firstName} onChange={(e) => onChange("firstName", sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}><label>Middle Name</label><input value={s.middleName ?? ""} onChange={(e) => onChange("middleName", sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
-        <div className="form-group" style={{ marginBottom: "0.4rem" }}><label>Suffix</label><select value={s.suffix ?? ""} onChange={(e) => onChange("suffix", e.target.value)}>{SUFFIX_OPTIONS.map((opt) => (<option key={opt} value={opt}>{opt || "\u2014 None \u2014"}</option>))}</select></div>
+        <div className="form-group" style={{ marginBottom: "0.4rem" }}><label>Suffix</label><select value={s.suffix ?? ""} onChange={(e) => onChange("suffix", e.target.value)}>{SUFFIX_OPTIONS.map((opt) => (<option key={opt} value={opt}>{opt || "None"}</option>))}</select></div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}><label>Contact Number</label><input value={s.contactNumber ?? ""} onChange={(e) => onChange("contactNumber", sanitizeInput(e.target.value))} /></div>
         <div className="form-group" style={{ marginBottom: "0.4rem" }}><label>Email</label><input type="email" value={s.email ?? ""} onChange={(e) => onChange("email", e.target.value)} /></div>
       </div>
@@ -193,169 +193,169 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
 
   return (
     <>
-    {/* Confirmation modal */}
-    {showConfirm && (
-      <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => { setShowConfirm(false); setSaveResult("cancelled"); }}>
-        <div className="modal-content" style={{ maxWidth: 500, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--warning-light)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warning-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      {/* Confirmation modal */}
+      {showConfirm && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => { setShowConfirm(false); setSaveResult("cancelled"); }}>
+          <div className="modal-content" style={{ maxWidth: 500, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--warning-light)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warning-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+              </div>
+              <div>
+                <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Confirm Changes</h2>
+                <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>{pendingChanges.length} field{pendingChanges.length > 1 ? "s" : ""} will be updated</p>
+              </div>
             </div>
-            <div>
-              <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Confirm Changes</h2>
-              <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>{pendingChanges.length} field{pendingChanges.length > 1 ? "s" : ""} will be updated</p>
-            </div>
-          </div>
-          <div style={{ background: "var(--bg-subtle)", borderRadius: "var(--radius-sm)", padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.85rem", border: "1px solid var(--border)", overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}>
-                  <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>Field</th>
-                  <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>Old Value</th>
-                  <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>New Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingChanges.map((c, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <td style={{ padding: "0.35rem 0.5rem", fontWeight: 500 }}>{c.label}</td>
-                    <td style={{ padding: "0.35rem 0.5rem", color: "var(--danger)", wordBreak: "break-word" }}>{c.oldVal}</td>
-                    <td style={{ padding: "0.35rem 0.5rem", color: "var(--success-text)", wordBreak: "break-word" }}>{c.newVal}</td>
+            <div style={{ background: "var(--bg-subtle)", borderRadius: "var(--radius-sm)", padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.85rem", border: "1px solid var(--border)", overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}>
+                    <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>Field</th>
+                    <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>Old Value</th>
+                    <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>New Value</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
-            <button className="btn btn-outline" onClick={() => { setShowConfirm(false); setSaveResult("cancelled"); }}>Cancel</button>
-            <button className="btn btn-primary" onClick={executeSave} disabled={loading}>{loading ? "Saving\u2026" : "Confirm"}</button>
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* Save result modal */}
-    {saveResult && (
-      <div className="modal-overlay" style={{ zIndex: 1200 }} onClick={() => { if (saveResult === "success") onUpdated(); setSaveResult(null); }}>
-        <div className="modal-content" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: saveResult === "success" ? "var(--success-light)" : "var(--bg-subtle)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              {saveResult === "success" ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-              )}
+                </thead>
+                <tbody>
+                  {pendingChanges.map((c, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "0.35rem 0.5rem", fontWeight: 500 }}>{c.label}</td>
+                      <td style={{ padding: "0.35rem 0.5rem", color: "var(--danger)", wordBreak: "break-word" }}>{c.oldVal}</td>
+                      <td style={{ padding: "0.35rem 0.5rem", color: "var(--success-text)", wordBreak: "break-word" }}>{c.newVal}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div>
-              <h2 style={{ fontSize: "1.15rem", color: saveResult === "success" ? "var(--success-text)" : "var(--text-muted)" }}>{saveResult === "success" ? "Changes Saved" : "Edit Cancelled"}</h2>
-              <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                {saveResult === "success" ? `All changes to ${trainee.displayName} saved.` : "No changes were saved. You can continue editing."}
-              </p>
+            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+              <button className="btn btn-outline" onClick={() => { setShowConfirm(false); setSaveResult("cancelled"); }}>Cancel</button>
+              <button className="btn btn-primary" onClick={executeSave} disabled={loading}>{loading ? "Saving\u2026" : "Confirm"}</button>
             </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button className="btn btn-primary" onClick={() => { if (saveResult === "success") onUpdated(); setSaveResult(null); }}>OK</button>
-          </div>
         </div>
-      </div>
-    )}
+      )}
 
-    {/* Main edit modal */}
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" style={{ maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.25rem" }}>
-          <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--accent-light)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </div>
-          <div>
-            <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Edit User</h2>
-            <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Update information for {trainee.displayName}</p>
-          </div>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Role *</label>
-            <select value={role} onChange={(e) => setRole(e.target.value as "admin" | "trainee") }>
-              <option value="trainee">Trainee</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
-            <div className="form-group"><label>Last Name *</label><input value={lastName} onChange={(e) => setLastName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
-            <div className="form-group"><label>First Name *</label><input value={firstName} onChange={(e) => setFirstName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
-            <div className="form-group"><label>Middle Name</label><input value={middleName} onChange={(e) => setMiddleName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
-            <div className="form-group"><label>Suffix</label><select value={suffix} onChange={(e) => setSuffix(e.target.value)}>{SUFFIX_OPTIONS.map((opt) => (<option key={opt} value={opt}>{opt || "\u2014 None \u2014"}</option>))}</select></div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
-            <div className="form-group">
-              <label>Email * {emailChanged && emailVerified && <span style={{ color: "var(--success-text)", fontSize: "0.8rem" }}>{"\u2713"} Verified</span>}</label>
-              <div style={{ display: "flex", gap: "0.35rem" }}>
-                <input type="email" value={email} onChange={(e) => handleEmailChange(e.target.value)} style={{ flex: 1, ...(emailChanged && emailVerified ? { borderColor: "var(--success)" } : {}) }} disabled={emailChanged && emailVerified} />
-                {emailChanged && !emailVerified && (
-                  <button type="button" className="btn btn-outline" style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }} onClick={handleSendVerification} disabled={emailSending}>{emailSending ? "Sending\u2026" : emailCodeSent ? "Resend" : "Verify"}</button>
-                )}
-                {emailChanged && emailVerified && (
-                  <button type="button" className="btn btn-outline" style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }} onClick={() => handleEmailChange(email)}>Change</button>
+      {/* Save result modal */}
+      {saveResult && (
+        <div className="modal-overlay" style={{ zIndex: 1200 }} onClick={() => { if (saveResult === "success") onUpdated(); setSaveResult(null); }}>
+          <div className="modal-content" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: saveResult === "success" ? "var(--success-light)" : "var(--bg-subtle)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {saveResult === "success" ? (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
                 )}
               </div>
-              {emailChanged && emailCodeSent && !emailVerified && (
-                <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.35rem" }}>
-                  <input type="text" inputMode="numeric" maxLength={6} value={emailCode} onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ""))} placeholder="6-digit code" style={{ flex: 1, letterSpacing: "0.3em", textAlign: "center", fontSize: "1rem" }} />
-                  <button type="button" className="btn btn-primary" style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }} onClick={handleVerifyEmailCode} disabled={emailSending}>{emailSending ? "Verifying\u2026" : "Confirm"}</button>
-                </div>
-              )}
-              {emailMsg && <span style={{ fontSize: "0.78rem", marginTop: "0.25rem", color: emailVerified ? "var(--success-text)" : "var(--primary)" }}>{emailMsg}</span>}
+              <div>
+                <h2 style={{ fontSize: "1.15rem", color: saveResult === "success" ? "var(--success-text)" : "var(--text-muted)" }}>{saveResult === "success" ? "Changes Saved" : "Edit Cancelled"}</h2>
+                <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                  {saveResult === "success" ? `All changes to ${trainee.displayName} saved.` : "No changes were saved. You can continue editing."}
+                </p>
+              </div>
             </div>
-            <div className="form-group"><label>Contact Number *</label><input value={contactNumber} onChange={(e) => setContactNumber(sanitizeInput(e.target.value))} /></div>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn btn-primary" onClick={() => { if (saveResult === "success") onUpdated(); setSaveResult(null); }}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main edit modal */}
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-content" style={{ maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.25rem" }}>
+            <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--accent-light)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+            </div>
+            <div>
+              <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Edit User</h2>
+              <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Update information for {trainee.displayName}</p>
+            </div>
           </div>
 
-          <div className="form-group"><label>School *</label><input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
-          <div className="form-group"><label>Company / Institution Name *</label><input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
-          <div className="form-group"><label>Required Hours *</label><input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} /></div>
+          <form onSubmit={handleSubmit}>
+            <div className="form-group">
+              <label>Role *</label>
+              <select value={role} onChange={(e) => setRole(e.target.value as "admin" | "trainee")}>
+                <option value="trainee">Trainee</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
 
-          {/* Supervisors section */}
-          <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border)", paddingTop: "0.75rem" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-              <label style={{ fontWeight: 600, fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                SUPERVISORS
-              </label>
-              <button type="button" className="btn btn-outline" style={{ fontSize: "0.8rem", padding: "0.3rem 0.7rem", gap: "0.25rem" }} onClick={addNewSupervisor}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                Add Supervisor
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+              <div className="form-group"><label>Last Name *</label><input value={lastName} onChange={(e) => setLastName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
+              <div className="form-group"><label>First Name *</label><input value={firstName} onChange={(e) => setFirstName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
+              <div className="form-group"><label>Middle Name</label><input value={middleName} onChange={(e) => setMiddleName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
+              <div className="form-group"><label>Suffix</label><select value={suffix} onChange={(e) => setSuffix(e.target.value)}>{SUFFIX_OPTIONS.map((opt) => (<option key={opt} value={opt}>{opt || "N/A"}</option>))}</select></div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+              <div className="form-group">
+                <label>Email * {emailChanged && emailVerified && <span style={{ color: "var(--success-text)", fontSize: "0.8rem" }}>{"\u2713"} Verified</span>}</label>
+                <div style={{ display: "flex", gap: "0.35rem" }}>
+                  <input type="email" value={email} onChange={(e) => handleEmailChange(e.target.value)} style={{ flex: 1, ...(emailChanged && emailVerified ? { borderColor: "var(--success)" } : {}) }} disabled={emailChanged && emailVerified} />
+                  {emailChanged && !emailVerified && (
+                    <button type="button" className="btn btn-outline" style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }} onClick={handleSendVerification} disabled={emailSending}>{emailSending ? "Sending\u2026" : emailCodeSent ? "Resend" : "Verify"}</button>
+                  )}
+                  {emailChanged && emailVerified && (
+                    <button type="button" className="btn btn-outline" style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }} onClick={() => handleEmailChange(email)}>Change</button>
+                  )}
+                </div>
+                {emailChanged && emailCodeSent && !emailVerified && (
+                  <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.35rem" }}>
+                    <input type="text" inputMode="numeric" maxLength={6} value={emailCode} onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ""))} placeholder="6-digit code" style={{ flex: 1, letterSpacing: "0.3em", textAlign: "center", fontSize: "1rem" }} />
+                    <button type="button" className="btn btn-primary" style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }} onClick={handleVerifyEmailCode} disabled={emailSending}>{emailSending ? "Verifying\u2026" : "Confirm"}</button>
+                  </div>
+                )}
+                {emailMsg && <span style={{ fontSize: "0.78rem", marginTop: "0.25rem", color: emailVerified ? "var(--success-text)" : "var(--primary)" }}>{emailMsg}</span>}
+              </div>
+              <div className="form-group"><label>Contact Number *</label><input value={contactNumber} onChange={(e) => setContactNumber(sanitizeInput(e.target.value))} /></div>
+            </div>
+
+            <div className="form-group"><label>School *</label><input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
+            <div className="form-group"><label>Company / Institution Name *</label><input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
+            <div className="form-group"><label>Required Hours *</label><input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} /></div>
+
+            {/* Supervisors section */}
+            <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border)", paddingTop: "0.75rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                <label style={{ fontWeight: 600, fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                  SUPERVISORS
+                </label>
+                <button type="button" className="btn btn-outline" style={{ fontSize: "0.8rem", padding: "0.3rem 0.7rem", gap: "0.25rem" }} onClick={addNewSupervisor}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                  Add Supervisor
+                </button>
+              </div>
+              {existingSupervisors.map((sup) => renderSupervisorFields(editedSupervisors[sup.id] ?? emptySupervisor(), (field, value) => updateExistingField(sup.id, field, value), () => toggleDeleteExisting(sup.id), deletedIds.has(sup.id)))}
+              {newSupervisors.map((s, idx) => renderSupervisorFields(s, (field, value) => updateNewField(idx, field, value), () => removeNewSupervisor(idx), false, `New Supervisor #${idx + 1}`))}
+              {existingSupervisors.length === 0 && newSupervisors.length === 0 && (
+                <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>No supervisors assigned.</p>
+              )}
+            </div>
+
+            {error && (
+              <div style={{ padding: "0.6rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem", marginTop: "0.5rem", display: "flex", alignItems: "flex-start", gap: "0.4rem" }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: "0.1rem" }}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+                {error}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end", marginTop: "1rem" }}>
+              <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
+                {loading ? "Saving\u2026" : (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                    Save Changes
+                  </>
+                )}
               </button>
             </div>
-            {existingSupervisors.map((sup) => renderSupervisorFields(editedSupervisors[sup.id] ?? emptySupervisor(), (field, value) => updateExistingField(sup.id, field, value), () => toggleDeleteExisting(sup.id), deletedIds.has(sup.id)))}
-            {newSupervisors.map((s, idx) => renderSupervisorFields(s, (field, value) => updateNewField(idx, field, value), () => removeNewSupervisor(idx), false, `New Supervisor #${idx + 1}`))}
-            {existingSupervisors.length === 0 && newSupervisors.length === 0 && (
-              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>No supervisors assigned.</p>
-            )}
-          </div>
-
-          {error && (
-            <div style={{ padding: "0.6rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem", marginTop: "0.5rem", display: "flex", alignItems: "flex-start", gap: "0.4rem" }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: "0.1rem" }}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-              {error}
-            </div>
-          )}
-
-          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end", marginTop: "1rem" }}>
-            <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
-              {loading ? "Saving\u2026" : (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                  Save Changes
-                </>
-              )}
-            </button>
-          </div>
-        </form>
+          </form>
+        </div>
       </div>
-    </div>
     </>
   );
 }

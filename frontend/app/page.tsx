@@ -9,7 +9,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Trainee } from "@/types";
-import { fetchTrainees, deleteTrainee, verifySuperPassword, downloadAllCSV, importAllCSV, getSession, logout } from "@/lib/api";
+import { calculateExpectedEndDate } from "@/lib/ph-holidays";
+import { fetchTrainees, deleteTrainee, downloadAllCSV, importAllCSV, getSession, logout } from "@/lib/api";
 import TraineeCard from "@/components/TraineeCard";
 import CreateTraineeForm from "@/components/CreateTraineeForm";
 import EditTraineeForm from "@/components/EditTraineeForm";
@@ -26,11 +27,6 @@ export default function HomePage() {
   const [importLoading, setImportLoading] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
-  // Super-password gate for Export / Import
-  const [pendingAction, setPendingAction] = useState<"export" | "import" | null>(null);
-  const [actionPassword, setActionPassword] = useState("");
-  const [actionPasswordError, setActionPasswordError] = useState("");
-  const [actionPasswordLoading, setActionPasswordLoading] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
 
   // Import result modal
@@ -43,9 +39,12 @@ export default function HomePage() {
   const [deleteError, setDeleteError] = useState("");
   const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
 
-  // Search & sort
+  // Search, sort & pagination
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<"name" | "createdAt" | "hoursRendered" | "hoursRemaining" | "expectedEnd">("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [cardsPerPage, setCardsPerPage] = useState(12);
 
   // Fetch all trainees on mount
   const loadTrainees = useCallback(async () => {
@@ -154,44 +153,50 @@ export default function HomePage() {
     }
   };
 
-  const closeActionModal = () => {
-    if (!actionPasswordLoading) {
-      setPendingAction(null);
-      setActionPassword("");
-      setActionPasswordError("");
-    }
+
+
+  // Helper: compute expected end date as timestamp for sorting
+  const getExpectedEndTs = (t: Trainee) => {
+    const remaining = Math.max(0, t.requiredHours - t.totalHoursRendered);
+    if (remaining === 0) return Infinity; // completed trainees sort last/first
+    const days = Math.ceil(remaining / 8);
+    return calculateExpectedEndDate(days).getTime();
   };
 
-  const handleActionVerify = async () => {
-    if (!pendingAction || !actionPassword.trim()) return;
-    setActionPasswordLoading(true);
-    setActionPasswordError("");
-    try {
-      await verifySuperPassword(actionPassword);
-      const action = pendingAction;
-      setPendingAction(null);
-      setActionPassword("");
-      setActionPasswordError("");
-      if (action === "export") {
-        downloadAllCSV();
-        setExportSuccess(true);
-      } else {
-        importRef.current?.click();
-      }
-    } catch (err) {
-      setActionPasswordError(err instanceof Error ? err.message : "Incorrect password.");
-    } finally {
-      setActionPasswordLoading(false);
-    }
-  };
-
-  // Filter and sort trainees by name
+  // Filter trainees by name, school, or company
+  const q = searchQuery.toLowerCase();
   const filteredTrainees = trainees
-    .filter((t) => t.displayName.toLowerCase().includes(searchQuery.toLowerCase()))
+    .filter((t) =>
+      t.displayName.toLowerCase().includes(q) ||
+      t.school.toLowerCase().includes(q) ||
+      t.companyName.toLowerCase().includes(q)
+    )
     .sort((a, b) => {
-      const cmp = a.displayName.localeCompare(b.displayName);
+      let cmp = 0;
+      switch (sortField) {
+        case "name":
+          cmp = a.displayName.localeCompare(b.displayName);
+          break;
+        case "createdAt":
+          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          break;
+        case "hoursRendered":
+          cmp = a.totalHoursRendered - b.totalHoursRendered;
+          break;
+        case "hoursRemaining":
+          cmp = (a.requiredHours - a.totalHoursRendered) - (b.requiredHours - b.totalHoursRendered);
+          break;
+        case "expectedEnd":
+          cmp = getExpectedEndTs(a) - getExpectedEndTs(b);
+          break;
+      }
       return sortDir === "asc" ? cmp : -cmp;
     });
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredTrainees.length / cardsPerPage));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedTrainees = filteredTrainees.slice((safePage - 1) * cardsPerPage, safePage * cardsPerPage);
 
   return (
     <div className="container">
@@ -212,13 +217,13 @@ export default function HomePage() {
         </div>
 
         <div className="hero-actions" style={{ marginTop: "1.25rem" }}>
-          <button className="btn" onClick={() => setPendingAction("export")}>
+          <button className="btn" onClick={() => { downloadAllCSV(); setExportSuccess(true); }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
             Export All
           </button>
           <button
             className="btn"
-            onClick={() => setPendingAction("import")}
+            onClick={() => importRef.current?.click()}
             disabled={importLoading}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
@@ -238,28 +243,85 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Search & Sort bar */}
+      {/* Search, Sort & Pagination bar */}
       {!loading && trainees.length > 0 && (
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "1.25rem" }}>
-          <div style={{ position: "relative", flex: 1, maxWidth: "360px" }}>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "1.25rem", flexWrap: "wrap" }}>
+          {/* Search */}
+          <div style={{ position: "relative", flex: "1 1 220px", maxWidth: "360px", minWidth: "180px" }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)", opacity: 0.4, pointerEvents: "none" }}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             <input
               type="text"
-              placeholder="Search by name..."
+              placeholder="Search name, school, or company..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
               style={{ paddingLeft: "2.25rem", width: "100%" }}
             />
           </div>
+
+          {/* Sort field dropdown */}
+          <select
+            className="btn btn-outline"
+            value={sortField}
+            onChange={(e) => { setSortField(e.target.value as typeof sortField); setCurrentPage(1); }}
+            style={{ fontSize: "0.82rem", padding: "0.45rem 0.6rem", cursor: "pointer", background: "var(--bg)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+          >
+            <option value="name">Sort: Name</option>
+            <option value="createdAt">Sort: Created Date</option>
+            <option value="hoursRendered">Sort: Hours Rendered</option>
+            <option value="hoursRemaining">Sort: Hours Remaining</option>
+            <option value="expectedEnd">Sort: Expected End</option>
+          </select>
+
+          {/* Sort direction toggle */}
           <button
             className="btn btn-outline"
             style={{ fontSize: "0.82rem", padding: "0.5rem 0.75rem", whiteSpace: "nowrap" }}
             onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
-            title={sortDir === "asc" ? "Sorted A → Z" : "Sorted Z → A"}
+            title={sortDir === "asc" ? "Ascending" : "Descending"}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5h10M11 9h7M11 13h4M3 17l3 3 3-3M6 18V4" /></svg>
-            {sortDir === "asc" ? "A → Z" : "Z → A"}
+            {sortDir === "asc" ? "↑ Asc" : "↓ Desc"}
           </button>
+
+          {/* Page size selector + Pagination controls — pushed to the right */}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", marginLeft: "auto", flexShrink: 0 }}>
+            <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>Show</span>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={cardsPerPage}
+              onChange={(e) => {
+                const v = Math.max(1, Math.min(100, parseInt(e.target.value) || 1));
+                setCardsPerPage(v);
+                setCurrentPage(1);
+              }}
+              style={{ width: "3.5rem", padding: "0.35rem 0.4rem", fontSize: "0.8rem", textAlign: "center", border: "1px solid var(--border)", borderRadius: "var(--radius-xs)", background: "var(--bg)", color: "var(--text)" }}
+            />
+            {totalPages > 1 && (
+              <>
+                <button
+                  className="btn btn-outline"
+                  style={{ fontSize: "0.78rem", padding: "0.4rem 0.6rem" }}
+                  disabled={safePage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                >
+                  ‹
+                </button>
+                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", whiteSpace: "nowrap", padding: "0 0.15rem" }}>
+                  {safePage} / {totalPages}
+                </span>
+                <button
+                  className="btn btn-outline"
+                  style={{ fontSize: "0.78rem", padding: "0.4rem 0.6rem" }}
+                  disabled={safePage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  ›
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -309,14 +371,15 @@ export default function HomePage() {
 
       {/* Trainee cards grid */}
       <div className="trainee-grid">
-        <AnimatePresence>
-          {filteredTrainees.map((t, idx) => (
+        <AnimatePresence mode="wait">
+          {paginatedTrainees.map((t, idx) => (
             <motion.div
               key={t.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.3, delay: idx * 0.05 }}
+              transition={{ duration: 0.25, delay: idx * 0.03 }}
+              style={{ height: "100%" }}
             >
               <TraineeCard
                 trainee={t}
@@ -328,6 +391,7 @@ export default function HomePage() {
           ))}
         </AnimatePresence>
       </div>
+
 
       {/* Create trainee modal */}
       {showCreate && (
@@ -488,54 +552,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Super password gate modal for Export / Import */}
-      {pendingAction && (
-        <div className="modal-overlay" onClick={closeActionModal}>
-          <div className="modal-content" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
-              <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--primary-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-              </div>
-              <div>
-                <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>
-                  {pendingAction === "export" ? "Export All CSV" : "Import CSV"}
-                </h2>
-                <p style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>
-                  Enter the secret code to proceed
-                </p>
-              </div>
-            </div>
-            <div className="form-group" style={{ marginBottom: "0.75rem" }}>
-              <label>Code</label>
-              <input
-                type="password"
-                placeholder="Enter secret code"
-                value={actionPassword}
-                onChange={(e) => { setActionPassword(e.target.value); setActionPasswordError(""); }}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleActionVerify(); } }}
-                autoFocus
-              />
-            </div>
-            {actionPasswordError && (
-              <div style={{ background: "var(--danger-light)", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", padding: "0.5rem 0.75rem", marginBottom: "0.75rem" }}>
-                <p style={{ color: "var(--danger)", fontSize: "0.84rem", margin: 0 }}>{actionPasswordError}</p>
-              </div>
-            )}
-            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
-              <button className="btn btn-outline" onClick={closeActionModal} disabled={actionPasswordLoading}>
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary"
-                disabled={actionPasswordLoading || !actionPassword.trim()}
-                onClick={handleActionVerify}
-              >
-                {actionPasswordLoading ? "Verifying..." : "Continue"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Export success modal */}
       {exportSuccess && (

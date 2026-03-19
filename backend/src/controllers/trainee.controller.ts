@@ -7,7 +7,7 @@ import { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import prisma from "../utils/prisma";
-import { sendResetCode } from "../utils/email";
+import { sendResetCode, sendTemporaryPassword } from "../utils/email";
 import { isEmailVerified } from "./email.controller";
 import { setSessionCookie } from "../middleware/auth";
 
@@ -59,6 +59,16 @@ async function findDuplicateName(
   return match;
 }
 
+// Helper: generate a random temporary password (12 chars)
+function generateTempPassword(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
+  let result = '';
+  for (let i = 0; i < 12; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
 // ── Create a new trainee ─────────────────────────────────────
 export const createTrainee = async (req: Request, res: Response) => {
   try {
@@ -78,9 +88,13 @@ export const createTrainee = async (req: Request, res: Response) => {
       return res.status(403).json({ error: "Only admins can create admin users." });
     }
 
-    // Verify email ownership
-    if (!verificationToken || !(await isEmailVerified(email, verificationToken))) {
-      return res.status(400).json({ error: "Email must be verified before creating a trainee." });
+    const isAdminCreating = auth?.role === "admin";
+
+    // Email verification: skip when admin is creating the user
+    if (!isAdminCreating) {
+      if (!verificationToken || !(await isEmailVerified(email, verificationToken))) {
+        return res.status(400).json({ error: "Email must be verified before creating a trainee." });
+      }
     }
 
     // Check for duplicate email
@@ -95,8 +109,23 @@ export const createTrainee = async (req: Request, res: Response) => {
       return res.status(409).json({ error: "A trainee with this name already exists." });
     }
 
-    // Hash the trainee's password before storing
-    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    // Determine password: admin creates → auto-generate temp password; self-signup → use provided
+    let actualPassword: string;
+    let mustChangePassword = false;
+    let tempPasswordPlaintext: string | undefined;
+
+    if (isAdminCreating) {
+      tempPasswordPlaintext = generateTempPassword();
+      actualPassword = tempPasswordPlaintext;
+      mustChangePassword = true;
+    } else {
+      if (!password) {
+        return res.status(400).json({ error: "Password is required." });
+      }
+      actualPassword = password;
+    }
+
+    const passwordHash = await bcrypt.hash(actualPassword, SALT_ROUNDS);
 
     const trainee = await prisma.trainee.create({
       data: {
@@ -111,24 +140,63 @@ export const createTrainee = async (req: Request, res: Response) => {
         companyName,
         requiredHours: Number(requiredHours),
         passwordHash,
-        // Create supervisors inline if provided
+        mustChangePassword,
+        // Check for duplicate supervisors within the provided list
         ...(Array.isArray(supervisors) && supervisors.length > 0
-          ? {
-            supervisors: {
-              create: supervisors.map((s: Record<string, string>) => ({
-                lastName: s.lastName,
-                firstName: s.firstName,
-                middleName: s.middleName || null,
-                suffix: s.suffix || null,
-                contactNumber: s.contactNumber || null,
-                email: s.email || null,
-              })),
-            },
-          }
+          ? (() => {
+            const seen = new Set<string>();
+            for (const s of supervisors as Record<string, string>[]) {
+              const key = [s.firstName, s.middleName, s.lastName, s.suffix]
+                .map((v) => (v ?? "").trim().toLowerCase())
+                .join("|");
+              if (seen.has(key)) {
+                throw new Error(`Duplicate supervisor: "${[s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ")}".`);
+              }
+              seen.add(key);
+            }
+            return {
+              supervisors: {
+                create: supervisors.map((s: Record<string, string>) => ({
+                  lastName: s.lastName,
+                  firstName: s.firstName,
+                  middleName: s.middleName || null,
+                  suffix: s.suffix || null,
+                  contactNumber: s.contactNumber || null,
+                  email: s.email || null,
+                })),
+              },
+            };
+          })()
           : {}),
       },
       select: { ...TRAINEE_PUBLIC_SELECT, supervisors: true, logs: { select: { hoursWorked: true } } },
     });
+
+    // Send temporary password email when admin creates the user
+    if (isAdminCreating && tempPasswordPlaintext) {
+      const name = displayName(trainee);
+      const internalKey = req.headers["x-internal-key"] as string | undefined;
+      if (internalKey && process.env.EMAIL_INTERNAL_KEY && internalKey === process.env.EMAIL_INTERNAL_KEY) {
+        // Vercel proxy: return temp password + email for Vercel to send
+        const totalHours = trainee.logs.reduce((sum, l) => sum + l.hoursWorked, 0);
+        const { logs: _logs, ...rest } = trainee;
+        return res.status(201).json({
+          ...rest,
+          displayName: name,
+          totalHoursRendered: totalHours,
+          _tempPassword: tempPasswordPlaintext,
+          _tempEmail: email,
+          _tempDisplayName: name,
+        });
+      }
+      // Direct call (local dev) — send email via SMTP
+      try {
+        await sendTemporaryPassword(email, tempPasswordPlaintext, name);
+      } catch (emailErr) {
+        console.error("Failed to send temp password email:", emailErr);
+        // User was still created — log the error but don't fail the request
+      }
+    }
 
     const totalHours = trainee.logs.reduce((sum, l) => sum + l.hoursWorked, 0);
     const { logs: _logs, ...rest } = trainee;

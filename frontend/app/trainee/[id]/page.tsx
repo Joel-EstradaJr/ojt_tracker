@@ -531,7 +531,7 @@ export default function TraineeDashboard() {
                       </div>
                       <div className="form-group" style={{ marginBottom: 0, gridColumn: "1 / -1" }}>
                         <label style={{ fontSize: "0.78rem" }}>Accomplishment</label>
-                        <input type="text" value={filterAccomplishment} onChange={(e) => { setFilterAccomplishment(e.target.value); setCurrentPage(1); }} placeholder={"Search accomplishments\u2026"} style={{ fontSize: "0.82rem" }} />
+                        <input type="text" value={filterAccomplishment} onChange={(e) => { setFilterAccomplishment(e.target.value); setCurrentPage(1); }} placeholder={"Search accomplishments"} style={{ fontSize: "0.82rem" }} />
                       </div>
                     </div>
                   </div>

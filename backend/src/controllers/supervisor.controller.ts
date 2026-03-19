@@ -15,6 +15,32 @@ function supervisorDisplayName(s: { lastName: string; firstName: string; middleN
   return parts.join(" ");
 }
 
+// Helper: normalize name for comparison (trim + lowercase)
+function normName(val?: string | null): string {
+  return (val ?? "").trim().toLowerCase();
+}
+
+// Helper: check for duplicate supervisor by full name within a trainee
+async function findDuplicateSupervisor(
+  traineeId: string,
+  firstName: string,
+  lastName: string,
+  middleName?: string | null,
+  suffix?: string | null,
+  excludeId?: string
+) {
+  const supervisors = await prisma.supervisor.findMany({ where: { traineeId } });
+  return supervisors.find((s) => {
+    if (excludeId && s.id === excludeId) return false;
+    return (
+      normName(s.firstName) === normName(firstName) &&
+      normName(s.lastName) === normName(lastName) &&
+      normName(s.middleName) === normName(middleName) &&
+      normName(s.suffix) === normName(suffix)
+    );
+  });
+}
+
 // ── Create a supervisor for a trainee ────────────────────────
 export const createSupervisor = async (req: Request, res: Response) => {
   try {
@@ -25,6 +51,12 @@ export const createSupervisor = async (req: Request, res: Response) => {
     const trainee = await prisma.trainee.findUnique({ where: { id: traineeId } });
     if (!trainee) {
       return res.status(404).json({ error: "Trainee not found." });
+    }
+
+    // Check for duplicate supervisor name
+    const dup = await findDuplicateSupervisor(traineeId, firstName, lastName, middleName, suffix);
+    if (dup) {
+      return res.status(409).json({ error: `A supervisor named "${supervisorDisplayName({ lastName, firstName, middleName, suffix })}" already exists for this trainee.` });
     }
 
     const supervisor = await prisma.supervisor.create({
@@ -68,6 +100,18 @@ export const updateSupervisor = async (req: Request, res: Response) => {
   try {
     const { supervisorId: id } = req.params;
     const { lastName, firstName, middleName, suffix, contactNumber, email } = req.body;
+
+    // Get existing supervisor to know traineeId
+    const existing = await prisma.supervisor.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: "Supervisor not found." });
+    }
+
+    // Check for duplicate supervisor name (exclude self)
+    const dup = await findDuplicateSupervisor(existing.traineeId, firstName, lastName, middleName, suffix, id);
+    if (dup) {
+      return res.status(409).json({ error: `A supervisor named "${supervisorDisplayName({ lastName, firstName, middleName, suffix })}" already exists for this trainee.` });
+    }
 
     const supervisor = await prisma.supervisor.update({
       where: { id },

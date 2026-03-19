@@ -45,14 +45,17 @@ export async function createTrainee(data: {
   school: string;
   companyName: string;
   requiredHours: number;
-  password: string;
+  password?: string;
   supervisors?: import("@/types").SupervisorInput[];
-  verificationToken: string;
+  verificationToken?: string;
 }) {
-  const hashedPassword = await sha256(data.password);
+  const payload: Record<string, unknown> = { ...data };
+  if (data.password) {
+    payload.password = await sha256(data.password);
+  }
   return request<import("@/types").Trainee>("/api/trainees", {
     method: "POST",
-    body: JSON.stringify({ ...data, password: hashedPassword }),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -350,7 +353,7 @@ export async function login(fullName: string, password: string) {
     });
   }
 
-  return res.json() as Promise<{ message: string; role: "admin" | "trainee"; traineeId?: string | null }>;
+  return res.json() as Promise<{ message: string; role: "admin" | "trainee"; traineeId?: string | null; mustChangePassword?: boolean }>;
 }
 
 export async function requestForgotPasswordCode(fullName: string) {
@@ -409,6 +412,22 @@ export function checkSession(traineeId: string) {
 
 export function logout() {
   return request<{ message: string }>("/api/auth/logout", { method: "POST" });
+}
+
+export async function setInitialPassword(traineeId: string, currentPassword: string, newPassword: string, confirmPassword: string) {
+  const hashedCurrent = await sha256(currentPassword);
+  const hashedNew = await sha256(newPassword);
+  const hashedConfirm = await sha256(confirmPassword);
+
+  return request<{ message: string; role: "admin" | "trainee"; traineeId?: string | null }>("/api/auth/set-initial-password", {
+    method: "POST",
+    body: JSON.stringify({
+      traineeId,
+      currentPassword: hashedCurrent,
+      newPassword: hashedNew,
+      confirmPassword: hashedConfirm,
+    }),
+  });
 }
 
 // ── Bulk Export / Import (full database) ─────────────────────
