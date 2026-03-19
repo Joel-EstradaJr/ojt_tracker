@@ -5,6 +5,7 @@
 /** Trainee as returned by the API (no passwordHash) */
 export interface Trainee {
   id: string;
+  role: "admin" | "trainee";
   lastName: string;
   firstName: string;
   middleName?: string | null;

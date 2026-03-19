@@ -221,6 +221,7 @@ export const supervisorInputSchema = z
 
 /** Full trainee creation payload. */
 export const createTraineeSchema = z.object({
+  role: z.enum(["admin", "trainee"]).optional(),
   lastName: nameField("Last name", true),
   firstName: nameField("First name", true),
   middleName: nameField("Middle name", false).optional().default(""),
@@ -242,6 +243,7 @@ export const createTraineeSchema = z.object({
 
 /** Trainee update payload (password not required). */
 export const updateTraineeSchema = z.object({
+  role: z.enum(["admin", "trainee"]).optional(),
   lastName: nameField("Last name", true),
   firstName: nameField("First name", true),
   middleName: nameField("Middle name", false).optional().default(""),

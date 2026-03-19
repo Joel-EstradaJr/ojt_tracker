@@ -22,6 +22,7 @@ const emptySupervisor = (): SupervisorInput => ({
 });
 
 export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) {
+  const [role, setRole] = useState<"admin" | "trainee">(trainee.role);
   const [lastName, setLastName] = useState(trainee.lastName.toUpperCase());
   const [firstName, setFirstName] = useState(trainee.firstName.toUpperCase());
   const [middleName, setMiddleName] = useState((trainee.middleName ?? "").toUpperCase());
@@ -137,6 +138,7 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
     cmp("Email", trainee.email, email); cmp("Contact Number", trainee.contactNumber, contactNumber);
     cmp("School", trainee.school, school); cmp("Company Name", trainee.companyName, companyName);
     cmp("Required Hours", String(trainee.requiredHours), requiredHours);
+    cmp("Role", trainee.role, role);
 
     for (const sup of existingSupervisors) {
       if (deletedIds.has(sup.id)) { changes.push({ label: "Remove Supervisor", oldVal: sup.displayName, newVal: "(deleted)" }); continue; }
@@ -156,7 +158,7 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
   const executeSave = async () => {
     setShowConfirm(false); setLoading(true);
     try {
-      await updateTrainee(trainee.id, { lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined, email, contactNumber, school, companyName, requiredHours: Number(requiredHours), ...(emailChanged ? { verificationToken } : {}) });
+      await updateTrainee(trainee.id, { role, lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined, email, contactNumber, school, companyName, requiredHours: Number(requiredHours), ...(emailChanged ? { verificationToken } : {}) });
       for (const id of deletedIds) { await deleteSupervisor(id); }
       for (const sup of existingSupervisors) { if (deletedIds.has(sup.id)) continue; await updateSupervisor(sup.id, editedSupervisors[sup.id]); }
       for (const s of newSupervisors) { await createSupervisor(trainee.id, s); }
@@ -266,12 +268,20 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </div>
           <div>
-            <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Edit Trainee</h2>
+            <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Edit User</h2>
             <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Update information for {trainee.displayName}</p>
           </div>
         </div>
 
         <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label>Role *</label>
+            <select value={role} onChange={(e) => setRole(e.target.value as "admin" | "trainee") }>
+              <option value="trainee">Trainee</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
             <div className="form-group"><label>Last Name *</label><input value={lastName} onChange={(e) => setLastName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
             <div className="form-group"><label>First Name *</label><input value={firstName} onChange={(e) => setFirstName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>

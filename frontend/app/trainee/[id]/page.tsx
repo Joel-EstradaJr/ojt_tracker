@@ -10,10 +10,9 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Trainee, LogEntry } from "@/types";
-import { fetchTrainee, fetchLogs, deleteLog, downloadExport, checkSession, logout } from "@/lib/api";
+import { fetchTrainee, fetchLogs, deleteLog, downloadExport, getSession, logout } from "@/lib/api";
 import LogForm from "@/components/LogForm";
 import ImportCSV from "@/components/ImportCSV";
-import PasswordModal from "@/components/PasswordModal";
 import { calculateExpectedEndDate } from "@/lib/ph-holidays";
 import { ThemeToggle } from "@/components/ThemeProvider";
 
@@ -33,8 +32,8 @@ export default function TraineeDashboard() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Session auth
-  const [authenticated, setAuthenticated] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
+  const [viewerRole, setViewerRole] = useState<"admin" | "trainee" | null>(null);
   const [showLockConfirm, setShowLockConfirm] = useState(false);
 
   // Pagination
@@ -80,62 +79,71 @@ export default function TraineeDashboard() {
     }
   }, [id]);
 
-  // Schedule auto-lock when session expires
+  // Schedule auto-logout when session expires
   const scheduleAutoLock = useCallback((expiresAt?: number) => {
     if (!expiresAt) return;
     const remaining = expiresAt - Date.now();
     if (remaining <= 0) {
-      setAuthenticated(false);
+      router.replace("/login");
       setTrainee(null);
       setLogs([]);
       return;
     }
     const timer = setTimeout(() => {
-      setAuthenticated(false);
+      router.replace("/login");
       setTrainee(null);
       setLogs([]);
     }, remaining);
     return timer;
-  }, []);
+  }, [router]);
 
   // Check session then load data
   useEffect(() => {
     let cancelled = false;
     let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+
     (async () => {
       try {
-        const res = await checkSession(id);
-        if (!cancelled && res.authenticated) {
-          setAuthenticated(true);
-          expiryTimer = scheduleAutoLock(res.expiresAt);
-          loadData();
+        const session = await getSession();
+        if (cancelled) return;
+
+        if (!session.authenticated) {
+          router.replace("/login");
+          return;
         }
+
+        setViewerRole(session.role === "admin" ? "admin" : "trainee");
+
+        if (session.role === "trainee") {
+          if (!session.traineeId) {
+            router.replace("/login");
+            return;
+          }
+
+          if (session.traineeId !== id) {
+            router.replace(`/trainee/${session.traineeId}`);
+            return;
+          }
+        }
+
+        expiryTimer = scheduleAutoLock(session.expiresAt ?? undefined);
+        loadData();
       } catch {
-        // not authenticated – show password modal
+        if (!cancelled) router.replace("/login");
       } finally {
         if (!cancelled) setAuthChecking(false);
       }
     })();
-    return () => { cancelled = true; if (expiryTimer) clearTimeout(expiryTimer); };
-  }, [id, loadData, scheduleAutoLock]);
 
-  const handleAuthenticated = useCallback(async () => {
-    setAuthenticated(true);
-    setAuthChecking(false);
-    // Fetch fresh session to get expiresAt for auto-lock timer
-    try {
-      const res = await checkSession(id);
-      if (res.expiresAt) scheduleAutoLock(res.expiresAt);
-    } catch { /* timer won't be set, acceptable fallback */ }
-    loadData();
-  }, [id, loadData, scheduleAutoLock]);
+    return () => { cancelled = true; if (expiryTimer) clearTimeout(expiryTimer); };
+  }, [id, loadData, router, scheduleAutoLock]);
 
   const handleLogout = useCallback(async () => {
     try { await logout(); } catch { /* ignore */ }
-    setAuthenticated(false);
     setTrainee(null);
     setLogs([]);
-  }, []);
+    router.replace("/login");
+  }, [router]);
 
   const handleDelete = async () => {
     if (!deletingLog) return;
@@ -161,18 +169,6 @@ export default function TraineeDashboard() {
             <div className="skeleton-line short" />
           </div>
         </div>
-      </div>
-    );
-  }
-
-  if (!authenticated) {
-    return (
-      <div className="container" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
-        <PasswordModal
-          traineeId={id}
-          onClose={() => router.push("/")}
-          onAuthenticated={handleAuthenticated}
-        />
       </div>
     );
   }
@@ -234,13 +230,17 @@ export default function TraineeDashboard() {
         transition={{ duration: 0.3 }}
         style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}
       >
-        <button className="btn btn-outline" onClick={() => router.push("/")} style={{ gap: "0.35rem" }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
-          Back
-        </button>
+        {viewerRole === "admin" ? (
+          <button className="btn btn-outline" onClick={() => router.push("/")} style={{ gap: "0.35rem" }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
+            Back
+          </button>
+        ) : (
+          <div />
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <ThemeToggle />
-          <button className="btn btn-ghost" onClick={() => setShowLockConfirm(true)} title="Lock session" style={{ gap: "0.35rem", fontSize: "0.84rem" }}>
+          <button className="btn btn-ghost" onClick={() => setShowLockConfirm(true)} title="Log Out" style={{ gap: "0.35rem", fontSize: "0.84rem" }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
             Log Out
           </button>
@@ -684,7 +684,7 @@ export default function TraineeDashboard() {
         })()}
       </motion.div>
 
-      {/* Lock Session Confirmation Modal */}
+      {/*Logout Session Confirmation Modal */}
       {showLockConfirm && (
         <div className="modal-overlay" onClick={() => setShowLockConfirm(false)}>
           <div className="modal-content" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
@@ -693,13 +693,13 @@ export default function TraineeDashboard() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warning, #e6a817)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
               </div>
               <div>
-                <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Lock Session?</h2>
+                <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Logout?</h2>
                 <p style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>You will need to re-enter the password to access this dashboard again.</p>
               </div>
             </div>
             <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
               <button className="btn btn-outline" onClick={() => setShowLockConfirm(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={() => { setShowLockConfirm(false); handleLogout(); }}>Lock</button>
+              <button className="btn btn-primary" onClick={() => { setShowLockConfirm(false); handleLogout(); }}>Logout</button>
             </div>
           </div>
         </div>

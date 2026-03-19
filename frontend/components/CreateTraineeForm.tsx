@@ -10,8 +10,17 @@ import { SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
 
 interface Props {
-  onClose: () => void;
+  onClose?: () => void;
   onCreated: () => void;
+  mode?: "modal" | "inline";
+  title?: string;
+  subtitle?: string;
+  submitLabel?: string;
+  showRoleField?: boolean;
+  defaultRole?: "admin" | "trainee";
+  formId?: string;
+  showSubmitActions?: boolean;
+  showFormHeader?: boolean;
 }
 
 const SUFFIX_OPTIONS = ["", "JR.", "SR.", "II", "III", "IV", "V", "VI", "VII", "VIII"] as const;
@@ -20,7 +29,21 @@ const emptySupervisor = (): SupervisorInput => ({
   lastName: "", firstName: "", middleName: "", suffix: "", contactNumber: "", email: "",
 });
 
-export default function CreateTraineeForm({ onClose, onCreated }: Props) {
+export default function CreateTraineeForm({
+  onClose,
+  onCreated,
+  mode = "modal",
+  title = "Add New User",
+  subtitle = "Fill in the details below to register a new user.",
+  submitLabel = "Create",
+  showRoleField = true,
+  defaultRole = "trainee",
+  formId,
+  showSubmitActions = true,
+  showFormHeader = true,
+}: Props) {
+  const isModal = mode === "modal";
+  const [role, setRole] = useState<"admin" | "trainee">(defaultRole);
   const [lastName, setLastName] = useState("");
   const [firstName, setFirstName] = useState("");
   const [middleName, setMiddleName] = useState("");
@@ -83,6 +106,7 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
     if (!lastName || !firstName || !email || !contactNumber || !school || !companyName || !requiredHours || !password || !confirmPassword) {
       setError("All required fields must be filled."); return;
     }
+    if (showRoleField && !role) { setError("Role is required."); return; }
     if (password !== confirmPassword) { setError("Passwords do not match."); return; }
     const lnErr = validateName("Last name", lastName, true); if (lnErr) { setError(lnErr); return; }
     const fnErr = validateName("First name", firstName, true); if (fnErr) { setError(fnErr); return; }
@@ -107,6 +131,7 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
     setLoading(true);
     try {
       await createTrainee({
+        role: showRoleField ? role : defaultRole,
         lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined,
         email, contactNumber, school, companyName, requiredHours: Number(requiredHours), password,
         supervisors: supervisors.length > 0 ? supervisors : undefined, verificationToken,
@@ -116,20 +141,31 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
     finally { setLoading(false); }
   };
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" style={{ maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+  const formContent = (
+    <div className={isModal ? "modal-content" : "card"} style={{ maxWidth: 560, maxHeight: isModal ? "90vh" : undefined, overflowY: isModal ? "auto" : undefined, margin: isModal ? undefined : "0 auto" }} onClick={isModal ? (e) => e.stopPropagation() : undefined}>
+        {showFormHeader && (
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.25rem" }}>
           <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--primary-light)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
           </div>
           <div>
-            <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Add New Trainee</h2>
-            <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Fill in the details below to register a new trainee.</p>
+            <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>{title}</h2>
+            <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>{subtitle}</p>
           </div>
         </div>
+        )}
 
-        <form onSubmit={handleSubmit}>
+        <form id={formId} onSubmit={handleSubmit}>
+          {showRoleField && (
+            <div className="form-group">
+              <label>Role *</label>
+              <select value={role} onChange={(e) => setRole(e.target.value as "admin" | "trainee")}>
+                <option value="trainee">Trainee</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          )}
+
           {/* Name fields */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
             <div className="form-group">
@@ -275,19 +311,32 @@ export default function CreateTraineeForm({ onClose, onCreated }: Props) {
             </div>
           )}
 
-          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end", marginTop: "1rem" }}>
-            <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
-              {loading ? "Creating\u2026" : (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                  Create
-                </>
+          {showSubmitActions && (
+            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end", marginTop: "1rem" }}>
+              {onClose && (
+                <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
               )}
-            </button>
-          </div>
+              <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
+                {loading ? "Creating\u2026" : (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    {submitLabel}
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </form>
       </div>
+  );
+
+  if (!isModal) {
+    return formContent;
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      {formContent}
     </div>
   );
 }

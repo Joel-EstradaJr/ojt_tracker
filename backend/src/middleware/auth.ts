@@ -12,7 +12,8 @@ const JWT_SECRET = () => {
 };
 
 export interface AuthPayload {
-  traineeId: string;
+  role: "admin" | "trainee";
+  traineeId?: string;
 }
 
 /**
@@ -35,9 +36,19 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction) => 
   try {
     const payload = jwt.verify(token, JWT_SECRET()) as AuthPayload;
 
+    // Backward compatibility for older tokens that only had traineeId
+    const normalized: AuthPayload = payload.role
+      ? payload
+      : { role: "trainee", traineeId: (payload as unknown as { traineeId?: string }).traineeId };
+
+    if (normalized.role === "admin") {
+      (req as Request & { auth: AuthPayload }).auth = normalized;
+      return next();
+    }
+
     // Enforce traineeId match when the route param is a traineeId
     const paramTraineeId = req.params.traineeId ?? req.params.id;
-    if (paramTraineeId && payload.traineeId !== paramTraineeId) {
+    if (paramTraineeId && normalized.traineeId !== paramTraineeId) {
       // Only enforce for UUID-shaped params (trainee IDs are UUIDs)
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paramTraineeId);
       if (isUUID) {
@@ -46,19 +57,44 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction) => 
     }
 
     // Attach payload for downstream handlers
-    (req as Request & { auth: AuthPayload }).auth = payload;
+    (req as Request & { auth: AuthPayload }).auth = normalized;
     next();
   } catch {
     return res.status(401).json({ error: "Session expired or invalid." });
   }
 };
 
+export const attachAuthIfPresent = (req: Request, _res: Response, next: NextFunction) => {
+  const token: string | undefined = req.cookies?.ojt_session;
+  if (!token) return next();
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET()) as AuthPayload;
+    const normalized: AuthPayload = payload.role
+      ? payload
+      : { role: "trainee", traineeId: (payload as unknown as { traineeId?: string }).traineeId };
+    (req as Request & { auth: AuthPayload }).auth = normalized;
+  } catch {
+    // Ignore invalid optional sessions
+  }
+
+  next();
+};
+
+export const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
+  const auth = (req as Request & { auth?: AuthPayload }).auth;
+  if (!auth || auth.role !== "admin") {
+    return res.status(403).json({ error: "Admin access required." });
+  }
+  next();
+};
+
 /**
  * Issue a signed JWT and set it as an HttpOnly cookie on the response.
  */
-export function setSessionCookie(res: Response, traineeId: string): void {
+export function setSessionCookie(res: Response, payload: AuthPayload): void {
   const expiresIn = process.env.JWT_EXPIRY || "30m";
-  const token = jwt.sign({ traineeId }, JWT_SECRET(), { expiresIn: expiresIn as string & jwt.SignOptions["expiresIn"] });
+  const token = jwt.sign(payload, JWT_SECRET(), { expiresIn: expiresIn as string & jwt.SignOptions["expiresIn"] });
 
   // Parse expiresIn to milliseconds for cookie maxAge
   const msMatch = expiresIn.match(/^(\d+)(m|h|d)$/);

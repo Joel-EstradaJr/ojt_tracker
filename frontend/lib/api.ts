@@ -35,6 +35,7 @@ export function fetchTrainee(id: string) {
 }
 
 export async function createTrainee(data: {
+  role?: "admin" | "trainee";
   lastName: string;
   firstName: string;
   middleName?: string;
@@ -58,6 +59,7 @@ export async function createTrainee(data: {
 export function updateTrainee(
   id: string,
   data: {
+    role?: "admin" | "trainee";
     lastName: string;
     firstName: string;
     middleName?: string;
@@ -278,6 +280,120 @@ export async function importCSV(traineeId: string, file: File) {
 // ── Bulk Export / Import (full database) ─────────────────────
 
 // ── Auth ──────────────────────────────────────────────────────
+
+export interface SessionInfo {
+  authenticated: boolean;
+  role?: "admin" | "trainee";
+  traineeId?: string | null;
+  expiresAt?: number | null;
+}
+
+export interface LoginSecurityDetails {
+  failedAttempts?: number;
+  attemptsRemainingBeforeLock?: number;
+  cooldown?: boolean;
+  retryAfterSeconds?: number;
+  accountLocked?: boolean;
+  lockoutUserId?: string;
+  lockoutEndsAt?: string;
+}
+
+export class LoginError extends Error {
+  details: LoginSecurityDetails;
+
+  constructor(message: string, details: LoginSecurityDetails = {}) {
+    super(message);
+    this.name = "LoginError";
+    this.details = details;
+  }
+}
+
+export function isLoginError(error: unknown): error is LoginError {
+  return error instanceof LoginError;
+}
+
+export async function login(fullName: string, password: string) {
+  const hashed = await sha256(password);
+
+  const res = await fetch(`${BASE}/api/auth/login`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fullName,
+      identifier: fullName,
+      password: hashed,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const payload = body as {
+      error?: string;
+      failedAttempts?: number;
+      attemptsRemainingBeforeLock?: number;
+      cooldown?: boolean;
+      retryAfterSeconds?: number;
+      accountLocked?: boolean;
+      lockoutUserId?: string;
+      lockoutEndsAt?: string;
+    };
+
+    throw new LoginError(payload.error || res.statusText, {
+      failedAttempts: payload.failedAttempts,
+      attemptsRemainingBeforeLock: payload.attemptsRemainingBeforeLock,
+      cooldown: payload.cooldown,
+      retryAfterSeconds: payload.retryAfterSeconds,
+      accountLocked: payload.accountLocked,
+      lockoutUserId: payload.lockoutUserId,
+      lockoutEndsAt: payload.lockoutEndsAt,
+    });
+  }
+
+  return res.json() as Promise<{ message: string; role: "admin" | "trainee"; traineeId?: string | null }>;
+}
+
+export async function requestForgotPasswordCode(fullName: string) {
+  const res = await fetch("/api/auth/forgot-password/request-code", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fullName }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+
+  return res.json() as Promise<{ message: string; maskedEmail?: string }>;
+}
+
+export function verifyForgotPasswordCode(fullName: string, code: string) {
+  return request<{ message: string; resetToken: string }>("/api/auth/forgot-password/verify-code", {
+    method: "POST",
+    body: JSON.stringify({ fullName, code }),
+  });
+}
+
+export async function resetForgottenPassword(fullName: string, newPassword: string, confirmPassword: string, resetToken: string) {
+  const hashed = await sha256(newPassword);
+  const hashedConfirm = await sha256(confirmPassword);
+
+  return request<{ message: string }>("/api/auth/forgot-password/reset", {
+    method: "POST",
+    body: JSON.stringify({
+      fullName,
+      resetToken,
+      newPassword: hashed,
+      confirmPassword: hashedConfirm,
+    }),
+  });
+}
+
+export function getSession() {
+  return request<SessionInfo>("/api/auth/me");
+}
 
 export async function verifySuperPassword(password: string) {
   const hashed = await sha256(password);

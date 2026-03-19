@@ -17,6 +17,7 @@ datasource db {
 // contact info, school, company, and a hashed password.
 model Trainee {
   id            String   @id @default(uuid())
+  role          String   @default("trainee") // "admin" | "trainee"
   lastName      String
   firstName     String
   middleName    String?  // optional
@@ -27,6 +28,8 @@ model Trainee {
   companyName   String   // company/institution where trainee renders OJT
   requiredHours Int      // total hours the trainee must complete
   passwordHash  String   // bcrypt hash of the trainee-specific password
+  failedLoginAttempts Int      @default(0)
+  lockedUntil         DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -34,6 +37,7 @@ model Trainee {
   logs        LogEntry[]
   supervisors Supervisor[]
   resetCodes  PasswordResetCode[]
+  passwordHistory PasswordHistory[]
 }
 
 // ── Supervisor ───────────────────────────────────────────────
@@ -113,4 +117,17 @@ model EmailVerificationCode {
   createdAt DateTime @default(now())
 
   @@index([email])
+}
+
+// ── PasswordHistory ──────────────────────────────────────────
+// Stores previous password hashes to prevent password reuse.
+model PasswordHistory {
+  id           String   @id @default(uuid())
+  traineeId    String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+
+  @@index([traineeId])
 }

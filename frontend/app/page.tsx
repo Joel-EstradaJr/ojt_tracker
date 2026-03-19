@@ -5,26 +5,24 @@
 // Shows all trainee cards. Click a card -> password prompt -> logs.
 // ============================================================
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Trainee } from "@/types";
-import { fetchTrainees, deleteTrainee, verifyPassword, verifySuperPassword, downloadAllCSV, importAllCSV } from "@/lib/api";
+import { fetchTrainees, deleteTrainee, verifySuperPassword, downloadAllCSV, importAllCSV, getSession, logout } from "@/lib/api";
 import TraineeCard from "@/components/TraineeCard";
-import PasswordModal from "@/components/PasswordModal";
 import CreateTraineeForm from "@/components/CreateTraineeForm";
 import EditTraineeForm from "@/components/EditTraineeForm";
 import { ThemeToggle } from "@/components/ThemeProvider";
 
 export default function HomePage() {
+  const router = useRouter();
+
   const [trainees, setTrainees] = useState<Trainee[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [authorized, setAuthorized] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [editingTrainee, setEditingTrainee] = useState<Trainee | null>(null);
-  const [pendingEditTrainee, setPendingEditTrainee] = useState<Trainee | null>(null);
-  const [editPassword, setEditPassword] = useState("");
-  const [editPasswordError, setEditPasswordError] = useState("");
-  const [editPasswordLoading, setEditPasswordLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -42,12 +40,15 @@ export default function HomePage() {
   // Delete confirmation modal
   const [deletingTrainee, setDeletingTrainee] = useState<Trainee | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deletePassword, setDeletePassword] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
 
+  // Search & sort
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
   // Fetch all trainees on mount
-  const loadTrainees = async () => {
+  const loadTrainees = useCallback(async () => {
     try {
       const data = await fetchTrainees();
       setTrainees(data);
@@ -56,33 +57,74 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadTrainees();
-  }, []);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const session = await getSession();
+        if (cancelled) return;
+
+        if (!session.authenticated) {
+          router.replace("/login");
+          return;
+        }
+
+        if (session.role === "trainee") {
+          if (session.traineeId) router.replace(`/trainee/${session.traineeId}`);
+          else router.replace("/login");
+          return;
+        }
+
+        setAuthorized(true);
+        await loadTrainees();
+      } catch {
+        if (!cancelled) router.replace("/login");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadTrainees, router]);
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // ignore and redirect
+    }
+    router.replace("/login");
+  };
+
+  if (!authorized) {
+    return (
+      <div className="container">
+        <div className="skeleton">
+          <div className="skeleton-card" style={{ height: "120px" }}>
+            <div className="skeleton-line medium" />
+            <div className="skeleton-line short" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleDelete = async () => {
     if (!deletingTrainee) return;
-    if (!deletePassword.trim()) {
-      setDeleteError("Please enter the trainee's password.");
-      return;
-    }
     setDeleteLoading(true);
     setDeleteError("");
     try {
-      // Verify password first
-      await verifyPassword(deletingTrainee.id, deletePassword);
-      // Password correct - proceed with deletion
       const name = deletingTrainee.displayName;
       await deleteTrainee(deletingTrainee.id);
       setDeletingTrainee(null);
-      setDeletePassword("");
       setDeleteError("");
       setDeleteSuccess(name);
       loadTrainees();
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Incorrect password.");
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete user.");
     } finally {
       setDeleteLoading(false);
     }
@@ -91,7 +133,6 @@ export default function HomePage() {
   const closeDeletingModal = () => {
     if (!deleteLoading) {
       setDeletingTrainee(null);
-      setDeletePassword("");
       setDeleteError("");
     }
   };
@@ -144,10 +185,6 @@ export default function HomePage() {
     }
   };
 
-  // Search & sort
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-
   // Filter and sort trainees by name
   const filteredTrainees = trainees
     .filter((t) => t.displayName.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -165,7 +202,13 @@ export default function HomePage() {
             <h1>OJT Progress Tracker</h1>
             <p>Manage trainee hours, accomplishments, and progress reports</p>
           </div>
-          <ThemeToggle />
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <ThemeToggle />
+            <button className="btn btn-outline" onClick={handleLogout} style={{ gap: "0.35rem" }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
+              Log Out
+            </button>
+          </div>
         </div>
 
         <div className="hero-actions" style={{ marginTop: "1.25rem" }}>
@@ -190,7 +233,7 @@ export default function HomePage() {
           />
           <button className="btn btn-add" onClick={() => setShowCreate(true)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-            Add Trainee
+            Add User
           </button>
         </div>
       </div>
@@ -253,7 +296,7 @@ export default function HomePage() {
             </svg>
           </div>
           <h3>No Trainees Yet</h3>
-          <p>Get started by adding your first trainee. Click the <strong>Add Trainee</strong> button above to begin tracking OJT progress.</p>
+          <p>Get started by adding your first user. Click the <strong>Add User</strong> button above to begin tracking OJT progress.</p>
         </motion.div>
       )}
 
@@ -277,8 +320,8 @@ export default function HomePage() {
             >
               <TraineeCard
                 trainee={t}
-                onClick={() => setSelectedId(t.id)}
-                onEdit={() => setPendingEditTrainee(t)}
+                onClick={() => router.push(`/trainee/${t.id}`)}
+                onEdit={() => setEditingTrainee(t)}
                 onDelete={() => setDeletingTrainee(t)}
               />
             </motion.div>
@@ -286,98 +329,20 @@ export default function HomePage() {
         </AnimatePresence>
       </div>
 
-      {/* Password modal - shown when a card is clicked */}
-      {selectedId && (
-        <PasswordModal
-          traineeId={selectedId}
-          onClose={() => setSelectedId(null)}
-        />
-      )}
-
       {/* Create trainee modal */}
       {showCreate && (
         <CreateTraineeForm
+          title="Add User"
+          subtitle="Create an Admin or Trainee account."
+          submitLabel="Create User"
+          showRoleField
+          defaultRole="trainee"
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);
             loadTrainees();
           }}
         />
-      )}
-
-      {/* Edit password gate modal */}
-      {pendingEditTrainee && !editingTrainee && (
-        <div className="modal-overlay" onClick={() => { if (!editPasswordLoading) { setPendingEditTrainee(null); setEditPassword(""); setEditPasswordError(""); } }}>
-          <div className="modal-content" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
-              <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--primary-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-              </div>
-              <div>
-                <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem" }}>Edit Trainee</h2>
-                <p style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>
-                  Enter <strong>{pendingEditTrainee.displayName}&apos;s</strong> password
-                </p>
-              </div>
-            </div>
-            <div className="form-group" style={{ marginBottom: "0.75rem" }}>
-              <label>Password</label>
-              <input
-                type="password"
-                placeholder="Enter password"
-                value={editPassword}
-                onChange={(e) => { setEditPassword(e.target.value); setEditPasswordError(""); }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    if (!editPassword.trim()) return;
-                    setEditPasswordLoading(true);
-                    setEditPasswordError("");
-                    verifyPassword(pendingEditTrainee!.id, editPassword)
-                      .then(() => {
-                        setEditingTrainee(pendingEditTrainee);
-                        setPendingEditTrainee(null);
-                        setEditPassword("");
-                        setEditPasswordError("");
-                      })
-                      .catch((err: unknown) => setEditPasswordError(err instanceof Error ? err.message : "Incorrect password."))
-                      .finally(() => setEditPasswordLoading(false));
-                  }
-                }}
-                autoFocus
-              />
-            </div>
-            {editPasswordError && (
-              <div style={{ background: "var(--danger-light)", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", padding: "0.5rem 0.75rem", marginBottom: "0.75rem" }}>
-                <p style={{ color: "var(--danger)", fontSize: "0.84rem", margin: 0 }}>{editPasswordError}</p>
-              </div>
-            )}
-            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
-              <button className="btn btn-outline" onClick={() => { setPendingEditTrainee(null); setEditPassword(""); setEditPasswordError(""); }} disabled={editPasswordLoading}>
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary"
-                disabled={editPasswordLoading || !editPassword.trim()}
-                onClick={() => {
-                  setEditPasswordLoading(true);
-                  setEditPasswordError("");
-                  verifyPassword(pendingEditTrainee!.id, editPassword)
-                    .then(() => {
-                      setEditingTrainee(pendingEditTrainee);
-                      setPendingEditTrainee(null);
-                      setEditPassword("");
-                      setEditPasswordError("");
-                    })
-                    .catch((err: unknown) => setEditPasswordError(err instanceof Error ? err.message : "Incorrect password."))
-                    .finally(() => setEditPasswordLoading(false));
-                }}
-              >
-                {editPasswordLoading ? "Verifying..." : "Continue"}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Edit trainee modal */}
@@ -404,7 +369,7 @@ export default function HomePage() {
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
                 </div>
                 <div>
-                  <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem", color: "var(--danger)" }}>Delete Trainee</h2>
+                  <h2 style={{ fontSize: "1.15rem", marginBottom: "0.1rem", color: "var(--danger)" }}>Delete User</h2>
                   <p style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>
                     This action is permanent and cannot be undone.
                   </p>
@@ -428,18 +393,6 @@ export default function HomePage() {
                 </div>
               </div>
 
-              <div className="form-group" style={{ marginBottom: "1rem" }}>
-                <label>Enter trainee&apos;s password to confirm deletion</label>
-                <input
-                  type="password"
-                  placeholder="Password"
-                  value={deletePassword}
-                  onChange={(e) => { setDeletePassword(e.target.value); setDeleteError(""); }}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleDelete(); } }}
-                  autoFocus
-                />
-              </div>
-
               {deleteError && (
                 <div style={{ background: "var(--danger-light)", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", padding: "0.5rem 0.75rem", marginBottom: "0.75rem" }}>
                   <p style={{ color: "var(--danger)", fontSize: "0.84rem", margin: 0 }}>{deleteError}</p>
@@ -450,8 +403,8 @@ export default function HomePage() {
                 <button className="btn btn-outline" onClick={closeDeletingModal} disabled={deleteLoading}>
                   Cancel
                 </button>
-                <button className="btn btn-danger" onClick={handleDelete} disabled={deleteLoading || !deletePassword.trim()}>
-                  {deleteLoading ? "Verifying..." : "Delete Permanently"}
+                <button className="btn btn-danger" onClick={handleDelete} disabled={deleteLoading}>
+                  {deleteLoading ? "Deleting..." : "Delete Permanently"}
                 </button>
               </div>
             </div>

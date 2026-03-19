@@ -25,6 +25,7 @@ function displayName(t: { lastName: string; firstName: string; middleName?: stri
 // Fields to select when returning trainee data (never expose passwordHash)
 const TRAINEE_PUBLIC_SELECT = {
   id: true,
+  role: true,
   lastName: true,
   firstName: true,
   middleName: true,
@@ -61,11 +62,21 @@ async function findDuplicateName(
 // ── Create a new trainee ─────────────────────────────────────
 export const createTrainee = async (req: Request, res: Response) => {
   try {
+    const auth = (req as Request & { auth?: { role: "admin" | "trainee" } }).auth;
     const {
+      role,
       lastName, firstName, middleName, suffix,
       email, contactNumber, school, companyName,
       requiredHours, password, supervisors, verificationToken,
     } = req.body;
+
+    const resolvedRole: "admin" | "trainee" = auth?.role === "admin"
+      ? (role === "admin" ? "admin" : "trainee")
+      : "trainee";
+
+    if (!auth?.role && role === "admin") {
+      return res.status(403).json({ error: "Only admins can create admin users." });
+    }
 
     // Verify email ownership
     if (!verificationToken || !(await isEmailVerified(email, verificationToken))) {
@@ -89,6 +100,7 @@ export const createTrainee = async (req: Request, res: Response) => {
 
     const trainee = await prisma.trainee.create({
       data: {
+        role: resolvedRole,
         lastName,
         firstName,
         middleName: middleName || null,
@@ -131,12 +143,18 @@ export const createTrainee = async (req: Request, res: Response) => {
 // ── Update trainee ───────────────────────────────────────────
 export const updateTrainee = async (req: Request, res: Response) => {
   try {
+    const auth = (req as Request & { auth?: { role: "admin" | "trainee" } }).auth;
     const { id } = req.params;
     const {
+      role,
       lastName, firstName, middleName, suffix,
       email, contactNumber, school, companyName, requiredHours,
       verificationToken,
     } = req.body;
+
+    if (role && auth?.role !== "admin") {
+      return res.status(403).json({ error: "Only admins can edit user roles." });
+    }
 
     // If email changed, verify ownership of the new email
     const currentTrainee = await prisma.trainee.findUnique({ where: { id } });
@@ -161,6 +179,7 @@ export const updateTrainee = async (req: Request, res: Response) => {
     const trainee = await prisma.trainee.update({
       where: { id },
       data: {
+        ...(auth?.role === "admin" && role ? { role } : {}),
         lastName,
         firstName,
         middleName: middleName || null,
@@ -271,7 +290,7 @@ export const verifyTraineePassword = async (req: Request, res: Response) => {
     }
 
     // Issue session cookie
-    setSessionCookie(res, trainee.id);
+    setSessionCookie(res, { role: "trainee", traineeId: trainee.id });
 
     const { passwordHash: _ph, ...safe } = trainee;
     return res.json({ ...safe, displayName: displayName(trainee) });
@@ -378,7 +397,7 @@ export const verifyResetCode = async (req: Request, res: Response) => {
 export const resetPassword = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { newPassword, resetToken } = req.body;
+    const { newPassword, resetToken, confirmPassword } = req.body;
 
     if (!newPassword || newPassword.trim().length < 4) {
       return res.status(400).json({ error: "New password must be at least 4 characters." });
@@ -386,6 +405,10 @@ export const resetPassword = async (req: Request, res: Response) => {
 
     if (!resetToken) {
       return res.status(400).json({ error: "Reset token is required." });
+    }
+
+    if (confirmPassword && newPassword !== confirmPassword) {
+      return res.status(400).json({ error: "Passwords do not match." });
     }
 
     // Verify the reset token is valid (used code belonging to this trainee, created within last 15 min)
@@ -407,11 +430,42 @@ export const resetPassword = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Trainee not found." });
     }
 
-    const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-    await prisma.trainee.update({ where: { id }, data: { passwordHash } });
+    const sameAsCurrent = await bcrypt.compare(newPassword, trainee.passwordHash);
+    if (sameAsCurrent) {
+      return res.status(400).json({ error: "You cannot reuse a previous password." });
+    }
 
-    // Clean up all reset codes for this trainee
-    await prisma.passwordResetCode.deleteMany({ where: { traineeId: id } });
+    const previousHashes = await prisma.passwordHistory.findMany({
+      where: { traineeId: id },
+      select: { passwordHash: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    for (const entry of previousHashes) {
+      if (await bcrypt.compare(newPassword, entry.passwordHash)) {
+        return res.status(400).json({ error: "You cannot reuse a previous password." });
+      }
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    await prisma.$transaction([
+      prisma.trainee.update({
+        where: { id },
+        data: {
+          passwordHash,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        },
+      }),
+      prisma.passwordHistory.create({
+        data: {
+          traineeId: id,
+          passwordHash: trainee.passwordHash,
+        },
+      }),
+      // Clean up all reset codes for this trainee
+      prisma.passwordResetCode.deleteMany({ where: { traineeId: id } }),
+    ]);
 
     return res.json({ message: "Password reset successfully." });
   } catch (err) {
