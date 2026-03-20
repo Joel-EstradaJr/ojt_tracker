@@ -5,6 +5,7 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import { Server } from "http";
 import traineeRoutes from "./routes/trainee.routes";
 import logRoutes from "./routes/log.routes";
 import supervisorRoutes from "./routes/supervisor.routes";
@@ -47,8 +48,22 @@ app.get("/health", (_req, res) => {
 });
 
 // ── Start ────────────────────────────────────────────────────
-app.listen(PORT, () => {
+const server: Server = app.listen(PORT, () => {
   console.log(`🚀 Backend running on http://localhost:${PORT}`);
 });
+
+function shutdown(signal: string) {
+  server.close((err?: Error) => {
+    if (err) {
+      console.error(`Error while closing server on ${signal}:`, err);
+      process.exit(1);
+    }
+    process.exit(0);
+  });
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGUSR2", () => shutdown("SIGUSR2"));
 
 export default app;

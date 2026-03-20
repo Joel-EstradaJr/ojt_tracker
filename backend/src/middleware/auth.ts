@@ -4,6 +4,7 @@
 
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import prisma from "../utils/prisma";
 
 const JWT_SECRET = () => {
   const secret = process.env.JWT_SECRET;
@@ -26,7 +27,7 @@ export interface AuthPayload {
  * (logs, supervisors — shorter IDs or non-UUID format) only check
  * that a valid session exists.
  */
-export const requireAuth = (req: Request, res: Response, next: NextFunction) => {
+export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
   const token: string | undefined = req.cookies?.ojt_session;
 
   if (!token) {
@@ -41,9 +42,24 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction) => 
       ? payload
       : { role: "trainee", traineeId: (payload as unknown as { traineeId?: string }).traineeId };
 
+    if (normalized.traineeId) {
+      const user = await prisma.trainee.findUnique({
+        where: { id: normalized.traineeId },
+        select: { id: true, role: true },
+      });
+
+      if (!user || user.role !== normalized.role) {
+        return res.status(401).json({ error: "Session expired or invalid." });
+      }
+    }
+
     if (normalized.role === "admin") {
       (req as Request & { auth: AuthPayload }).auth = normalized;
       return next();
+    }
+
+    if (!normalized.traineeId) {
+      return res.status(401).json({ error: "Session expired or invalid." });
     }
 
     // Enforce traineeId match when the route param is a traineeId

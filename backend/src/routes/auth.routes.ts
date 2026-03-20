@@ -87,7 +87,7 @@ router.post("/login", async (req: Request, res: Response) => {
   const superHash = crypto.createHash("sha256").update(superPwd).digest("hex");
   if (normalizeName(superName) === normalizedLookupName && password === superHash) {
     setSessionCookie(res, { role: "admin" });
-    return res.json({ message: "Logged in.", role: "admin" });
+    return res.json({ message: "Logged in.", role: "admin", traineeId: null });
   }
 
   try {
@@ -207,11 +207,11 @@ router.post("/login", async (req: Request, res: Response) => {
       });
     }
 
-    setSessionCookie(res, role === "admin" ? { role: "admin" } : { role: "trainee", traineeId: user.id });
+    setSessionCookie(res, { role, traineeId: user.id });
     return res.json({
       message: "Logged in.",
       role,
-      traineeId: role === "trainee" ? user.id : null,
+      traineeId: user.id,
     });
   } catch (err) {
     console.error("login error:", err);
@@ -469,7 +469,7 @@ router.post("/forgot-password/reset", async (req: Request, res: Response) => {
 });
 
 // GET /auth/me — inspect current authenticated session
-router.get("/me", (req: Request, res: Response) => {
+router.get("/me", async (req: Request, res: Response) => {
   const token: string | undefined = req.cookies?.ojt_session;
 
   if (!token) {
@@ -484,12 +484,57 @@ router.get("/me", (req: Request, res: Response) => {
   try {
     const raw = jwt.verify(token, secret) as AuthPayload & { exp?: number };
     const payload = normalizePayload(raw);
-    return res.json({
-      authenticated: true,
-      role: payload.role,
-      traineeId: payload.traineeId ?? null,
-      expiresAt: raw.exp ? raw.exp * 1000 : null,
-    });
+
+    if (payload.traineeId) {
+      const user = await prisma.trainee.findUnique({
+        where: { id: payload.traineeId },
+        select: {
+          id: true,
+          role: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          suffix: true,
+          email: true,
+        },
+      });
+
+      if (!user || user.role !== payload.role) {
+        clearSessionCookie(res);
+        return res.status(401).json({ authenticated: false });
+      }
+
+      return res.json({
+        authenticated: true,
+        role: payload.role,
+        traineeId: user.id,
+        expiresAt: raw.exp ? raw.exp * 1000 : null,
+        currentUser: {
+          id: user.id,
+          displayName: buildFullName(user),
+          email: user.email,
+          isSuper: false,
+        },
+      });
+    }
+
+    if (payload.role === "admin") {
+      return res.json({
+        authenticated: true,
+        role: "admin",
+        traineeId: null,
+        expiresAt: raw.exp ? raw.exp * 1000 : null,
+        currentUser: {
+          id: null,
+          displayName: process.env.SUPER_NAME || "Super Admin",
+          email: null,
+          isSuper: true,
+        },
+      });
+    }
+
+    clearSessionCookie(res);
+    return res.status(401).json({ authenticated: false });
   } catch {
     return res.status(401).json({ authenticated: false });
   }
@@ -518,7 +563,7 @@ router.post("/verify-super", (req: Request, res: Response) => {
 });
 
 // GET /auth/session/:traineeId — check if current session is valid for this trainee
-router.get("/session/:traineeId", (req: Request, res: Response) => {
+router.get("/session/:traineeId", async (req: Request, res: Response) => {
   const token: string | undefined = req.cookies?.ojt_session;
   const { traineeId } = req.params;
 
@@ -535,6 +580,18 @@ router.get("/session/:traineeId", (req: Request, res: Response) => {
     const raw = jwt.verify(token, secret) as AuthPayload & { exp?: number };
     const payload = normalizePayload(raw);
 
+    if (payload.traineeId) {
+      const user = await prisma.trainee.findUnique({
+        where: { id: payload.traineeId },
+        select: { id: true, role: true },
+      });
+
+      if (!user || user.role !== payload.role) {
+        clearSessionCookie(res);
+        return res.status(401).json({ authenticated: false });
+      }
+    }
+
     if (payload.role === "admin") {
       return res.json({
         authenticated: true,
@@ -543,7 +600,7 @@ router.get("/session/:traineeId", (req: Request, res: Response) => {
       });
     }
 
-    if (payload.traineeId !== traineeId) {
+    if (!payload.traineeId || payload.traineeId !== traineeId) {
       return res.status(403).json({ authenticated: false });
     }
 
@@ -627,12 +684,12 @@ router.post("/set-initial-password", async (req: Request, res: Response) => {
 
     // Set session cookie and log the user in
     const role = user.role === "admin" ? "admin" : "trainee";
-    setSessionCookie(res, role === "admin" ? { role: "admin" } : { role: "trainee", traineeId: user.id });
+    setSessionCookie(res, { role, traineeId: user.id });
 
     return res.json({
       message: "Password set successfully.",
       role,
-      traineeId: role === "trainee" ? user.id : null,
+      traineeId: user.id,
     });
   } catch (err) {
     console.error("set-initial-password error:", err);

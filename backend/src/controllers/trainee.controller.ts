@@ -6,10 +6,12 @@
 import { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
+import { AuditAction } from "@prisma/client";
 import prisma from "../utils/prisma";
 import { sendResetCode, sendTemporaryPassword } from "../utils/email";
 import { isEmailVerified } from "./email.controller";
 import { setSessionCookie } from "../middleware/auth";
+import { createAuditLog } from "../utils/audit";
 
 const SALT_ROUNDS = 10;
 const INITIAL_PASSWORD_REQUIRED_ERROR = "Forgot Password is disabled for this account until the temporary password is changed.";
@@ -563,7 +565,123 @@ export const resetPassword = async (req: Request, res: Response) => {
 export const deleteTrainee = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    await prisma.trainee.delete({ where: { id } });
+    const { currentPassword, typedConfirmation } = req.body as {
+      currentPassword?: string;
+      typedConfirmation?: string;
+    };
+    const auth = (req as Request & { auth?: { role: "admin" | "trainee"; traineeId?: string } }).auth;
+
+    if (auth?.role === "admin" && auth.traineeId && auth.traineeId === id) {
+      return res.status(403).json({ error: "You cannot delete your own account while logged in." });
+    }
+
+    const target = await prisma.trainee.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        role: true,
+        firstName: true,
+        middleName: true,
+        lastName: true,
+        suffix: true,
+        email: true,
+        contactNumber: true,
+        school: true,
+        companyName: true,
+        requiredHours: true,
+        workSchedule: true,
+        mustChangePassword: true,
+        failedLoginAttempts: true,
+        lockedUntil: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!target) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    if (target.role === "admin") {
+      if (!currentPassword) {
+        return res.status(400).json({ error: "Current password (or super password) is required for admin deletion." });
+      }
+
+      const normalizeConfirmation = (value: string) => value.trim().replace(/\s+/g, " ").toUpperCase();
+      const expectedConfirmation = `DELETE ${displayName(target)}`;
+      if (normalizeConfirmation(typedConfirmation ?? "") !== normalizeConfirmation(expectedConfirmation)) {
+        return res.status(400).json({ error: `Type \"${expectedConfirmation}\" to confirm admin deletion.` });
+      }
+
+      const remainingAdmins = await prisma.trainee.count({
+        where: {
+          role: "admin",
+          id: { not: id },
+        },
+      });
+
+      if (remainingAdmins < 1) {
+        return res.status(403).json({ error: "Cannot delete the last remaining admin account." });
+      }
+
+      let verified = false;
+
+      if (auth?.traineeId) {
+        const actingAdmin = await prisma.trainee.findUnique({
+          where: { id: auth.traineeId },
+          select: { passwordHash: true },
+        });
+
+        if (actingAdmin) {
+          verified = await bcrypt.compare(currentPassword, actingAdmin.passwordHash);
+        }
+      }
+
+      const superPwd = process.env.SUPER_PASSWORD;
+      if (!verified && superPwd) {
+        const superHash = crypto.createHash("sha256").update(superPwd).digest("hex");
+        verified = currentPassword === superHash;
+      }
+
+      if (!verified) {
+        return res.status(401).json({ error: "Password confirmation failed for admin deletion." });
+      }
+    }
+
+    const actor = auth?.traineeId
+      ? await prisma.trainee.findUnique({
+        where: { id: auth.traineeId },
+        select: {
+          id: true,
+          role: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          suffix: true,
+          email: true,
+        },
+      })
+      : null;
+
+    await prisma.$transaction([
+      prisma.trainee.delete({ where: { id } }),
+      createAuditLog({
+        actionType: AuditAction.DELETE,
+        entityName: "trainees",
+        recordId: target.id,
+        performedById: auth?.traineeId ?? null,
+        oldValues: target,
+        newValues: null,
+        metadata: {
+          sourceIp: req.ip,
+          userAgent: req.headers["user-agent"] ?? null,
+          actorRole: auth?.role ?? null,
+          actorName: actor ? displayName(actor) : process.env.SUPER_NAME || "Super Admin",
+          actorEmail: actor?.email ?? null,
+        },
+      }),
+    ]);
+
     return res.json({ message: "Trainee deleted." });
   } catch (err) {
     console.error("deleteTrainee error:", err);

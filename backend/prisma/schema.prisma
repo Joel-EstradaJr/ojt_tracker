@@ -12,6 +12,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+}
+
 // ── Trainee ──────────────────────────────────────────────────
 // Represents an OJT trainee with structured name fields,
 // contact info, school, company, and a hashed password.
@@ -42,6 +48,7 @@ model Trainee {
   supervisors Supervisor[]
   resetCodes  PasswordResetCode[]
   passwordHistory PasswordHistory[]
+  auditLogsPerformed AuditLog[]
 }
 
 // ── Supervisor ───────────────────────────────────────────────
@@ -135,6 +142,29 @@ model PasswordHistory {
   trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
 
   @@index([traineeId])
+}
+
+// ── AuditLog ────────────────────────────────────────────────
+// Generic audit trail table designed for CREATE/UPDATE/DELETE
+// events across entities, including field-level JSON snapshots.
+model AuditLog {
+  id            String      @id @default(uuid())
+  actionType    AuditAction
+  entityName    String
+  recordId      String
+  performedById String?
+  oldValues     Json?
+  newValues     Json?
+  metadata      Json?
+  createdAt     DateTime    @default(now())
+
+  performedBy Trainee? @relation(fields: [performedById], references: [id], onDelete: SetNull)
+
+  @@index([actionType])
+  @@index([entityName])
+  @@index([recordId])
+  @@index([performedById])
+  @@index([createdAt])
 }
 
 // ── SystemSettings ───────────────────────────────────────────

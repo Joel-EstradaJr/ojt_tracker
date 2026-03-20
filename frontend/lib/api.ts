@@ -121,9 +121,17 @@ export function verifyResetCode(id: string, code: string) {
   });
 }
 
-export function deleteTrainee(id: string) {
+export async function deleteTrainee(
+  id: string,
+  options?: { currentPassword?: string; typedConfirmation?: string }
+) {
+  const payload: { currentPassword?: string; typedConfirmation?: string } = {};
+  if (options?.typedConfirmation) payload.typedConfirmation = options.typedConfirmation;
+  if (options?.currentPassword) payload.currentPassword = await sha256(options.currentPassword);
+
   return request<{ message: string }>(`/api/trainees/${id}`, {
     method: "DELETE",
+    body: JSON.stringify(payload),
   });
 }
 
@@ -302,6 +310,12 @@ export interface SessionInfo {
   role?: "admin" | "trainee";
   traineeId?: string | null;
   expiresAt?: number | null;
+  currentUser?: {
+    id?: string | null;
+    displayName: string;
+    email?: string | null;
+    isSuper?: boolean;
+  };
 }
 
 export interface LoginSecurityDetails {

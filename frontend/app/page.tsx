@@ -22,6 +22,7 @@ export default function HomePage() {
   const [trainees, setTrainees] = useState<Trainee[]>([]);
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
+  const [activeAdminLabel, setActiveAdminLabel] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editingTrainee, setEditingTrainee] = useState<Trainee | null>(null);
   const [importLoading, setImportLoading] = useState(false);
@@ -38,6 +39,8 @@ export default function HomePage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
 
   // Search, sort & pagination
   const [searchQuery, setSearchQuery] = useState("");
@@ -45,6 +48,8 @@ export default function HomePage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [currentPage, setCurrentPage] = useState(1);
   const [cardsPerPage, setCardsPerPage] = useState(12);
+
+  const normalizeDeleteConfirmation = (value: string) => value.trim().replace(/\s+/g, " ").toUpperCase();
 
   // Fetch all trainees on mount
   const loadTrainees = useCallback(async () => {
@@ -75,6 +80,12 @@ export default function HomePage() {
           if (session.traineeId) router.replace(`/trainee/${session.traineeId}`);
           else router.replace("/login");
           return;
+        }
+
+        if (session.role === "admin") {
+          const displayName = session.currentUser?.displayName || "Admin";
+          const email = session.currentUser?.email;
+          setActiveAdminLabel(email ? `${displayName} (${email})` : displayName);
         }
 
         setAuthorized(true);
@@ -117,8 +128,13 @@ export default function HomePage() {
     setDeleteError("");
     try {
       const name = deletingTrainee.displayName;
-      await deleteTrainee(deletingTrainee.id);
+      await deleteTrainee(deletingTrainee.id, {
+        currentPassword: deletingTrainee.role === "admin" ? deletePassword : undefined,
+        typedConfirmation: deletingTrainee.role === "admin" ? deleteConfirmText : undefined,
+      });
       setDeletingTrainee(null);
+      setDeleteConfirmText("");
+      setDeletePassword("");
       setDeleteError("");
       setDeleteSuccess(name);
       loadTrainees();
@@ -133,6 +149,8 @@ export default function HomePage() {
     if (!deleteLoading) {
       setDeletingTrainee(null);
       setDeleteError("");
+      setDeleteConfirmText("");
+      setDeletePassword("");
     }
   };
 
@@ -163,8 +181,9 @@ export default function HomePage() {
   };
 
   // Filter trainees by name, school, or company
+  const trackableTrainees = trainees.filter((t) => t.role === "trainee");
   const q = searchQuery.toLowerCase();
-  const filteredTrainees = trainees
+  const filteredTrainees = trackableTrainees
     .filter((t) =>
       t.displayName.toLowerCase().includes(q) ||
       t.school.toLowerCase().includes(q) ||
@@ -239,11 +258,14 @@ export default function HomePage() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
             Add User
           </button>
+          <div style={{ marginLeft: "auto", textAlign: "right", fontSize: "0.82rem", color: "var(--text-muted)", lineHeight: 1.3 }}>
+            Logged in as: <strong style={{ color: "var(--text)" }}>{activeAdminLabel || "Admin"}</strong>
+          </div>
         </div>
       </div>
 
       {/* Search, Sort & Pagination bar */}
-      {!loading && trainees.length > 0 && (
+      {!loading && trackableTrainees.length > 0 && (
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "1.25rem", flexWrap: "wrap" }}>
           {/* Search */}
           <div style={{ position: "relative", flex: "1 1 220px", maxWidth: "360px", minWidth: "180px" }}>
@@ -341,7 +363,7 @@ export default function HomePage() {
       )}
 
       {/* Empty state */}
-      {!loading && trainees.length === 0 && (
+      {!loading && trackableTrainees.length === 0 && (
         <motion.div
           className="empty-state"
           initial={{ opacity: 0, y: 20 }}
@@ -362,7 +384,7 @@ export default function HomePage() {
       )}
 
       {/* No search results */}
-      {!loading && trainees.length > 0 && filteredTrainees.length === 0 && (
+      {!loading && trackableTrainees.length > 0 && filteredTrainees.length === 0 && (
         <div style={{ textAlign: "center", padding: "2rem 1rem", color: "var(--text-muted)" }}>
           <p style={{ fontSize: "0.95rem" }}>No trainees match &ldquo;{searchQuery}&rdquo;</p>
         </div>
@@ -456,6 +478,42 @@ export default function HomePage() {
                 </div>
               </div>
 
+              {t.role === "admin" && (
+                <div style={{ background: "var(--warning-light)", border: "1px solid var(--warning)", borderRadius: "var(--radius-sm)", padding: "0.8rem", marginBottom: "1rem" }}>
+                  {(() => {
+                    const requiredPhrase = `DELETE ${t.displayName}`;
+                    return (
+                      <>
+                  <p style={{ margin: "0 0 0.55rem 0", fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+                    Admin deletion requires confirmation.
+                  </p>
+                  <div className="form-group" style={{ marginBottom: "0.55rem" }}>
+                    <label htmlFor="deleteAdminPassword">Your Current Password (or SUPER_PASSWORD)</label>
+                    <input
+                      id="deleteAdminPassword"
+                      type="password"
+                      value={deletePassword}
+                      onChange={(e) => setDeletePassword(e.target.value)}
+                      placeholder="Enter your password"
+                      autoComplete="current-password"
+                    />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label htmlFor="deleteAdminPhrase">Type "{requiredPhrase}" to confirm</label>
+                    <input
+                      id="deleteAdminPhrase"
+                      type="text"
+                      value={deleteConfirmText}
+                      onChange={(e) => setDeleteConfirmText(e.target.value)}
+                      placeholder={requiredPhrase}
+                    />
+                  </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+
               {deleteError && (
                 <div style={{ background: "var(--danger-light)", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", padding: "0.5rem 0.75rem", marginBottom: "0.75rem" }}>
                   <p style={{ color: "var(--danger)", fontSize: "0.84rem", margin: 0 }}>{deleteError}</p>
@@ -466,7 +524,14 @@ export default function HomePage() {
                 <button className="btn btn-outline" onClick={closeDeletingModal} disabled={deleteLoading}>
                   Cancel
                 </button>
-                <button className="btn btn-danger" onClick={handleDelete} disabled={deleteLoading}>
+                <button
+                  className="btn btn-danger"
+                  onClick={handleDelete}
+                  disabled={
+                    deleteLoading ||
+                    (t.role === "admin" && (!deletePassword.trim() || normalizeDeleteConfirmation(deleteConfirmText) !== normalizeDeleteConfirmation(`DELETE ${t.displayName}`)))
+                  }
+                >
                   {deleteLoading ? "Deleting..." : "Delete Permanently"}
                 </button>
               </div>
