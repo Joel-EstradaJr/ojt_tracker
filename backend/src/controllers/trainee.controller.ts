@@ -40,6 +40,7 @@ const TRAINEE_PUBLIC_SELECT = {
   requiredHours: true,
   workSchedule: true,
   mustChangePassword: true,
+  lockedUntil: true,
   createdAt: true,
   updatedAt: true,
 } as const;

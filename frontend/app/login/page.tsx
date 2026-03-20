@@ -126,7 +126,7 @@ export default function LoginPage() {
         if (cancelled || !session.authenticated) return;
 
         if (session.role === "admin") {
-          router.replace("/");
+          router.replace("/admin/trainee-management");
           return;
         }
 
@@ -189,7 +189,7 @@ export default function LoginPage() {
       }
 
       if (result.role === "admin") {
-        router.replace("/");
+        router.replace("/admin/trainee-management");
       } else if (result.traineeId) {
         router.replace(`/trainee/${result.traineeId}`);
       } else {
@@ -411,7 +411,7 @@ export default function LoginPage() {
       setError("");
 
       if (result.role === "admin") {
-        router.replace("/");
+        router.replace("/admin/trainee-management");
       } else if (result.traineeId) {
         router.replace(`/trainee/${result.traineeId}`);
       } else {

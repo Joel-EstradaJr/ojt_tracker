@@ -20,6 +20,7 @@ export interface Trainee {
   updatedAt: string;
   totalHoursRendered: number;
   mustChangePassword?: boolean;
+  lockedUntil?: string | null;
   workSchedule?: Record<string, { start: string; end: string }>;
   supervisors?: Supervisor[];
 }
