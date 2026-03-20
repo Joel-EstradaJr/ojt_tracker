@@ -6,6 +6,7 @@
 
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { getHolidayMap, isWeekend, HolidayInfo } from "@/lib/ph-holidays";
+import { formatDisplayDateFromDateOnly } from "@/lib/date";
 
 interface Props {
   value: string;           // "yyyy-MM-dd"
@@ -134,10 +135,10 @@ export default function DatePicker({ value, onChange, max }: Props) {
 
   // Display text
   const displayText = value
-    ? new Date(value + "T00:00:00").toLocaleDateString("en-PH", { day: "2-digit", month: "2-digit", year: "numeric" })
+    ? formatDisplayDateFromDateOnly(value)
     : "Select date";
 
-  const monthLabel = new Date(viewYear, viewMonth).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const monthLabel = formatDisplayDateFromDateOnly(`${viewYear}-${pad(viewMonth + 1)}-01`);
 
   const selectedStr = value || "";
 

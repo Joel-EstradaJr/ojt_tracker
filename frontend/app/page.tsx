@@ -26,7 +26,7 @@ export default function RootPage() {
         }
 
         if (session.role === "trainee" && session.traineeId) {
-          router.replace(`/trainee/${session.traineeId}`);
+          router.replace(`/trainee/${session.traineeId}/dashboard`);
           return;
         }
 

@@ -21,11 +21,10 @@ export interface AuthPayload {
  * Middleware that requires a valid `ojt_session` HttpOnly cookie
  * containing a JWT with `{ traineeId }`.
  *
- * For routes with a `:traineeId` or `:id` param that looks like a UUID,
- * enforces that the JWT's traineeId matches the route param (prevents
- * cross-trainee access). Routes using `:id` for non-trainee entities
- * (logs, supervisors — shorter IDs or non-UUID format) only check
- * that a valid session exists.
+ * For routes with a `:traineeId` param (and `/trainees/:id`), enforces
+ * that the JWT's traineeId matches the route param (prevents cross-trainee
+ * access). Routes using `:id` for non-trainee entities (like log IDs)
+ * only check that a valid session exists.
  */
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
   const token: string | undefined = req.cookies?.ojt_session;
@@ -62,8 +61,9 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       return res.status(401).json({ error: "Session expired or invalid." });
     }
 
-    // Enforce traineeId match when the route param is a traineeId
-    const paramTraineeId = req.params.traineeId ?? req.params.id;
+    // Enforce traineeId match only for explicit trainee-id params.
+    const traineeRouteId = req.baseUrl.includes("/trainees") ? req.params.id : undefined;
+    const paramTraineeId = req.params.traineeId ?? traineeRouteId;
     if (paramTraineeId && normalized.traineeId !== paramTraineeId) {
       // Only enforce for UUID-shaped params (trainee IDs are UUIDs)
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paramTraineeId);

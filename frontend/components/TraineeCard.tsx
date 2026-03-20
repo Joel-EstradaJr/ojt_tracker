@@ -8,6 +8,8 @@
 
 import { Trainee } from "@/types";
 import { calculateExpectedEndDate } from "@/lib/ph-holidays";
+import { formatMinutes } from "@/lib/duration";
+import { formatDisplayDate } from "@/lib/date";
 
 interface Props {
   trainee: Trainee;
@@ -17,18 +19,19 @@ interface Props {
 }
 
 export default function TraineeCard({ trainee, onClick, onEdit, onDelete }: Props) {
+  const requiredMinutes = trainee.requiredHours * 60;
   const percent = Math.min(
     100,
-    Math.round((trainee.totalHoursRendered / trainee.requiredHours) * 100)
+    Math.round((trainee.totalHoursRendered / Math.max(1, requiredMinutes)) * 100)
   );
 
   const isComplete = percent >= 100;
 
   // Calculate expected end date from remaining hours using trainee-specific schedule
-  const remainingHours = Math.max(0, trainee.requiredHours - trainee.totalHoursRendered);
-  const endDate = isComplete ? null : calculateExpectedEndDate(remainingHours, undefined, trainee.workSchedule);
+  const remainingMinutes = Math.max(0, requiredMinutes - trainee.totalHoursRendered);
+  const endDate = isComplete ? null : calculateExpectedEndDate(remainingMinutes / 60, undefined, trainee.workSchedule);
   const formattedEndDate = endDate
-    ? endDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    ? formatDisplayDate(endDate)
     : null;
 
   return (
@@ -73,7 +76,7 @@ export default function TraineeCard({ trainee, onClick, onEdit, onDelete }: Prop
       {/* Hours + Expected End Date — fixed */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem", fontSize: "0.84rem", color: "var(--text-muted)", flexShrink: 0 }}>
         <span>
-          <strong style={{ color: "var(--text)" }}>{trainee.totalHoursRendered.toFixed(1)}</strong> / {trainee.requiredHours} hrs
+          <strong style={{ color: "var(--text)" }}>{formatMinutes(trainee.totalHoursRendered)}</strong> / {formatMinutes(requiredMinutes)}
         </span>
         {formattedEndDate && (
           <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>

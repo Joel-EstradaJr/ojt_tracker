@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import CreateTraineeForm from "@/components/CreateTraineeForm";
 import { ThemeToggle } from "@/components/ThemeProvider";
+import { useActionGuard } from "@/lib/useActionGuard";
 import {
   getSession,
   isLoginError,
@@ -31,6 +32,7 @@ type PermanentLockState = {
 
 export default function LoginPage() {
   const router = useRouter();
+  const { runGuarded } = useActionGuard();
 
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
@@ -131,7 +133,7 @@ export default function LoginPage() {
         }
 
         if (session.role === "trainee" && session.traineeId) {
-          router.replace(`/trainee/${session.traineeId}`);
+          router.replace(`/trainee/${session.traineeId}/dashboard`);
         }
       } catch {
         // no active session
@@ -146,94 +148,96 @@ export default function LoginPage() {
   }, [router]);
 
   const handleLogin = async () => {
-    if (isLoginRestricted) {
-      return;
-    }
-
-    setError("");
-    setSignupSuccess("");
-    setForgotMessage("");
-
-    const normalizedFullName = fullName.trim().toUpperCase();
-
-    if (!normalizedFullName) {
-      setError("Full Name is required.");
-      return;
-    }
-
-    if (normalizedFullName.split(/\s+/).length < 2) {
-      setError("Full Name must include at least first name and last name.");
-      return;
-    }
-
-    if (!password.trim()) {
-      setError("Password is required.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await login(normalizedFullName, password);
-      setActiveLockout(null);
-      setPermanentLock(null);
-
-      // Check if the user must set a new password (admin-created account)
-      if (result.mustChangePassword && result.traineeId) {
-        setShowSetPassword(true);
-        setSetPasswordTraineeId(result.traineeId);
-        setSetPasswordTempPwd(password);
-        setShowSignUp(false);
-        setShowForgotPassword(false);
-        setError("");
+    await runGuarded("login", async () => {
+      if (isLoginRestricted) {
         return;
       }
 
-      if (result.role === "admin") {
-        router.replace("/admin/trainee-management");
-      } else if (result.traineeId) {
-        router.replace(`/trainee/${result.traineeId}`);
-      } else {
-        router.replace("/login");
-      }
-    } catch (err: unknown) {
-      if (isLoginError(err)) {
-        const failedAttempts = typeof err.details.failedAttempts === "number" ? err.details.failedAttempts : 0;
-        const attemptsRemaining = typeof err.details.attemptsRemainingBeforeLock === "number"
-          ? err.details.attemptsRemainingBeforeLock
-          : Math.max(0, 15 - failedAttempts);
-        const lockoutUserId = err.details.lockoutUserId;
+      setError("");
+      setSignupSuccess("");
+      setForgotMessage("");
 
-        if (err.details.accountLocked && lockoutUserId) {
-          setActiveLockout(null);
-          setPermanentLock({ lockoutUserId, failedAttempts, attemptsRemaining });
+      const normalizedFullName = fullName.trim().toUpperCase();
+
+      if (!normalizedFullName) {
+        setError("Full Name is required.");
+        return;
+      }
+
+      if (normalizedFullName.split(/\s+/).length < 2) {
+        setError("Full Name must include at least first name and last name.");
+        return;
+      }
+
+      if (!password.trim()) {
+        setError("Password is required.");
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const result = await login(normalizedFullName, password);
+        setActiveLockout(null);
+        setPermanentLock(null);
+
+        // Check if the user must set a new password (admin-created account)
+        if (result.mustChangePassword && result.traineeId) {
+          setShowSetPassword(true);
+          setSetPasswordTraineeId(result.traineeId);
+          setSetPasswordTempPwd(password);
+          setShowSignUp(false);
+          setShowForgotPassword(false);
           setError("");
-        } else if (err.details.cooldown && typeof err.details.retryAfterSeconds === "number" && lockoutUserId) {
-          setPermanentLock(null);
-          const fallbackLockoutEndsAt = Date.now() + Math.max(1, Math.ceil(err.details.retryAfterSeconds)) * 1000;
-          const parsedLockoutEndsAt = err.details.lockoutEndsAt ? Date.parse(err.details.lockoutEndsAt) : NaN;
-          setActiveLockout({
-            lockoutUserId,
-            lockoutEndsAtMs: Number.isFinite(parsedLockoutEndsAt) ? parsedLockoutEndsAt : fallbackLockoutEndsAt,
-            failedAttempts,
-            attemptsRemaining,
-          });
-          setNowMs(Date.now());
-          setError("");
-        } else {
-          setActiveLockout(null);
-          setPermanentLock(null);
-          setError(`Invalid credentials.`);
+          return;
         }
 
-        return;
-      }
+        if (result.role === "admin") {
+          router.replace("/admin/trainee-management");
+        } else if (result.traineeId) {
+          router.replace(`/trainee/${result.traineeId}/dashboard`);
+        } else {
+          router.replace("/login");
+        }
+      } catch (err: unknown) {
+        if (isLoginError(err)) {
+          const failedAttempts = typeof err.details.failedAttempts === "number" ? err.details.failedAttempts : 0;
+          const attemptsRemaining = typeof err.details.attemptsRemainingBeforeLock === "number"
+            ? err.details.attemptsRemainingBeforeLock
+            : Math.max(0, 15 - failedAttempts);
+          const lockoutUserId = err.details.lockoutUserId;
 
-      setActiveLockout(null);
-      setPermanentLock(null);
-      setError(GENERIC_LOGIN_ERROR);
-    } finally {
-      setLoading(false);
-    }
+          if (err.details.accountLocked && lockoutUserId) {
+            setActiveLockout(null);
+            setPermanentLock({ lockoutUserId, failedAttempts, attemptsRemaining });
+            setError("");
+          } else if (err.details.cooldown && typeof err.details.retryAfterSeconds === "number" && lockoutUserId) {
+            setPermanentLock(null);
+            const fallbackLockoutEndsAt = Date.now() + Math.max(1, Math.ceil(err.details.retryAfterSeconds)) * 1000;
+            const parsedLockoutEndsAt = err.details.lockoutEndsAt ? Date.parse(err.details.lockoutEndsAt) : NaN;
+            setActiveLockout({
+              lockoutUserId,
+              lockoutEndsAtMs: Number.isFinite(parsedLockoutEndsAt) ? parsedLockoutEndsAt : fallbackLockoutEndsAt,
+              failedAttempts,
+              attemptsRemaining,
+            });
+            setNowMs(Date.now());
+            setError("");
+          } else {
+            setActiveLockout(null);
+            setPermanentLock(null);
+            setError(`Invalid credentials.`);
+          }
+
+          return;
+        }
+
+        setActiveLockout(null);
+        setPermanentLock(null);
+        setError(GENERIC_LOGIN_ERROR);
+      } finally {
+        setLoading(false);
+      }
+    });
   };
 
   const openForgotPassword = () => {
@@ -268,160 +272,170 @@ export default function LoginPage() {
   };
 
   const handleRequestResetCode = async () => {
-    const normalizedName = forgotFullName.trim().toUpperCase();
-    setError("");
-    setForgotMessage("");
+    await runGuarded("forgot-request", async () => {
+      const normalizedName = forgotFullName.trim().toUpperCase();
+      setError("");
+      setForgotMessage("");
 
-    if (!normalizedName) {
-      setError("Full Name is required.");
-      return;
-    }
+      if (!normalizedName) {
+        setError("Full Name is required.");
+        return;
+      }
 
-    if (normalizedName.split(/\s+/).length < 2) {
-      setError("Full Name must include at least first name and last name.");
-      return;
-    }
+      if (normalizedName.split(/\s+/).length < 2) {
+        setError("Full Name must include at least first name and last name.");
+        return;
+      }
 
-    setForgotLoading(true);
-    try {
-      const result = await requestForgotPasswordCode(normalizedName);
-      setForgotMaskedEmail(result.maskedEmail ?? null);
-      setForgotMessage(result.message);
-      setForgotStep("verify");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to send verification code.");
-    } finally {
-      setForgotLoading(false);
-    }
+      setForgotLoading(true);
+      try {
+        const result = await requestForgotPasswordCode(normalizedName);
+        setForgotMaskedEmail(result.maskedEmail ?? null);
+        setForgotMessage(result.message);
+        setForgotStep("verify");
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to send verification code.");
+      } finally {
+        setForgotLoading(false);
+      }
+    });
   };
 
   const handleVerifyResetCode = async () => {
-    const normalizedName = forgotFullName.trim().toUpperCase();
-    setError("");
+    await runGuarded("forgot-verify", async () => {
+      const normalizedName = forgotFullName.trim().toUpperCase();
+      setError("");
 
-    if (forgotCode.length !== 6) {
-      setError("Please enter the 6-digit verification code.");
-      return;
-    }
+      if (forgotCode.length !== 6) {
+        setError("Please enter the 6-digit verification code.");
+        return;
+      }
 
-    setForgotLoading(true);
-    try {
-      const result = await verifyForgotPasswordCode(normalizedName, forgotCode);
-      setForgotResetToken(result.resetToken);
-      setForgotStep("reset");
-      setForgotMessage("");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Invalid or expired verification code. Please enter the latest code or resend a new one.");
-    } finally {
-      setForgotLoading(false);
-    }
+      setForgotLoading(true);
+      try {
+        const result = await verifyForgotPasswordCode(normalizedName, forgotCode);
+        setForgotResetToken(result.resetToken);
+        setForgotStep("reset");
+        setForgotMessage("");
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Invalid or expired verification code. Please enter the latest code or resend a new one.");
+      } finally {
+        setForgotLoading(false);
+      }
+    });
   };
 
   const handleResendResetCode = async () => {
-    const normalizedName = forgotFullName.trim().toUpperCase();
-    setError("");
-    setForgotMessage("");
+    await runGuarded("forgot-resend", async () => {
+      const normalizedName = forgotFullName.trim().toUpperCase();
+      setError("");
+      setForgotMessage("");
 
-    if (!normalizedName) {
-      setError("Full Name is required.");
-      return;
-    }
+      if (!normalizedName) {
+        setError("Full Name is required.");
+        return;
+      }
 
-    if (normalizedName.split(/\s+/).length < 2) {
-      setError("Full Name must include at least first name and last name.");
-      return;
-    }
+      if (normalizedName.split(/\s+/).length < 2) {
+        setError("Full Name must include at least first name and last name.");
+        return;
+      }
 
-    setForgotLoading(true);
-    try {
-      const result = await requestForgotPasswordCode(normalizedName);
-      setForgotCode("");
-      setForgotResetToken("");
-      setForgotMaskedEmail(result.maskedEmail ?? null);
-      setForgotMessage("A new verification code was sent. Previous codes are now invalid.");
-      setForgotStep("verify");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to resend verification code.");
-    } finally {
-      setForgotLoading(false);
-    }
+      setForgotLoading(true);
+      try {
+        const result = await requestForgotPasswordCode(normalizedName);
+        setForgotCode("");
+        setForgotResetToken("");
+        setForgotMaskedEmail(result.maskedEmail ?? null);
+        setForgotMessage("A new verification code was sent. Previous codes are now invalid.");
+        setForgotStep("verify");
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to resend verification code.");
+      } finally {
+        setForgotLoading(false);
+      }
+    });
   };
 
   const handleResetForgottenPassword = async () => {
-    const normalizedName = forgotFullName.trim().toUpperCase();
-    setError("");
-
-    if (newPassword.length < 4) {
-      setError("New password must be at least 4 characters.");
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-
-    if (!forgotResetToken) {
-      setError("Reset token is missing. Please verify your code again.");
-      setForgotStep("verify");
-      return;
-    }
-
-    setForgotLoading(true);
-    try {
-      const result = await resetForgottenPassword(normalizedName, newPassword, confirmPassword, forgotResetToken);
-      setForgotMessage(result.message);
-      setShowForgotPassword(false);
-      setForgotStep("request");
-      setForgotCode("");
-      setForgotResetToken("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setActiveLockout(null);
-      setPermanentLock(null);
+    await runGuarded("forgot-reset", async () => {
+      const normalizedName = forgotFullName.trim().toUpperCase();
       setError("");
-      setSignupSuccess("Password updated. You can now log in with your new password.");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to reset password.");
-    } finally {
-      setForgotLoading(false);
-    }
+
+      if (newPassword.length < 4) {
+        setError("New password must be at least 4 characters.");
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        setError("Passwords do not match.");
+        return;
+      }
+
+      if (!forgotResetToken) {
+        setError("Reset token is missing. Please verify your code again.");
+        setForgotStep("verify");
+        return;
+      }
+
+      setForgotLoading(true);
+      try {
+        const result = await resetForgottenPassword(normalizedName, newPassword, confirmPassword, forgotResetToken);
+        setForgotMessage(result.message);
+        setShowForgotPassword(false);
+        setForgotStep("request");
+        setForgotCode("");
+        setForgotResetToken("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setActiveLockout(null);
+        setPermanentLock(null);
+        setError("");
+        setSignupSuccess("Password updated. You can now log in with your new password.");
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to reset password.");
+      } finally {
+        setForgotLoading(false);
+      }
+    });
   };
 
   const handleSetInitialPassword = async () => {
-    setError("");
-
-    if (setNewPwd.length < 4) {
-      setError("New password must be at least 4 characters.");
-      return;
-    }
-
-    if (setNewPwd !== setConfirmPwd) {
-      setError("Passwords do not match.");
-      return;
-    }
-
-    setSetPasswordLoading(true);
-    try {
-      const result = await setInitialPassword(setPasswordTraineeId, setPasswordTempPwd, setNewPwd, setConfirmPwd);
-      setShowSetPassword(false);
-      setSetNewPwd("");
-      setSetConfirmPwd("");
-      setSetPasswordTempPwd("");
+    await runGuarded("set-initial-password", async () => {
       setError("");
 
-      if (result.role === "admin") {
-        router.replace("/admin/trainee-management");
-      } else if (result.traineeId) {
-        router.replace(`/trainee/${result.traineeId}`);
-      } else {
-        setSignupSuccess("Password set successfully. You can now log in.");
+      if (setNewPwd.length < 4) {
+        setError("New password must be at least 4 characters.");
+        return;
       }
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to set password.");
-    } finally {
-      setSetPasswordLoading(false);
-    }
+
+      if (setNewPwd !== setConfirmPwd) {
+        setError("Passwords do not match.");
+        return;
+      }
+
+      setSetPasswordLoading(true);
+      try {
+        const result = await setInitialPassword(setPasswordTraineeId, setPasswordTempPwd, setNewPwd, setConfirmPwd);
+        setShowSetPassword(false);
+        setSetNewPwd("");
+        setSetConfirmPwd("");
+        setSetPasswordTempPwd("");
+        setError("");
+
+        if (result.role === "admin") {
+          router.replace("/admin/trainee-management");
+        } else if (result.traineeId) {
+          router.replace(`/trainee/${result.traineeId}/dashboard`);
+        } else {
+          setSignupSuccess("Password set successfully. You can now log in.");
+        }
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to set password.");
+      } finally {
+        setSetPasswordLoading(false);
+      }
+    });
   };
 
   if (checkingSession) {

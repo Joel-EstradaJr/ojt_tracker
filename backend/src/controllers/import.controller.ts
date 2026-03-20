@@ -102,15 +102,15 @@ const DEFAULT_SCHEDULE: WorkScheduleMap = {
   "5": { start: "08:00", end: "17:00" },
 };
 
-function getStandardHoursForDay(schedule: WorkScheduleMap | null | undefined, dayOfWeek: number): number {
+function getStandardMinutesForDay(schedule: WorkScheduleMap | null | undefined, dayOfWeek: number): number {
   const sched = schedule || DEFAULT_SCHEDULE;
   const dayEntry = sched[String(dayOfWeek)];
-  if (!dayEntry) return 8;
+  if (!dayEntry) return 8 * 60;
   const [sh, sm] = dayEntry.start.split(":").map(Number);
   const [eh, em] = dayEntry.end.split(":").map(Number);
   const totalMinutes = (eh * 60 + em) - (sh * 60 + sm);
   const workedMinutes = totalMinutes - 60;
-  return workedMinutes > 0 ? parseFloat((workedMinutes / 60).toFixed(2)) : 8;
+  return workedMinutes > 0 ? workedMinutes : 8 * 60;
 }
 
 export const importCSV = async (req: Request, res: Response) => {
@@ -180,7 +180,7 @@ export const importCSV = async (req: Request, res: Response) => {
 
       const totalMinutes = differenceInMinutes(outDate, inDate);
       const lunchMinutes = hasLunch ? differenceInMinutes(lEnd, lStart) : 0;
-      const hoursWorked = parseFloat(((totalMinutes - lunchMinutes) / 60).toFixed(2));
+      const hoursWorked = Math.max(0, totalMinutes - lunchMinutes);
 
       if (hoursWorked < 0) {
         skipped.push(`Negative hours for ${dateStr}`);
@@ -188,8 +188,8 @@ export const importCSV = async (req: Request, res: Response) => {
       }
 
       const logDate = new Date(dateStr);
-      const standardHours = getStandardHoursForDay(trainee.workSchedule as WorkScheduleMap, logDate.getDay());
-      const overtime = parseFloat(Math.max(0, hoursWorked - standardHours).toFixed(2));
+      const standardMinutes = getStandardMinutesForDay(trainee.workSchedule as WorkScheduleMap, logDate.getDay());
+      const overtime = Math.max(0, hoursWorked - standardMinutes);
 
       // Check for duplicate date
       const existing = await prisma.logEntry.findFirst({

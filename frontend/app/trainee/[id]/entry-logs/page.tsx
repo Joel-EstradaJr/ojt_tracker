@@ -1,0 +1,811 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import { deleteLog, downloadExport, patchLogAction } from "@/lib/api";
+import ImportCSV from "@/components/ImportCSV";
+import LogForm from "@/components/LogForm";
+import { LogEntry } from "@/types";
+import { ThemeToggle } from "@/components/ThemeProvider";
+import PageHeading from "@/components/PageHeading";
+import { useTraineePageData } from "../components/useTraineePageData";
+import { formatMinutes } from "@/lib/duration";
+import { useActionGuard } from "@/lib/useActionGuard";
+import { formatDisplayDate } from "@/lib/date";
+
+export default function TraineeEntryLogsPage() {
+  const { runGuarded } = useActionGuard();
+  const {
+    id,
+    trainee,
+    logs,
+    totalHours,
+    availableOffset,
+    loading,
+    authChecking,
+    viewerRole,
+    activeUserLabel,
+    loadData,
+  } = useTraineePageData();
+
+  const [editingLog, setEditingLog] = useState<LogEntry | null>(null);
+  const [deletingLog, setDeletingLog] = useState<LogEntry | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [offsetLog, setOffsetLog] = useState<LogEntry | null>(null);
+  const [offsetMinutes, setOffsetMinutes] = useState("");
+  const [offsetLoading, setOffsetLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState<"csv" | "excel" | null>(null);
+  const [showExportPicker, setShowExportPicker] = useState(false);
+  const [showFiltersModal, setShowFiltersModal] = useState(false);
+  const [filterError, setFilterError] = useState("");
+
+  const [query, setQuery] = useState("");
+  const [sortField, setSortField] = useState<"date" | "timeIn" | "timeOut" | "lunchStart" | "lunchEnd" | "hoursWorked" | "offsetUsed">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [timeInFrom, setTimeInFrom] = useState("");
+  const [timeInTo, setTimeInTo] = useState("");
+  const [timeOutFrom, setTimeOutFrom] = useState("");
+  const [timeOutTo, setTimeOutTo] = useState("");
+  const [lunchStartFrom, setLunchStartFrom] = useState("");
+  const [lunchStartTo, setLunchStartTo] = useState("");
+  const [lunchEndFrom, setLunchEndFrom] = useState("");
+  const [lunchEndTo, setLunchEndTo] = useState("");
+  const [hoursWorkedMin, setHoursWorkedMin] = useState("");
+  const [hoursWorkedMax, setHoursWorkedMax] = useState("");
+  const [offsetUsedMin, setOffsetUsedMin] = useState("");
+  const [offsetUsedMax, setOffsetUsedMax] = useState("");
+
+  const [draftDateFrom, setDraftDateFrom] = useState("");
+  const [draftDateTo, setDraftDateTo] = useState("");
+  const [draftTimeInFrom, setDraftTimeInFrom] = useState("");
+  const [draftTimeInTo, setDraftTimeInTo] = useState("");
+  const [draftTimeOutFrom, setDraftTimeOutFrom] = useState("");
+  const [draftTimeOutTo, setDraftTimeOutTo] = useState("");
+  const [draftLunchStartFrom, setDraftLunchStartFrom] = useState("");
+  const [draftLunchStartTo, setDraftLunchStartTo] = useState("");
+  const [draftLunchEndFrom, setDraftLunchEndFrom] = useState("");
+  const [draftLunchEndTo, setDraftLunchEndTo] = useState("");
+  const [draftHoursWorkedMin, setDraftHoursWorkedMin] = useState("");
+  const [draftHoursWorkedMax, setDraftHoursWorkedMax] = useState("");
+  const [draftOffsetUsedMin, setDraftOffsetUsedMin] = useState("");
+  const [draftOffsetUsedMax, setDraftOffsetUsedMax] = useState("");
+
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const handleSort = (field: typeof sortField) => {
+    if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortField(field);
+      setSortDir("desc");
+    }
+    setCurrentPage(1);
+  };
+
+  const toMinutes = (hhmm: string): number => {
+    const [h, m] = hhmm.split(":").map(Number);
+    return (h * 60) + m;
+  };
+
+  const toManilaClockMinutes = (iso: string): number => {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Manila",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(iso));
+    const hour = Number(parts.find((p) => p.type === "hour")?.value || "0");
+    const minute = Number(parts.find((p) => p.type === "minute")?.value || "0");
+    return (hour * 60) + minute;
+  };
+
+  const isPlaceholderLunch = (targetIso: string, timeInIso: string): boolean =>
+    new Date(targetIso).getTime() === new Date(timeInIso).getTime();
+
+  const openFiltersModal = () => {
+    setDraftDateFrom(dateFrom);
+    setDraftDateTo(dateTo);
+    setDraftTimeInFrom(timeInFrom);
+    setDraftTimeInTo(timeInTo);
+    setDraftTimeOutFrom(timeOutFrom);
+    setDraftTimeOutTo(timeOutTo);
+    setDraftLunchStartFrom(lunchStartFrom);
+    setDraftLunchStartTo(lunchStartTo);
+    setDraftLunchEndFrom(lunchEndFrom);
+    setDraftLunchEndTo(lunchEndTo);
+    setDraftHoursWorkedMin(hoursWorkedMin);
+    setDraftHoursWorkedMax(hoursWorkedMax);
+    setDraftOffsetUsedMin(offsetUsedMin);
+    setDraftOffsetUsedMax(offsetUsedMax);
+    setFilterError("");
+    setShowFiltersModal(true);
+  };
+
+  const validateNonNegative = (value: string): boolean => value === "" || Number(value) >= 0;
+
+  const applyFilters = () => {
+    const nonNegativeOk =
+      validateNonNegative(draftHoursWorkedMin) &&
+      validateNonNegative(draftHoursWorkedMax) &&
+      validateNonNegative(draftOffsetUsedMin) &&
+      validateNonNegative(draftOffsetUsedMax);
+
+    if (!nonNegativeOk) {
+      setFilterError("Hours Worked and Offset Used cannot be negative.");
+      return;
+    }
+
+    if (
+      draftHoursWorkedMin !== "" && draftHoursWorkedMax !== "" && Number(draftHoursWorkedMin) > Number(draftHoursWorkedMax)
+    ) {
+      setFilterError("Hours Worked minimum cannot be greater than maximum.");
+      return;
+    }
+
+    if (
+      draftOffsetUsedMin !== "" && draftOffsetUsedMax !== "" && Number(draftOffsetUsedMin) > Number(draftOffsetUsedMax)
+    ) {
+      setFilterError("Offset Used minimum cannot be greater than maximum.");
+      return;
+    }
+
+    setDateFrom(draftDateFrom);
+    setDateTo(draftDateTo);
+    setTimeInFrom(draftTimeInFrom);
+    setTimeInTo(draftTimeInTo);
+    setTimeOutFrom(draftTimeOutFrom);
+    setTimeOutTo(draftTimeOutTo);
+    setLunchStartFrom(draftLunchStartFrom);
+    setLunchStartTo(draftLunchStartTo);
+    setLunchEndFrom(draftLunchEndFrom);
+    setLunchEndTo(draftLunchEndTo);
+    setHoursWorkedMin(draftHoursWorkedMin);
+    setHoursWorkedMax(draftHoursWorkedMax);
+    setOffsetUsedMin(draftOffsetUsedMin);
+    setOffsetUsedMax(draftOffsetUsedMax);
+    setCurrentPage(1);
+    setFilterError("");
+    setShowFiltersModal(false);
+  };
+
+  const clearFilters = () => {
+    setDateFrom("");
+    setDateTo("");
+    setTimeInFrom("");
+    setTimeInTo("");
+    setTimeOutFrom("");
+    setTimeOutTo("");
+    setLunchStartFrom("");
+    setLunchStartTo("");
+    setLunchEndFrom("");
+    setLunchEndTo("");
+    setHoursWorkedMin("");
+    setHoursWorkedMax("");
+    setOffsetUsedMin("");
+    setOffsetUsedMax("");
+
+    setDraftDateFrom("");
+    setDraftDateTo("");
+    setDraftTimeInFrom("");
+    setDraftTimeInTo("");
+    setDraftTimeOutFrom("");
+    setDraftTimeOutTo("");
+    setDraftLunchStartFrom("");
+    setDraftLunchStartTo("");
+    setDraftLunchEndFrom("");
+    setDraftLunchEndTo("");
+    setDraftHoursWorkedMin("");
+    setDraftHoursWorkedMax("");
+    setDraftOffsetUsedMin("");
+    setDraftOffsetUsedMax("");
+
+    setFilterError("");
+    setCurrentPage(1);
+    setShowFiltersModal(false);
+  };
+
+  const nonNegativeInput = (
+    value: string,
+    setter: React.Dispatch<React.SetStateAction<string>>,
+  ) => {
+    if (value === "") {
+      setter("");
+      setFilterError("");
+      return;
+    }
+    if (Number(value) < 0) {
+      setFilterError("Hours Worked and Offset Used cannot be negative.");
+      return;
+    }
+    setFilterError("");
+    setter(value);
+  };
+
+  const activeFilterCount =
+    Number(Boolean(dateFrom)) +
+    Number(Boolean(dateTo)) +
+    Number(Boolean(timeInFrom)) +
+    Number(Boolean(timeInTo)) +
+    Number(Boolean(timeOutFrom)) +
+    Number(Boolean(timeOutTo)) +
+    Number(Boolean(lunchStartFrom)) +
+    Number(Boolean(lunchStartTo)) +
+    Number(Boolean(lunchEndFrom)) +
+    Number(Boolean(lunchEndTo)) +
+    Number(Boolean(hoursWorkedMin)) +
+    Number(Boolean(hoursWorkedMax)) +
+    Number(Boolean(offsetUsedMin)) +
+    Number(Boolean(offsetUsedMax));
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const base = q
+      ? logs.filter((log) => {
+          const dateStr = formatDisplayDate(log.date).toLowerCase();
+          const accomplishment = (log.accomplishment || "").toLowerCase();
+          return dateStr.includes(q) || accomplishment.includes(q);
+        })
+      : logs;
+
+    const withFilters = base.filter((log) => {
+      const entryDate = new Date(log.date);
+      if (dateFrom) {
+        const from = new Date(`${dateFrom}T00:00:00`);
+        if (entryDate < from) return false;
+      }
+      if (dateTo) {
+        const to = new Date(`${dateTo}T23:59:59.999`);
+        if (entryDate > to) return false;
+      }
+
+      const timeInMins = toManilaClockMinutes(log.timeIn);
+      if (timeInFrom && timeInMins < toMinutes(timeInFrom)) return false;
+      if (timeInTo && timeInMins > toMinutes(timeInTo)) return false;
+
+      const hasTimeOut = Boolean(log.timeOut);
+      if (timeOutFrom || timeOutTo) {
+        if (!hasTimeOut) return false;
+        const outMins = toManilaClockMinutes(log.timeOut as string);
+        if (timeOutFrom && outMins < toMinutes(timeOutFrom)) return false;
+        if (timeOutTo && outMins > toMinutes(timeOutTo)) return false;
+      }
+
+      const lunchStartPlaceholder = isPlaceholderLunch(log.lunchStart, log.timeIn);
+      if (lunchStartFrom || lunchStartTo) {
+        if (lunchStartPlaceholder) return false;
+        const lsMins = toManilaClockMinutes(log.lunchStart);
+        if (lunchStartFrom && lsMins < toMinutes(lunchStartFrom)) return false;
+        if (lunchStartTo && lsMins > toMinutes(lunchStartTo)) return false;
+      }
+
+      const lunchEndPlaceholder = isPlaceholderLunch(log.lunchEnd, log.timeIn);
+      if (lunchEndFrom || lunchEndTo) {
+        if (lunchEndPlaceholder) return false;
+        const leMins = toManilaClockMinutes(log.lunchEnd);
+        if (lunchEndFrom && leMins < toMinutes(lunchEndFrom)) return false;
+        if (lunchEndTo && leMins > toMinutes(lunchEndTo)) return false;
+      }
+
+      const workedHours = log.hoursWorked / 60;
+      if (hoursWorkedMin !== "" && workedHours < Number(hoursWorkedMin)) return false;
+      if (hoursWorkedMax !== "" && workedHours > Number(hoursWorkedMax)) return false;
+
+      const offsetHours = log.offsetUsed / 60;
+      if (offsetUsedMin !== "" && offsetHours < Number(offsetUsedMin)) return false;
+      if (offsetUsedMax !== "" && offsetHours > Number(offsetUsedMax)) return false;
+
+      return true;
+    });
+
+    return [...withFilters].sort((a, b) => {
+      let cmp = 0;
+      switch (sortField) {
+        case "date":
+          cmp = new Date(a.date).getTime() - new Date(b.date).getTime();
+          break;
+        case "timeIn":
+          cmp = new Date(a.timeIn).getTime() - new Date(b.timeIn).getTime();
+          break;
+        case "timeOut": {
+          const aOut = a.timeOut ? new Date(a.timeOut).getTime() : -1;
+          const bOut = b.timeOut ? new Date(b.timeOut).getTime() : -1;
+          cmp = aOut - bOut;
+          break;
+        }
+        case "lunchStart":
+          cmp = new Date(a.lunchStart).getTime() - new Date(b.lunchStart).getTime();
+          break;
+        case "lunchEnd":
+          cmp = new Date(a.lunchEnd).getTime() - new Date(b.lunchEnd).getTime();
+          break;
+        case "hoursWorked":
+          cmp = a.hoursWorked - b.hoursWorked;
+          break;
+        case "offsetUsed":
+          cmp = a.offsetUsed - b.offsetUsed;
+          break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [
+    logs,
+    query,
+    sortField,
+    sortDir,
+    dateFrom,
+    dateTo,
+    timeInFrom,
+    timeInTo,
+    timeOutFrom,
+    timeOutTo,
+    lunchStartFrom,
+    lunchStartTo,
+    lunchEndFrom,
+    lunchEndTo,
+    hoursWorkedMin,
+    hoursWorkedMax,
+    offsetUsedMin,
+    offsetUsedMax,
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIdx = (safePage - 1) * pageSize;
+  const paginatedLogs = filtered.slice(startIdx, startIdx + pageSize);
+
+  const doDelete = async () => {
+    await runGuarded("trainee-delete-log", async () => {
+      if (!deletingLog) return;
+      setDeleteLoading(true);
+      try {
+        await deleteLog(deletingLog.id);
+        setDeletingLog(null);
+        loadData();
+      } finally {
+        setDeleteLoading(false);
+      }
+    });
+  };
+
+  const getStandardMinutesForLog = (log: LogEntry): number => {
+    if (!trainee) return 8 * 60;
+    const ws = trainee.workSchedule as Record<string, { start: string; end: string }> | undefined;
+    const day = new Date(log.date).getDay();
+    const dayCfg = ws?.[String(day)];
+    if (!dayCfg) return 8 * 60;
+    const [sh, sm] = dayCfg.start.split(":").map(Number);
+    const [eh, em] = dayCfg.end.split(":").map(Number);
+    const span = (eh * 60 + em) - (sh * 60 + sm);
+    return Math.max(0, span - 60);
+  };
+
+  const actualWorkedIntervalMinutes = (log: LogEntry): number => {
+    if (!log.timeOut) return 0;
+    const inMs = new Date(log.timeIn).getTime();
+    const outMs = new Date(log.timeOut).getTime();
+    const lunchStartMs = new Date(log.lunchStart).getTime();
+    const lunchEndMs = new Date(log.lunchEnd).getTime();
+    const lunchDeduction = lunchEndMs > lunchStartMs ? Math.max(0, Math.round((lunchEndMs - lunchStartMs) / 60000)) : 0;
+    return Math.max(0, Math.round((outMs - inMs) / 60000) - lunchDeduction);
+  };
+
+  const canOffset = (log: LogEntry): boolean => {
+    if (!trainee) return false;
+    if (!log.timeOut) return false;
+    if (availableOffset <= 0) return false;
+    const requiredMinutes = trainee.requiredHours * 60;
+    if (totalHours < requiredMinutes) return false;
+    return actualWorkedIntervalMinutes(log) >= getStandardMinutesForLog(log);
+  };
+
+  const applyOffset = async () => {
+    await runGuarded("trainee-offset", async () => {
+      if (!offsetLog) return;
+      setOffsetLoading(true);
+      try {
+        await patchLogAction(offsetLog.id, {
+          action: "offset",
+          offsetMinutes: offsetMinutes ? Math.floor(Number(offsetMinutes)) : undefined,
+        });
+        setOffsetLog(null);
+        setOffsetMinutes("");
+        loadData();
+      } finally {
+        setOffsetLoading(false);
+      }
+    });
+  };
+
+  const handleExport = async (format: "csv" | "excel") => {
+    await runGuarded(`trainee-export-${format}`, async () => {
+      setExportLoading(format);
+      try {
+        await downloadExport(id, format);
+      } finally {
+        setExportLoading(null);
+      }
+    });
+  };
+
+  if (authChecking || loading) {
+    return (
+      <div className="container">
+        <div className="skeleton">
+          <div className="skeleton-card" style={{ height: "220px" }}>
+            <div className="skeleton-line medium" />
+            <div className="skeleton-line short" />
+            <div className="skeleton-line" />
+            <div className="skeleton-line thin" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!trainee) {
+    return (
+      <div className="container">
+        <div className="empty-state">
+          <h3>Trainee Not Found</h3>
+        </div>
+      </div>
+    );
+  }
+
+  const sortTh = (field: typeof sortField, label: string) => (
+    <th key={field} onClick={() => handleSort(field)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
+        {label}
+        {sortField === field ? (
+          <span style={{ fontSize: "0.7rem", lineHeight: 1 }}>{sortDir === "asc" ? "▲" : "▼"}</span>
+        ) : (
+          <span style={{ fontSize: "0.7rem", opacity: 0.3, lineHeight: 1 }}>⇅</span>
+        )}
+      </span>
+    </th>
+  );
+
+  return (
+    <div className="container">
+      <PageHeading
+        title="Entry Logs"
+        subtitle="Manage your daily logs and export your records."
+        actions={(
+          <>
+            <ThemeToggle />
+          </>
+        )}
+        toolbar={(
+          <>
+            <button className="btn btn-outline" onClick={() => setShowExportPicker(true)} disabled={exportLoading !== null} style={{ gap: "0.35rem" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+              <span>{exportLoading ? `Exporting ${exportLoading.toUpperCase()}...` : "Export"}</span>
+              <span style={{ fontSize: "0.7rem", opacity: 0.8 }}>▾</span>
+            </button>
+            <ImportCSV traineeId={id} onImported={loadData} />
+          </>
+        )}
+        meta={<>LOGGED IN AS: <strong style={{ color: "var(--text)" }}>{activeUserLabel || "Trainee"}</strong></>}
+      />
+
+      {showExportPicker && (
+        <div className="modal-overlay" onClick={() => exportLoading === null && setShowExportPicker(false)}>
+          <div className="modal-content" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Export Records</h2>
+            <p style={{ fontSize: "0.84rem", color: "var(--text-muted)", marginBottom: "0.9rem" }}>
+              Choose the export format for your own records.
+            </p>
+            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.9rem" }}>
+              <button
+                className="btn btn-outline"
+                style={{ flex: 1 }}
+                onClick={() => { handleExport("csv"); setShowExportPicker(false); }}
+                disabled={exportLoading !== null}
+              >
+                CSV
+              </button>
+              <button
+                className="btn btn-outline"
+                style={{ flex: 1 }}
+                onClick={() => { handleExport("excel"); setShowExportPicker(false); }}
+                disabled={exportLoading !== null}
+              >
+                EXCEL
+              </button>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn btn-outline" onClick={() => setShowExportPicker(false)} disabled={exportLoading !== null}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <LogForm
+        traineeId={id}
+        traineeDisplayName={trainee.displayName}
+        onCreated={loadData}
+        editingLog={editingLog}
+        onCancelEdit={() => setEditingLog(null)}
+        availableOffset={availableOffset}
+        viewerRole={viewerRole}
+        logs={logs}
+      />
+
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.05 }}>
+        <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+          <div className="form-group" style={{ marginBottom: 0, minWidth: 260, flex: "1 1 260px" }}>
+            <input
+              type="text"
+              placeholder="Search by date or accomplishment..."
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setCurrentPage(1); }}
+            />
+          </div>
+          <button className="btn btn-outline" onClick={openFiltersModal} style={{ whiteSpace: "nowrap", fontSize: "0.82rem", padding: "0.5rem 0.75rem" }}>
+            Filter {activeFilterCount > 0 ? `(${activeFilterCount})` : ""}
+          </button>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.35rem" }}>
+            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Rows per page:</span>
+            <select className="rows-per-page-select" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}>
+              {[5, 10, 20, 50].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ overflowX: "auto", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+          <table className="logs-table entry-logs-table">
+            <thead>
+              <tr>
+                {sortTh("date", "Date")}
+                {sortTh("timeIn", "Time In")}
+                {sortTh("lunchStart", "Lunch Start")}
+                {sortTh("lunchEnd", "Lunch End")}
+                {sortTh("timeOut", "Time Out")}
+                {sortTh("hoursWorked", "Hours Worked")}
+                <th>Overtime</th>
+                {sortTh("offsetUsed", "Offset Used")}
+                <th>Accomplishment</th>
+                <th style={{ textAlign: "center" }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginatedLogs.map((log) => {
+                const dateStr = formatDisplayDate(log.date);
+                const [weekday = "", monthDayYear = ""] = dateStr.split(" | ");
+                const timeFmt = (iso: string) =>
+                  new Date(iso).toLocaleTimeString("en-PH", { timeZone: "Asia/Manila", hour: "2-digit", minute: "2-digit" });
+                const lunchStartIsPlaceholder = new Date(log.lunchStart).getTime() === new Date(log.timeIn).getTime();
+                const lunchEndIsPlaceholder = new Date(log.lunchEnd).getTime() === new Date(log.timeIn).getTime();
+                return (
+                  <tr key={log.id}>
+                    <td>
+                      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2, gap: "0.1rem" }}>
+                        <span>{weekday} |</span>
+                        <span style={{ whiteSpace: "nowrap" }}>{monthDayYear}</span>
+                      </div>
+                    </td>
+                    <td>{timeFmt(log.timeIn)}</td>
+                    <td>{lunchStartIsPlaceholder ? <span style={{ color: "var(--text-faint)" }}>—</span> : timeFmt(log.lunchStart)}</td>
+                    <td>{lunchEndIsPlaceholder ? <span style={{ color: "var(--text-faint)" }}>—</span> : timeFmt(log.lunchEnd)}</td>
+                    <td>{log.timeOut ? timeFmt(log.timeOut) : <span style={{ color: "var(--text-faint)" }}>—</span>}</td>
+                    <td>{log.timeOut ? formatMinutes(log.hoursWorked) : <span style={{ color: "var(--text-faint)" }}>—</span>}</td>
+                    <td>{log.timeOut ? formatMinutes(log.overtime) : <span style={{ color: "var(--text-faint)" }}>—</span>}</td>
+                    <td>{log.offsetUsed > 0 ? formatMinutes(log.offsetUsed) : <span style={{ color: "var(--text-faint)" }}>-</span>}</td>
+                    <td className="accomplishment-cell"><div className="accomplishment-content">{log.accomplishment}</div></td>
+                    <td style={{ textAlign: "center" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", alignItems: "center" }}>
+                        <button className="btn btn-outline" style={{ padding: "0.25rem 0.5rem", fontSize: "0.75rem", width: "100%" }} onClick={() => setEditingLog(log)}>EDIT</button>
+                        <button
+                          className="btn btn-outline"
+                          style={{ padding: "0.25rem 0.5rem", fontSize: "0.75rem", width: "100%" }}
+                          disabled={!canOffset(log)}
+                          onClick={() => { setOffsetLog(log); setOffsetMinutes(String(Math.max(1, availableOffset))); }}
+                        >
+                          OFFSET
+                        </button>
+                        <button className="btn btn-danger" style={{ padding: "0.25rem 0.5rem", fontSize: "0.75rem", width: "100%" }} onClick={() => setDeletingLog(log)}>DELETE</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {paginatedLogs.length === 0 && (
+                <tr>
+                  <td colSpan={10} style={{ textAlign: "center", padding: "2rem 1rem", color: "var(--text-muted)", fontSize: "0.88rem" }}>
+                    No log entries found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {totalPages > 1 && (
+          <div className="pagination-controls">
+            <button className="btn btn-outline pagination-btn" disabled={safePage <= 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>‹</button>
+            <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>{safePage} / {totalPages}</span>
+            <button className="btn btn-outline pagination-btn" disabled={safePage >= totalPages} onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}>›</button>
+          </div>
+        )}
+      </motion.div>
+
+      {showFiltersModal && (
+        <div className="modal-overlay" onClick={() => setShowFiltersModal(false)}>
+          <div className="modal-content" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.9rem" }}>
+              <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Entry Log Filters</h2>
+            </div>
+
+            {filterError && (
+              <div style={{ background: "var(--danger-light)", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", padding: "0.5rem 0.75rem", marginBottom: "0.75rem" }}>
+                <p style={{ color: "var(--danger)", fontSize: "0.84rem", margin: 0 }}>{filterError}</p>
+              </div>
+            )}
+
+            <div style={{ display: "grid", gap: "0.8rem", marginBottom: "1rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-date-from">Date From</label>
+                  <input id="log-date-from" type="date" value={draftDateFrom} onChange={(e) => setDraftDateFrom(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-date-to">Date To</label>
+                  <input id="log-date-to" type="date" value={draftDateTo} onChange={(e) => setDraftDateTo(e.target.value)} />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-time-in-from">Time In From</label>
+                  <input id="log-time-in-from" type="time" value={draftTimeInFrom} onChange={(e) => setDraftTimeInFrom(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-time-in-to">Time In To</label>
+                  <input id="log-time-in-to" type="time" value={draftTimeInTo} onChange={(e) => setDraftTimeInTo(e.target.value)} />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-time-out-from">Time Out From</label>
+                  <input id="log-time-out-from" type="time" value={draftTimeOutFrom} onChange={(e) => setDraftTimeOutFrom(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-time-out-to">Time Out To</label>
+                  <input id="log-time-out-to" type="time" value={draftTimeOutTo} onChange={(e) => setDraftTimeOutTo(e.target.value)} />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-lunch-start-from">Lunch Start From</label>
+                  <input id="log-lunch-start-from" type="time" value={draftLunchStartFrom} onChange={(e) => setDraftLunchStartFrom(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-lunch-start-to">Lunch Start To</label>
+                  <input id="log-lunch-start-to" type="time" value={draftLunchStartTo} onChange={(e) => setDraftLunchStartTo(e.target.value)} />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-lunch-end-from">Lunch End From</label>
+                  <input id="log-lunch-end-from" type="time" value={draftLunchEndFrom} onChange={(e) => setDraftLunchEndFrom(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-lunch-end-to">Lunch End To</label>
+                  <input id="log-lunch-end-to" type="time" value={draftLunchEndTo} onChange={(e) => setDraftLunchEndTo(e.target.value)} />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-hours-worked-min">Hours Worked Min</label>
+                  <input
+                    id="log-hours-worked-min"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={draftHoursWorkedMin}
+                    onChange={(e) => nonNegativeInput(e.target.value, setDraftHoursWorkedMin)}
+                    placeholder="e.g., 4"
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-hours-worked-max">Hours Worked Max</label>
+                  <input
+                    id="log-hours-worked-max"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={draftHoursWorkedMax}
+                    onChange={(e) => nonNegativeInput(e.target.value, setDraftHoursWorkedMax)}
+                    placeholder="e.g., 9"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-offset-used-min">Offset Used Min</label>
+                  <input
+                    id="log-offset-used-min"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={draftOffsetUsedMin}
+                    onChange={(e) => nonNegativeInput(e.target.value, setDraftOffsetUsedMin)}
+                    placeholder="e.g., 0"
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="log-offset-used-max">Offset Used Max</label>
+                  <input
+                    id="log-offset-used-max"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={draftOffsetUsedMax}
+                    onChange={(e) => nonNegativeInput(e.target.value, setDraftOffsetUsedMax)}
+                    placeholder="e.g., 2"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem" }}>
+              <button className="btn btn-outline" onClick={clearFilters}>Clear</button>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button className="btn btn-outline" onClick={() => { setFilterError(""); setShowFiltersModal(false); }}>Cancel</button>
+                <button className="btn btn-primary" onClick={applyFilters}>Apply</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deletingLog && (
+        <div className="modal-overlay" onClick={() => !deleteLoading && setDeletingLog(null)}>
+          <div className="modal-content" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: "1.1rem", color: "var(--danger)", marginBottom: "0.5rem" }}>Delete Log Entry</h2>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem" }}>This action cannot be undone.</p>
+            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+              <button className="btn btn-outline" onClick={() => setDeletingLog(null)} disabled={deleteLoading}>Cancel</button>
+              <button className="btn btn-danger" onClick={doDelete} disabled={deleteLoading}>{deleteLoading ? "Deleting..." : "Delete"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {offsetLog && (
+        <div className="modal-overlay" onClick={() => !offsetLoading && setOffsetLog(null)}>
+          <div className="modal-content" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Apply Offset</h2>
+            <p style={{ fontSize: "0.84rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>
+              Available offset: <strong>{formatMinutes(availableOffset)}</strong>
+            </p>
+            <div className="form-group">
+              <label>Offset Minutes To Apply</label>
+              <input
+                type="number"
+                min="1"
+                max={Math.max(1, availableOffset)}
+                value={offsetMinutes}
+                onChange={(e) => setOffsetMinutes(e.target.value)}
+              />
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+              <button className="btn btn-outline" onClick={() => setOffsetLog(null)} disabled={offsetLoading}>Cancel</button>
+              <button className="btn btn-primary" onClick={applyOffset} disabled={offsetLoading || !offsetMinutes || Number(offsetMinutes) <= 0}>
+                {offsetLoading ? "Applying..." : "Apply Offset"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

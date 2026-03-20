@@ -222,9 +222,10 @@ export function createLog(data: {
 }
 
 export function patchLogAction(logId: string, data: {
-  action: "lunchStart" | "lunchEnd" | "timeOut" | "accomplishment";
+  action: "lunchStart" | "lunchEnd" | "timeOut" | "accomplishment" | "offset";
   timestamp?: string;
   accomplishment?: string;
+  offsetMinutes?: number;
 }) {
   return request<import("@/types").LogEntry>(`/api/logs/${logId}/action`, {
     method: "PATCH",
@@ -235,11 +236,11 @@ export function patchLogAction(logId: string, data: {
 export function updateLog(
   id: string,
   data: {
-    date: string;
-    timeIn: string;
-    lunchStart: string;
-    lunchEnd: string;
-    timeOut: string;
+    date?: string;
+    timeIn?: string;
+    lunchStart?: string;
+    lunchEnd?: string;
+    timeOut?: string;
     accomplishment?: string;
     applyOffset?: boolean;
     offsetAmount?: number;

@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import { createTrainee, sendEmailVerification, verifyEmailCode } from "@/lib/api";
+import { useActionGuard } from "@/lib/useActionGuard";
 import { SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
 import { DEFAULT_WORK_SCHEDULE, WorkSchedule } from "@/lib/ph-holidays";
@@ -45,6 +46,7 @@ export default function CreateTraineeForm({
   showSubmitActions = true,
   showFormHeader = true,
 }: Props) {
+  const { runGuarded } = useActionGuard();
   const isModal = mode === "modal";
   const isAdminCreating = showRoleField; // admin dashboard passes showRoleField=true
   const [role, setRole] = useState<"admin" | "trainee">(defaultRole);
@@ -108,78 +110,85 @@ export default function CreateTraineeForm({
   };
 
   const handleSendVerification = async () => {
-    setError(""); setEmailMsg("");
-    if (!email || !isValidEmail(email)) { setError("Please enter a valid email address first."); return; }
-    setEmailSending(true);
-    try { await sendEmailVerification(email); setEmailCodeSent(true); setEmailMsg("Verification code sent! Check your inbox."); }
-    catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to send verification code."); }
-    finally { setEmailSending(false); }
+    await runGuarded("create-email-send", async () => {
+      setError(""); setEmailMsg("");
+      if (!email || !isValidEmail(email)) { setError("Please enter a valid email address first."); return; }
+      setEmailSending(true);
+      try { await sendEmailVerification(email); setEmailCodeSent(true); setEmailMsg("Verification code sent! Check your inbox."); }
+      catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to send verification code."); }
+      finally { setEmailSending(false); }
+    });
   };
 
   const handleVerifyEmailCode = async () => {
-    setError(""); setEmailMsg("");
-    if (emailCode.length !== 6) { setError("Please enter the 6-digit verification code."); return; }
-    setEmailSending(true);
-    try { const res = await verifyEmailCode(email, emailCode); setVerificationToken(res.verificationToken); setEmailVerified(true); setEmailMsg("Email verified!"); }
-    catch (err: unknown) { setError(err instanceof Error ? err.message : "Invalid or expired code."); }
-    finally { setEmailSending(false); }
+    await runGuarded("create-email-verify", async () => {
+      setError(""); setEmailMsg("");
+      if (emailCode.length !== 6) { setError("Please enter the 6-digit verification code."); return; }
+      setEmailSending(true);
+      try { const res = await verifyEmailCode(email, emailCode); setVerificationToken(res.verificationToken); setEmailVerified(true); setEmailMsg("Email verified!"); }
+      catch (err: unknown) { setError(err instanceof Error ? err.message : "Invalid or expired code."); }
+      finally { setEmailSending(false); }
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); setError("");
-    if (!lastName || !firstName || !email || !contactNumber || !school || !companyName || !requiredHours) {
-      setError("All required fields must be filled."); return;
-    }
-    if (!isAdminCreating && (!password || !confirmPassword)) {
-      setError("Password fields are required."); return;
-    }
-    if (showRoleField && !role) { setError("Role is required."); return; }
-    if (!isAdminCreating && password !== confirmPassword) { setError("Passwords do not match."); return; }
-    const lnErr = validateName("Last name", lastName, true); if (lnErr) { setError(lnErr); return; }
-    const fnErr = validateName("First name", firstName, true); if (fnErr) { setError(fnErr); return; }
-    const mnErr = validateName("Middle name", middleName, false); if (mnErr) { setError(mnErr); return; }
-    if (!isValidEmail(email)) { setError("Please enter a valid email address (e.g. name@example.com)."); return; }
-    if (!isAdminCreating && !emailVerified) { setError("Please verify your email address before creating."); return; }
-    if (!phoneCharsOnly(contactNumber)) { setError("Contact number must contain only digits, +, -, (, ), and spaces."); return; }
-    if (!isValidPhone(contactNumber)) { setError("Contact number must have at least 7 digits."); return; }
-    const schErr = validateInstitution("School", school); if (schErr) { setError(schErr); return; }
-    const coErr = validateInstitution("Company name", companyName); if (coErr) { setError(coErr); return; }
-
-    for (let i = 0; i < supervisors.length; i++) {
-      const s = supervisors[i];
-      const sLn = validateName(`Supervisor #${i + 1} last name`, s.lastName, true); if (sLn) { setError(sLn); return; }
-      const sFn = validateName(`Supervisor #${i + 1} first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
-      const sMn = validateName(`Supervisor #${i + 1} middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
-      if (!s.contactNumber?.trim() && !s.email?.trim()) {
-        setError(`Supervisor #${i + 1}: At least one of Contact Number or Email is required.`); return;
+    e.preventDefault();
+    await runGuarded("create-submit", async () => {
+      setError("");
+      if (!lastName || !firstName || !email || !contactNumber || !school || !companyName || !requiredHours) {
+        setError("All required fields must be filled."); return;
       }
-    }
-
-    // Check for duplicate supervisors (same full name)
-    const supKeys = new Set<string>();
-    for (let i = 0; i < supervisors.length; i++) {
-      const s = supervisors[i];
-      const key = [s.firstName, s.middleName, s.lastName, s.suffix].map((v) => (v ?? "").trim().toLowerCase()).join("|");
-      if (supKeys.has(key)) {
-        const dupName = [s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ");
-        setError(`Duplicate supervisor: "${dupName}". Each supervisor must be unique per trainee.`);
-        return;
+      if (!isAdminCreating && (!password || !confirmPassword)) {
+        setError("Password fields are required."); return;
       }
-      supKeys.add(key);
-    }
-    setLoading(true);
-    try {
-      await createTrainee({
-        role: showRoleField ? role : defaultRole,
-        lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined,
-        email, contactNumber, school, companyName, requiredHours: Number(requiredHours),
-        workSchedule: Object.keys(workSchedule).length > 0 ? workSchedule : undefined,
-        ...(isAdminCreating ? {} : { password, verificationToken }),
-        supervisors: supervisors.length > 0 ? supervisors : undefined,
-      });
-      onCreated();
-    } catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to create trainee."); }
-    finally { setLoading(false); }
+      if (showRoleField && !role) { setError("Role is required."); return; }
+      if (!isAdminCreating && password !== confirmPassword) { setError("Passwords do not match."); return; }
+      const lnErr = validateName("Last name", lastName, true); if (lnErr) { setError(lnErr); return; }
+      const fnErr = validateName("First name", firstName, true); if (fnErr) { setError(fnErr); return; }
+      const mnErr = validateName("Middle name", middleName, false); if (mnErr) { setError(mnErr); return; }
+      if (!isValidEmail(email)) { setError("Please enter a valid email address (e.g. name@example.com)."); return; }
+      if (!isAdminCreating && !emailVerified) { setError("Please verify your email address before creating."); return; }
+      if (!phoneCharsOnly(contactNumber)) { setError("Contact number must contain only digits, +, -, (, ), and spaces."); return; }
+      if (!isValidPhone(contactNumber)) { setError("Contact number must have at least 7 digits."); return; }
+      const schErr = validateInstitution("School", school); if (schErr) { setError(schErr); return; }
+      const coErr = validateInstitution("Company name", companyName); if (coErr) { setError(coErr); return; }
+
+      for (let i = 0; i < supervisors.length; i++) {
+        const s = supervisors[i];
+        const sLn = validateName(`Supervisor #${i + 1} last name`, s.lastName, true); if (sLn) { setError(sLn); return; }
+        const sFn = validateName(`Supervisor #${i + 1} first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
+        const sMn = validateName(`Supervisor #${i + 1} middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
+        if (!s.contactNumber?.trim() && !s.email?.trim()) {
+          setError(`Supervisor #${i + 1}: At least one of Contact Number or Email is required.`); return;
+        }
+      }
+
+      // Check for duplicate supervisors (same full name)
+      const supKeys = new Set<string>();
+      for (let i = 0; i < supervisors.length; i++) {
+        const s = supervisors[i];
+        const key = [s.firstName, s.middleName, s.lastName, s.suffix].map((v) => (v ?? "").trim().toLowerCase()).join("|");
+        if (supKeys.has(key)) {
+          const dupName = [s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ");
+          setError(`Duplicate supervisor: "${dupName}". Each supervisor must be unique per trainee.`);
+          return;
+        }
+        supKeys.add(key);
+      }
+      setLoading(true);
+      try {
+        await createTrainee({
+          role: showRoleField ? role : defaultRole,
+          lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined,
+          email, contactNumber, school, companyName, requiredHours: Number(requiredHours),
+          workSchedule: Object.keys(workSchedule).length > 0 ? workSchedule : undefined,
+          ...(isAdminCreating ? {} : { password, verificationToken }),
+          supervisors: supervisors.length > 0 ? supervisors : undefined,
+        });
+        onCreated();
+      } catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to create trainee."); }
+      finally { setLoading(false); }
+    });
   };
 
   const formContent = (

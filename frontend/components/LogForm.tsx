@@ -11,6 +11,9 @@ import { createLog, updateLog, fetchOffset, patchLogAction } from "@/lib/api";
 import { LogEntry } from "@/types";
 import DatePicker from "@/components/DatePicker";
 import { sanitizeInput } from "@/lib/sanitize";
+import { formatMinutes } from "@/lib/duration";
+import { useActionGuard } from "@/lib/useActionGuard";
+import { formatDisplayDate, formatDisplayDateFromDateOnly, toDateInputValue } from "@/lib/date";
 
 interface Props {
   traineeId: string;
@@ -36,7 +39,7 @@ function isoToTime(iso: string): string {
 
 /** Extract yyyy-MM-dd from an ISO date string */
 function isoToDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-CA");
+  return toDateInputValue(iso);
 }
 
 /** Detect if a log had "no lunch" (lunchStart === lunchEnd) */
@@ -80,12 +83,13 @@ const ACTION_ICONS: Record<ActionStep, string> = {
   done: "✅",
 };
 
-const STANDARD_HOURS = 8;
+const STANDARD_MINUTES = 8 * 60;
 
 export default function LogForm({
   traineeId, traineeDisplayName, onCreated, editingLog, onCancelEdit,
   availableOffset: parentOffset, viewerRole, logs,
 }: Props) {
+  const { runGuarded } = useActionGuard();
   const today = new Date().toISOString().slice(0, 10);
   const isAdmin = viewerRole === "admin";
 
@@ -108,7 +112,8 @@ export default function LogForm({
   const [pendingAction, setPendingAction] = useState<ActionStep | null>(null);
   const [capturedTime, setCapturedTime] = useState<Date | null>(null);
   const [todayLog, setTodayLog] = useState<LogEntry | null>(null);
-  const [showAccomplishmentInput, setShowAccomplishmentInput] = useState(false);
+  const [showAccomplishmentModal, setShowAccomplishmentModal] = useState(false);
+  const [accomplishmentTargetLogId, setAccomplishmentTargetLogId] = useState<string | null>(null);
   const [accomplishmentText, setAccomplishmentText] = useState("");
 
   // Find today's log from passed logs
@@ -145,8 +150,8 @@ export default function LogForm({
       const lE = noLunch ? tIn : new Date(`${date}T${lunchEnd}:00`).getTime();
       const mins = (tOut - tIn) / 60000 - (lE - lS) / 60000;
       if (mins < 0) return null;
-      const hw = parseFloat((mins / 60).toFixed(2));
-      const ot = parseFloat(Math.max(0, hw - STANDARD_HOURS).toFixed(2));
+      const hw = Math.floor(mins);
+      const ot = Math.max(0, hw - STANDARD_MINUTES);
       return { hoursWorked: hw, overtime: ot };
     } catch { return null; }
   })();
@@ -175,56 +180,53 @@ export default function LogForm({
   // ── Admin form submit ──────────────────────────────────────
   const handleAdminSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
+    await runGuarded("log-admin-submit", async () => {
+      setError("");
 
-    if (!date || !timeIn) { setError("Date and Time In are required."); return; }
-    if (date > today) { setError("Date cannot be in the future."); return; }
+      if (!date || !timeIn) { setError("Date and Time In are required."); return; }
+      if (date > today) { setError("Date cannot be in the future."); return; }
 
-    const timeInISO = new Date(`${date}T${timeIn}:00`).toISOString();
-    const timeOutISO = timeOut ? new Date(`${date}T${timeOut}:00`).toISOString() : undefined;
-    const lunchStartISO = noLunch || !lunchStart ? undefined : new Date(`${date}T${lunchStart}:00`).toISOString();
-    const lunchEndISO = noLunch || !lunchEnd ? undefined : new Date(`${date}T${lunchEnd}:00`).toISOString();
+      const timeInISO = new Date(`${date}T${timeIn}:00`).toISOString();
+      const timeOutISO = timeOut ? new Date(`${date}T${timeOut}:00`).toISOString() : undefined;
+      const lunchStartISO = noLunch || !lunchStart ? undefined : new Date(`${date}T${lunchStart}:00`).toISOString();
+      const lunchEndISO = noLunch || !lunchEnd ? undefined : new Date(`${date}T${lunchEnd}:00`).toISOString();
 
-    if (timeOut) {
-      if (!noLunch && (!lunchStart || !lunchEnd)) { setError("Lunch Start and Lunch End are required (or toggle No Lunch)."); return; }
-    }
-
-    const offsetPayload = applyOffset
-      ? { applyOffset: true, offsetAmount: offsetAmount ? parseFloat(offsetAmount) : undefined }
-      : {};
-
-    setLoading(true);
-    try {
-      if (editingLog) {
-        await updateLog(editingLog.id, {
-          date: new Date(date).toISOString(),
-          timeIn: timeInISO,
-          lunchStart: lunchStartISO || (noLunch ? timeInISO : new Date(`${date}T12:00:00`).toISOString()),
-          lunchEnd: lunchEndISO || (noLunch ? timeInISO : new Date(`${date}T13:00:00`).toISOString()),
-          timeOut: timeOutISO || new Date(`${date}T17:00:00`).toISOString(),
-          accomplishment: accomplishment || undefined,
-          ...offsetPayload,
-        });
-      } else {
-        await createLog({
-          traineeId,
-          date: new Date(date).toISOString(),
-          timeIn: timeInISO,
-          lunchStart: noLunch ? timeInISO : lunchStartISO,
-          lunchEnd: noLunch ? timeInISO : lunchEndISO,
-          timeOut: timeOutISO,
-          accomplishment: accomplishment || undefined,
-          ...offsetPayload,
-        });
+      if (timeOut) {
+        if (!noLunch && (!lunchStart || !lunchEnd)) { setError("Lunch Start and Lunch End are required (or toggle No Lunch)."); return; }
       }
-      setDate(today); setTimeIn(""); setLunchStart(""); setLunchEnd("");
-      setNoLunch(false); setTimeOut(""); setAccomplishment("");
-      setApplyOffset(false); setOffsetAmount(""); setError("");
-      onCreated();
-      if (editingLog && onCancelEdit) onCancelEdit();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : `Failed to ${editingLog ? "update" : "create"} log.`);
-    } finally { setLoading(false); }
+
+      const offsetPayload = applyOffset
+        ? { applyOffset: true, offsetAmount: offsetAmount ? Math.floor(Number(offsetAmount)) : undefined }
+        : {};
+
+      setLoading(true);
+      try {
+        if (editingLog) {
+          await updateLog(editingLog.id, {
+            accomplishment: accomplishment || undefined,
+            ...offsetPayload,
+          });
+        } else {
+          await createLog({
+            traineeId,
+            date: new Date(date).toISOString(),
+            timeIn: timeInISO,
+            lunchStart: noLunch ? timeInISO : lunchStartISO,
+            lunchEnd: noLunch ? timeInISO : lunchEndISO,
+            timeOut: timeOutISO,
+            accomplishment: accomplishment || undefined,
+            ...offsetPayload,
+          });
+        }
+        setDate(today); setTimeIn(""); setLunchStart(""); setLunchEnd("");
+        setNoLunch(false); setTimeOut(""); setAccomplishment("");
+        setApplyOffset(false); setOffsetAmount(""); setError("");
+        onCreated();
+        if (editingLog && onCancelEdit) onCancelEdit();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : `Failed to ${editingLog ? "update" : "create"} log.`);
+      } finally { setLoading(false); }
+    });
   };
 
   // ── Trainee button handlers ────────────────────────────────
@@ -235,51 +237,62 @@ export default function LogForm({
   };
 
   const confirmTraineeAction = async () => {
-    if (!pendingAction || !capturedTime) return;
-    setShowConfirm(false);
-    setLoading(true);
-    setError("");
+    await runGuarded("log-trainee-action", async () => {
+      if (!pendingAction || !capturedTime) return;
+      setShowConfirm(false);
+      setLoading(true);
+      setError("");
 
-    try {
-      if (pendingAction === "timeIn") {
-        await createLog({
-          traineeId,
-          date: new Date().toISOString(),
-          timeIn: capturedTime.toISOString(),
-        });
-      } else if (todayLog) {
-        await patchLogAction(todayLog.id, {
-          action: pendingAction as "lunchStart" | "lunchEnd" | "timeOut",
-          timestamp: capturedTime.toISOString(),
-        });
+      try {
+        if (pendingAction === "timeIn") {
+          await createLog({
+            traineeId,
+            date: new Date().toISOString(),
+            timeIn: capturedTime.toISOString(),
+          });
+        } else if (todayLog) {
+          const updated = await patchLogAction(todayLog.id, {
+            action: pendingAction as "lunchStart" | "lunchEnd" | "timeOut",
+            timestamp: capturedTime.toISOString(),
+          });
+          if (pendingAction === "timeOut") {
+            setAccomplishmentTargetLogId(updated.id);
+            setAccomplishmentText(updated.accomplishment ?? "");
+            setShowAccomplishmentModal(true);
+          }
+        }
+        onCreated();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to record action.");
+      } finally {
+        setLoading(false);
+        setPendingAction(null);
+        setCapturedTime(null);
       }
-      onCreated();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to record action.");
-    } finally {
-      setLoading(false);
-      setPendingAction(null);
-      setCapturedTime(null);
-    }
+    });
   };
 
   const handleSaveAccomplishment = async () => {
-    if (!todayLog || !accomplishmentText.trim()) return;
-    setLoading(true);
-    setError("");
-    try {
-      await patchLogAction(todayLog.id, { action: "accomplishment", accomplishment: accomplishmentText });
-      setShowAccomplishmentInput(false);
-      setAccomplishmentText("");
-      onCreated();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to save accomplishment.");
-    } finally { setLoading(false); }
+    await runGuarded("log-save-accomplishment", async () => {
+      if (!accomplishmentTargetLogId || !accomplishmentText.trim()) return;
+      setLoading(true);
+      setError("");
+      try {
+        await patchLogAction(accomplishmentTargetLogId, { action: "accomplishment", accomplishment: accomplishmentText });
+        setShowAccomplishmentModal(false);
+        setAccomplishmentTargetLogId(null);
+        setAccomplishmentText("");
+        onCreated();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to save accomplishment.");
+      } finally { setLoading(false); }
+    });
   };
 
   const isEditing = !!editingLog;
+  const lockCoreFields = isEditing;
   const effectiveAvailable = isEditing && editingLog
-    ? parseFloat((availableOffset + editingLog.offsetUsed).toFixed(2))
+    ? Math.max(0, Math.floor(availableOffset + editingLog.offsetUsed))
     : availableOffset;
 
   // ════════════════════════════════════════════════════════════
@@ -303,7 +316,7 @@ export default function LogForm({
             {allDone ? "Today\u2019s Log Complete" : "Time Logging"}
           </h3>
           <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", marginLeft: "auto" }}>
-            {new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+            {formatDisplayDate(new Date())}
           </span>
         </div>
 
@@ -341,8 +354,8 @@ export default function LogForm({
             borderRadius: "var(--radius-sm)",
             border: "1px solid var(--primary-light)",
           }}>
-            <span>Hours: <strong style={{ color: "var(--text)" }}>{todayLog.hoursWorked}</strong></span>
-            <span>Overtime: <strong style={{ color: todayLog.overtime > 0 ? "var(--primary)" : "var(--text)" }}>{todayLog.overtime}</strong></span>
+            <span>Hours: <strong style={{ color: "var(--text)" }}>{formatMinutes(todayLog.hoursWorked)}</strong></span>
+            <span>Overtime: <strong style={{ color: todayLog.overtime > 0 ? "var(--primary)" : "var(--text)" }}>{formatMinutes(todayLog.overtime)}</strong></span>
           </div>
         )}
 
@@ -360,7 +373,7 @@ export default function LogForm({
           </button>
         )}
 
-        {/* Accomplishment input (available after time out or any time after time in) */}
+        {/* Accomplishment display only; entry is handled in required modal after Time Out */}
         {todayLog && (
           <div style={{ marginTop: "0.65rem" }}>
             {todayLog.accomplishment ? (
@@ -368,29 +381,8 @@ export default function LogForm({
                 <span style={{ fontWeight: 600, fontSize: "0.78rem", color: "var(--text-muted)", display: "block", marginBottom: "0.25rem" }}>Accomplishment</span>
                 {todayLog.accomplishment}
               </div>
-            ) : showAccomplishmentInput ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                <textarea
-                  rows={3}
-                  value={accomplishmentText}
-                  onChange={(e) => setAccomplishmentText(sanitizeInput(e.target.value))}
-                  placeholder="What did you accomplish today?"
-                  style={{ fontSize: "0.9rem" }}
-                />
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <button type="button" className="btn btn-primary" disabled={loading || !accomplishmentText.trim()} onClick={handleSaveAccomplishment} style={{ fontSize: "0.85rem", padding: "0.4rem 0.8rem" }}>
-                    Save
-                  </button>
-                  <button type="button" className="btn btn-outline" onClick={() => { setShowAccomplishmentInput(false); setAccomplishmentText(""); }} style={{ fontSize: "0.85rem", padding: "0.4rem 0.8rem" }}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
             ) : (
-              <button type="button" className="btn btn-outline" onClick={() => setShowAccomplishmentInput(true)} style={{ fontSize: "0.82rem", padding: "0.35rem 0.7rem", gap: "0.3rem" }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                Add Accomplishment
-              </button>
+              <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>No accomplishment submitted yet.</span>
             )}
           </div>
         )}
@@ -419,7 +411,7 @@ export default function LogForm({
                 )}
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "var(--text-muted)" }}>Date:</span>
-                  <strong>{capturedTime.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</strong>
+                  <strong>{formatDisplayDate(capturedTime)}</strong>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "var(--text-muted)" }}>Action:</span>
@@ -436,6 +428,30 @@ export default function LogForm({
                 </button>
                 <button type="button" className="btn btn-primary" onClick={confirmTraineeAction} disabled={loading} style={{ padding: "0.5rem 1rem" }}>
                   {loading ? "Saving\u2026" : "Confirm"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Required accomplishment modal after Time Out */}
+        {showAccomplishmentModal && (
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1001 }}>
+            <div style={{ background: "var(--bg)", borderRadius: "var(--radius)", padding: "1.5rem", maxWidth: 460, width: "92%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              <h3 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.65rem" }}>Submit Accomplishment</h3>
+              <p style={{ fontSize: "0.84rem", color: "var(--text-muted)", marginBottom: "0.65rem" }}>
+                Time Out has been recorded. Please enter your accomplishment to complete today&apos;s log.
+              </p>
+              <textarea
+                rows={4}
+                value={accomplishmentText}
+                onChange={(e) => setAccomplishmentText(sanitizeInput(e.target.value))}
+                placeholder="What did you accomplish today?"
+                style={{ fontSize: "0.9rem", width: "100%", marginBottom: "0.75rem" }}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button type="button" className="btn btn-primary" disabled={loading || !accomplishmentText.trim()} onClick={handleSaveAccomplishment}>
+                  {loading ? "Saving..." : "Confirm Accomplishment"}
                 </button>
               </div>
             </div>
@@ -482,49 +498,65 @@ export default function LogForm({
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.75rem" }}>
           <div className="form-group">
             <label>Date</label>
-            <DatePicker value={date} onChange={setDate} max={today} />
+            {lockCoreFields ? (
+              <input type="text" value={formatDisplayDateFromDateOnly(date)} readOnly />
+            ) : (
+              <DatePicker value={date} onChange={setDate} max={today} />
+            )}
           </div>
 
           <div className="form-group">
             <label>Time In *</label>
             <div style={{ display: "flex", gap: "0.35rem" }}>
-              <input type="time" value={timeIn} onChange={(e) => setTimeIn(e.target.value)} style={{ flex: 1 }} />
-              <button type="button" className="btn btn-outline" style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", whiteSpace: "nowrap" }} onClick={() => { const n = new Date(); setTimeIn(`${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`); }}>
-                Now
-              </button>
+              <input type="time" value={timeIn} onChange={(e) => setTimeIn(e.target.value)} style={{ flex: 1 }} disabled={lockCoreFields} />
+              {!lockCoreFields && (
+                <button type="button" className="btn btn-outline" style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", whiteSpace: "nowrap" }} onClick={() => { const n = new Date(); setTimeIn(`${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`); }}>
+                  Now
+                </button>
+              )}
             </div>
           </div>
 
           <div className="form-group">
             <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
               Lunch Start
-              <button
-                type="button"
-                onClick={() => setNoLunch(!noLunch)}
-                className={noLunch ? "badge badge-warning" : "badge badge-info"}
-                style={{ cursor: "pointer", fontSize: "0.68rem", padding: "0.1rem 0.4rem", border: "none" }}
-              >
-                {noLunch ? "No Lunch" : "Has Lunch"}
-              </button>
+              {!lockCoreFields && (
+                <button
+                  type="button"
+                  onClick={() => setNoLunch(!noLunch)}
+                  className={noLunch ? "badge badge-warning" : "badge badge-info"}
+                  style={{ cursor: "pointer", fontSize: "0.68rem", padding: "0.1rem 0.4rem", border: "none" }}
+                >
+                  {noLunch ? "No Lunch" : "Has Lunch"}
+                </button>
+              )}
             </label>
-            <input type="time" value={lunchStart} onChange={(e) => setLunchStart(e.target.value)} disabled={noLunch} style={{ opacity: noLunch ? 0.4 : 1 }} />
+            <input type="time" value={lunchStart} onChange={(e) => setLunchStart(e.target.value)} disabled={noLunch || lockCoreFields} style={{ opacity: noLunch || lockCoreFields ? 0.4 : 1 }} />
           </div>
 
           <div className="form-group">
             <label>Lunch End</label>
-            <input type="time" value={lunchEnd} onChange={(e) => setLunchEnd(e.target.value)} disabled={noLunch} style={{ opacity: noLunch ? 0.4 : 1 }} />
+            <input type="time" value={lunchEnd} onChange={(e) => setLunchEnd(e.target.value)} disabled={noLunch || lockCoreFields} style={{ opacity: noLunch || lockCoreFields ? 0.4 : 1 }} />
           </div>
 
           <div className="form-group">
             <label>Time Out</label>
             <div style={{ display: "flex", gap: "0.35rem" }}>
-              <input type="time" value={timeOut} onChange={(e) => setTimeOut(e.target.value)} style={{ flex: 1 }} />
-              <button type="button" className="btn btn-outline" style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", whiteSpace: "nowrap" }} onClick={() => { const n = new Date(); setTimeOut(`${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`); }}>
-                Now
-              </button>
+              <input type="time" value={timeOut} onChange={(e) => setTimeOut(e.target.value)} style={{ flex: 1 }} disabled={lockCoreFields} />
+              {!lockCoreFields && (
+                <button type="button" className="btn btn-outline" style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", whiteSpace: "nowrap" }} onClick={() => { const n = new Date(); setTimeOut(`${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`); }}>
+                  Now
+                </button>
+              )}
             </div>
           </div>
         </div>
+
+        {lockCoreFields && (
+          <div style={{ margin: "0.65rem 0 0.25rem", fontSize: "0.82rem", color: "var(--text-muted)" }}>
+            Date and time fields are locked while editing. You can only update accomplishment and offset values.
+          </div>
+        )}
 
         {/* Preview: calculated hours & overtime */}
         {previewHours && (
@@ -538,11 +570,11 @@ export default function LogForm({
           }}>
             <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-              Hours: <strong style={{ color: "var(--text)" }}>{previewHours.hoursWorked}</strong>
+              Hours: <strong style={{ color: "var(--text)" }}>{formatMinutes(previewHours.hoursWorked)}</strong>
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={previewHours.overtime > 0 ? "var(--primary)" : "var(--text-faint)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg>
-              Overtime: <strong style={{ color: previewHours.overtime > 0 ? "var(--primary)" : "var(--text)" }}>{previewHours.overtime}</strong>
+              Overtime: <strong style={{ color: previewHours.overtime > 0 ? "var(--primary)" : "var(--text)" }}>{formatMinutes(previewHours.overtime)}</strong>
             </span>
           </div>
         )}
@@ -568,13 +600,13 @@ export default function LogForm({
               Apply Offset
             </label>
             <span className="badge badge-info" style={{ fontSize: "0.74rem" }}>
-              Available: {effectiveAvailable.toFixed(2)} hrs
+              Available: {formatMinutes(effectiveAvailable)}
             </span>
             {applyOffset && effectiveAvailable > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
-                <label style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Hours to apply:</label>
+                <label style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Minutes to apply:</label>
                 <input
-                  type="number" step="0.25" min="0" max={effectiveAvailable}
+                  type="number" step="1" min="0" max={effectiveAvailable}
                   value={offsetAmount} onChange={(e) => setOffsetAmount(e.target.value)}
                   placeholder={`max ${effectiveAvailable}`}
                   style={{ width: "6rem", padding: "0.3rem 0.45rem", fontSize: "0.85rem" }}

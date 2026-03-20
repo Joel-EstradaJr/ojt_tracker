@@ -12,6 +12,7 @@ import {
   forgotPassword,
   verifyResetCode,
 } from "@/lib/api";
+import { useActionGuard } from "@/lib/useActionGuard";
 
 interface Props {
   traineeId: string;
@@ -24,6 +25,7 @@ type Step = "login" | "codeSent" | "newPassword";
 
 export default function PasswordModal({ traineeId, onClose, onAuthenticated }: Props) {
   const router = useRouter();
+  const { runGuarded } = useActionGuard();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
@@ -41,43 +43,54 @@ export default function PasswordModal({ traineeId, onClose, onAuthenticated }: P
   };
 
   const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(""); setLoading(true);
-    try {
-      await verifyPassword(traineeId, password);
-      if (onAuthenticated) onAuthenticated();
-      else router.push(`/trainee/${traineeId}`);
-    }
-    catch (err: unknown) { setError(err instanceof Error ? err.message : "Incorrect password."); }
-    finally { setLoading(false); }
+    e.preventDefault();
+    await runGuarded("password-modal-login", async () => {
+      setError(""); setLoading(true);
+      try {
+        await verifyPassword(traineeId, password);
+        if (onAuthenticated) onAuthenticated();
+        else router.push(`/trainee/${traineeId}/dashboard`);
+      }
+      catch (err: unknown) { setError(err instanceof Error ? err.message : "Incorrect password."); }
+      finally { setLoading(false); }
+    });
   };
 
   const handleForgotClick = async () => {
-    setError(""); setLoading(true);
-    try { const res = await forgotPassword(traineeId); setMaskedEmail(res.maskedEmail); setStep("codeSent"); }
-    catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to send reset code."); }
-    finally { setLoading(false); }
+    await runGuarded("password-modal-forgot", async () => {
+      setError(""); setLoading(true);
+      try { const res = await forgotPassword(traineeId); setMaskedEmail(res.maskedEmail); setStep("codeSent"); }
+      catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to send reset code."); }
+      finally { setLoading(false); }
+    });
   };
 
   const handleVerifyCode = async (e: React.FormEvent) => {
-    e.preventDefault(); setError("");
-    if (resetCode.length !== 6) { setError("Please enter the 6-digit code."); return; }
-    setLoading(true);
-    try { const res = await verifyResetCode(traineeId, resetCode); setResetToken(res.resetToken); setStep("newPassword"); }
-    catch (err: unknown) { setError(err instanceof Error ? err.message : "Invalid or expired code."); }
-    finally { setLoading(false); }
+    e.preventDefault();
+    await runGuarded("password-modal-verify-code", async () => {
+      setError("");
+      if (resetCode.length !== 6) { setError("Please enter the 6-digit code."); return; }
+      setLoading(true);
+      try { const res = await verifyResetCode(traineeId, resetCode); setResetToken(res.resetToken); setStep("newPassword"); }
+      catch (err: unknown) { setError(err instanceof Error ? err.message : "Invalid or expired code."); }
+      finally { setLoading(false); }
+    });
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault(); setError("");
-    if (newPassword.length < 4) { setError("New password must be at least 4 characters."); return; }
-    if (newPassword !== confirmPassword) { setError("Passwords do not match."); return; }
-    setLoading(true);
-    try {
-      const res = await resetPassword(traineeId, newPassword, resetToken);
-      setSuccessMsg(res.message); setNewPassword(""); setConfirmPassword("");
-      setTimeout(() => resetAll(), 1500);
-    } catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to reset password."); }
-    finally { setLoading(false); }
+    e.preventDefault();
+    await runGuarded("password-modal-reset", async () => {
+      setError("");
+      if (newPassword.length < 4) { setError("New password must be at least 4 characters."); return; }
+      if (newPassword !== confirmPassword) { setError("Passwords do not match."); return; }
+      setLoading(true);
+      try {
+        const res = await resetPassword(traineeId, newPassword, resetToken);
+        setSuccessMsg(res.message); setNewPassword(""); setConfirmPassword("");
+        setTimeout(() => resetAll(), 1500);
+      } catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to reset password."); }
+      finally { setLoading(false); }
+    });
   };
 
   const ErrorBox = ({ msg }: { msg: string }) => (

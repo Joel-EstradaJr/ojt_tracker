@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { updateTrainee, fetchSupervisors, createSupervisor, updateSupervisor, deleteSupervisor, sendEmailVerification, verifyEmailCode, resendTempPassword } from "@/lib/api";
+import { useActionGuard } from "@/lib/useActionGuard";
 import { Trainee, Supervisor, SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
 import { DEFAULT_WORK_SCHEDULE, WorkSchedule } from "@/lib/ph-holidays";
@@ -24,7 +25,54 @@ const emptySupervisor = (): SupervisorInput => ({
   lastName: "", firstName: "", middleName: "", suffix: "", contactNumber: "", email: "",
 });
 
+const normalizeTime = (value?: string): string => {
+  if (!value) return "";
+  const [h = "", m = ""] = value.split(":");
+  if (!h || !m) return "";
+  return `${h.padStart(2, "0")}:${m.padStart(2, "0")}`;
+};
+
+const normalizeWorkSchedule = (schedule?: WorkSchedule): WorkSchedule => {
+  const source = schedule ?? DEFAULT_WORK_SCHEDULE;
+  const normalized: WorkSchedule = {};
+
+  for (let day = 0; day < 7; day++) {
+    const key = String(day);
+    const daySchedule = source[key];
+    if (!daySchedule) continue;
+
+    const start = normalizeTime(daySchedule.start);
+    const end = normalizeTime(daySchedule.end);
+    if (!start || !end) continue;
+
+    normalized[key] = { start, end };
+  }
+
+  return normalized;
+};
+
+const workSchedulesEqual = (a: WorkSchedule, b: WorkSchedule): boolean => {
+  const keysA = Object.keys(a).sort();
+  const keysB = Object.keys(b).sort();
+  if (keysA.length !== keysB.length) return false;
+
+  for (let i = 0; i < keysA.length; i++) {
+    if (keysA[i] !== keysB[i]) return false;
+    if (a[keysA[i]].start !== b[keysB[i]].start) return false;
+    if (a[keysA[i]].end !== b[keysB[i]].end) return false;
+  }
+
+  return true;
+};
+
+const formatWorkSchedule = (schedule: WorkSchedule): string => {
+  const keys = Object.keys(schedule).sort((a, b) => Number(a) - Number(b));
+  if (keys.length === 0) return "(none)";
+  return keys.map((k) => `${DAY_LABELS[Number(k)]} ${schedule[k].start}-${schedule[k].end}`).join(",\n");
+};
+
 export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) {
+  const { runGuarded } = useActionGuard();
   const [role, setRole] = useState<"admin" | "trainee">(trainee.role);
   const [lastName, setLastName] = useState(trainee.lastName.toUpperCase());
   const [firstName, setFirstName] = useState(trainee.firstName.toUpperCase());
@@ -107,20 +155,24 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
     if (emailVerified || emailCodeSent) { setEmailVerified(false); setVerificationToken(""); setEmailCode(""); setEmailCodeSent(false); setEmailMsg(""); }
   };
   const handleSendVerification = async () => {
-    setError(""); setEmailMsg("");
-    if (!email || !isValidEmail(email)) { setError("Please enter a valid email address first."); return; }
-    setEmailSending(true);
-    try { await sendEmailVerification(email); setEmailCodeSent(true); setEmailMsg("Verification code sent! Check your inbox."); }
-    catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to send verification code."); }
-    finally { setEmailSending(false); }
+    await runGuarded("edit-email-send", async () => {
+      setError(""); setEmailMsg("");
+      if (!email || !isValidEmail(email)) { setError("Please enter a valid email address first."); return; }
+      setEmailSending(true);
+      try { await sendEmailVerification(email); setEmailCodeSent(true); setEmailMsg("Verification code sent! Check your inbox."); }
+      catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to send verification code."); }
+      finally { setEmailSending(false); }
+    });
   };
   const handleVerifyEmailCode = async () => {
-    setError(""); setEmailMsg("");
-    if (emailCode.length !== 6) { setError("Please enter the 6-digit verification code."); return; }
-    setEmailSending(true);
-    try { const res = await verifyEmailCode(email, emailCode); setVerificationToken(res.verificationToken); setEmailVerified(true); setEmailMsg("Email verified!"); }
-    catch (err: unknown) { setError(err instanceof Error ? err.message : "Invalid or expired code."); }
-    finally { setEmailSending(false); }
+    await runGuarded("edit-email-verify", async () => {
+      setError(""); setEmailMsg("");
+      if (emailCode.length !== 6) { setError("Please enter the 6-digit verification code."); return; }
+      setEmailSending(true);
+      try { const res = await verifyEmailCode(email, emailCode); setVerificationToken(res.verificationToken); setEmailVerified(true); setEmailMsg("Email verified!"); }
+      catch (err: unknown) { setError(err instanceof Error ? err.message : "Invalid or expired code."); }
+      finally { setEmailSending(false); }
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -184,6 +236,15 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
     cmp("School", trainee.school, school); cmp("Company Name", trainee.companyName, companyName);
     cmp("Required Hours", String(trainee.requiredHours), requiredHours);
     cmp("Role", trainee.role, role);
+    const originalWorkSchedule = normalizeWorkSchedule(trainee.workSchedule as WorkSchedule | undefined);
+    const currentWorkSchedule = normalizeWorkSchedule(workSchedule);
+    if (!workSchedulesEqual(originalWorkSchedule, currentWorkSchedule)) {
+      changes.push({
+        label: "Work Schedule",
+        oldVal: formatWorkSchedule(originalWorkSchedule),
+        newVal: formatWorkSchedule(currentWorkSchedule),
+      });
+    }
 
     for (const sup of existingSupervisors) {
       if (deletedIds.has(sup.id)) { changes.push({ label: "Remove Supervisor", oldVal: sup.displayName, newVal: "(deleted)" }); continue; }
@@ -201,15 +262,32 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
   };
 
   const executeSave = async () => {
-    setShowConfirm(false); setLoading(true);
-    try {
-      await updateTrainee(trainee.id, { role, lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined, email, contactNumber, school, companyName, requiredHours: Number(requiredHours), workSchedule: Object.keys(workSchedule).length > 0 ? workSchedule : undefined, ...(emailChanged ? { verificationToken } : {}) });
-      for (const id of deletedIds) { await deleteSupervisor(id); }
-      for (const sup of existingSupervisors) { if (deletedIds.has(sup.id)) continue; await updateSupervisor(sup.id, editedSupervisors[sup.id]); }
-      for (const s of newSupervisors) { await createSupervisor(trainee.id, s); }
-      setSaveResult("success");
-    } catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to update trainee."); }
-    finally { setLoading(false); }
+    await runGuarded("edit-save", async () => {
+      setShowConfirm(false); setLoading(true);
+      try {
+        await updateTrainee(trainee.id, { role, lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined, email, contactNumber, school, companyName, requiredHours: Number(requiredHours), workSchedule: Object.keys(workSchedule).length > 0 ? workSchedule : undefined, ...(emailChanged ? { verificationToken } : {}) });
+        for (const id of deletedIds) { await deleteSupervisor(id); }
+        for (const sup of existingSupervisors) { if (deletedIds.has(sup.id)) continue; await updateSupervisor(sup.id, editedSupervisors[sup.id]); }
+        for (const s of newSupervisors) { await createSupervisor(trainee.id, s); }
+        setSaveResult("success");
+      } catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to update trainee."); }
+      finally { setLoading(false); }
+    });
+  };
+
+  const handleResendTempPassword = async () => {
+    await runGuarded("edit-resend-temp", async () => {
+      setResendLoading(true);
+      setResendMsg(null);
+      try {
+        const res = await resendTempPassword(trainee.id);
+        setResendMsg({ type: "success", text: res.message });
+      } catch (err: unknown) {
+        setResendMsg({ type: "error", text: err instanceof Error ? err.message : "Failed to resend." });
+      } finally {
+        setResendLoading(false);
+      }
+    });
   };
 
   const renderSupervisorFields = (
@@ -264,8 +342,8 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
                   {pendingChanges.map((c, i) => (
                     <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
                       <td style={{ padding: "0.35rem 0.5rem", fontWeight: 500 }}>{c.label}</td>
-                      <td style={{ padding: "0.35rem 0.5rem", color: "var(--danger)", wordBreak: "break-word" }}>{c.oldVal}</td>
-                      <td style={{ padding: "0.35rem 0.5rem", color: "var(--success-text)", wordBreak: "break-word" }}>{c.newVal}</td>
+                      <td style={{ padding: "0.35rem 0.5rem", color: "var(--danger)", wordBreak: "break-word", whiteSpace: "pre-line" }}>{c.oldVal}</td>
+                      <td style={{ padding: "0.35rem 0.5rem", color: "var(--success-text)", wordBreak: "break-word", whiteSpace: "pre-line" }}>{c.newVal}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -331,15 +409,7 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
                   className="btn btn-outline"
                   style={{ fontSize: "0.78rem", padding: "0.35rem 0.7rem", whiteSpace: "nowrap", flexShrink: 0 }}
                   disabled={resendLoading}
-                  onClick={async () => {
-                    setResendLoading(true); setResendMsg(null);
-                    try {
-                      const res = await resendTempPassword(trainee.id);
-                      setResendMsg({ type: "success", text: res.message });
-                    } catch (err: unknown) {
-                      setResendMsg({ type: "error", text: err instanceof Error ? err.message : "Failed to resend." });
-                    } finally { setResendLoading(false); }
-                  }}
+                  onClick={handleResendTempPassword}
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>
                   {resendLoading ? "Sending…" : "Resend Temp Password"}

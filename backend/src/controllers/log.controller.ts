@@ -22,7 +22,7 @@ import { Request, Response } from "express";
 import { differenceInMinutes } from "date-fns";
 import prisma from "../utils/prisma";
 
-const DEFAULT_STANDARD_HOURS = 8;
+const DEFAULT_STANDARD_MINUTES = 8 * 60;
 const STANDARD_LUNCH_MINUTES = 60;
 
 // Work schedule type: maps day number (0-6) to {start, end}
@@ -43,14 +43,14 @@ function getScheduleForDay(schedule: WorkScheduleMap | null | undefined, dayOfWe
 }
 
 // ── Helper: compute standard hours for a specific day ────────
-function getStandardHoursForDay(schedule: WorkScheduleMap | null | undefined, dayOfWeek: number): number {
+function getStandardMinutesForDay(schedule: WorkScheduleMap | null | undefined, dayOfWeek: number): number {
   const dayEntry = getScheduleForDay(schedule, dayOfWeek);
-  if (!dayEntry) return DEFAULT_STANDARD_HOURS;
+  if (!dayEntry) return DEFAULT_STANDARD_MINUTES;
   const [sh, sm] = dayEntry.start.split(":").map(Number);
   const [eh, em] = dayEntry.end.split(":").map(Number);
   const totalMinutes = (eh * 60 + em) - (sh * 60 + sm);
   const workedMinutes = totalMinutes - STANDARD_LUNCH_MINUTES;
-  return workedMinutes > 0 ? parseFloat((workedMinutes / 60).toFixed(2)) : DEFAULT_STANDARD_HOURS;
+  return workedMinutes > 0 ? workedMinutes : DEFAULT_STANDARD_MINUTES;
 }
 
 // ── Helper: parse "HH:mm" string to minutes since midnight ───
@@ -62,15 +62,12 @@ function timeToMinutes(t: string): number {
 // ── Helper: compute hoursWorked with lunch cap ───────────────
 // If lunch > 60 min, excess is NOT counted as work hours.
 // Effective lunch = max(actualLunch, 60min) for deduction.
-function calcHoursWorked(timeIn: Date, timeOut: Date, lunchStart: Date, lunchEnd: Date): number {
+function calcWorkedMinutes(timeIn: Date, timeOut: Date, lunchStart: Date, lunchEnd: Date): number {
   const totalMinutes = differenceInMinutes(timeOut, timeIn);
   const actualLunchMinutes = differenceInMinutes(lunchEnd, lunchStart);
-  // If no lunch (lunchStart === lunchEnd), don't deduct
   const hasLunch = actualLunchMinutes > 0;
-  // Cap: deduct at least 60 min if they took lunch, or the actual if longer
   const lunchDeduction = hasLunch ? Math.max(actualLunchMinutes, STANDARD_LUNCH_MINUTES) : 0;
-  const workedMinutes = totalMinutes - lunchDeduction;
-  return parseFloat((workedMinutes / 60).toFixed(2));
+  return Math.max(0, totalMinutes - lunchDeduction);
 }
 
 // ── Settings cache (avoid repeated DB calls within same request) ──
@@ -106,33 +103,33 @@ function calculateOvertime(
   const actualInMin = timeIn.getHours() * 60 + timeIn.getMinutes();
   const actualOutMin = timeOut.getHours() * 60 + timeOut.getMinutes();
 
-  let totalOT = 0;
+  let totalOTMinutes = 0;
 
   // Early Time In overtime
   if (settings.countEarlyInAsOT && actualInMin < scheduledStartMin) {
-    totalOT += (scheduledStartMin - actualInMin) / 60;
+    totalOTMinutes += scheduledStartMin - actualInMin;
   }
 
   // Late Time Out overtime
   if (settings.countLateOutAsOT && actualOutMin > scheduledEndMin) {
-    totalOT += (actualOutMin - scheduledEndMin) / 60;
+    totalOTMinutes += actualOutMin - scheduledEndMin;
   }
 
   // Early Lunch End overtime (lunch < 60 min)
   if (settings.countEarlyLunchEndAsOT) {
     const actualLunchMinutes = differenceInMinutes(lunchEnd, lunchStart);
     if (actualLunchMinutes > 0 && actualLunchMinutes < STANDARD_LUNCH_MINUTES) {
-      totalOT += (STANDARD_LUNCH_MINUTES - actualLunchMinutes) / 60;
+      totalOTMinutes += STANDARD_LUNCH_MINUTES - actualLunchMinutes;
     }
   }
 
-  return parseFloat(Math.max(0, totalOT).toFixed(2));
+  return Math.max(0, Math.floor(totalOTMinutes));
 }
 
 // ── Helper: calculate a trainee's available offset bank ──────
 // Available = sum(overtime) − sum(offsetUsed) across ALL logs,
 // optionally excluding a specific log id (for update scenarios).
-async function getAvailableOffset(traineeId: string, excludeLogId?: string): Promise<number> {
+async function getAvailableOffsetMinutes(traineeId: string, excludeLogId?: string): Promise<number> {
   const logs = await prisma.logEntry.findMany({
     where: {
       traineeId,
@@ -142,17 +139,22 @@ async function getAvailableOffset(traineeId: string, excludeLogId?: string): Pro
   });
   const totalOT = logs.reduce((s, l) => s + l.overtime, 0);
   const totalUsed = logs.reduce((s, l) => s + l.offsetUsed, 0);
-  return parseFloat(Math.max(0, totalOT - totalUsed).toFixed(2));
+  return Math.max(0, Math.floor(totalOT - totalUsed));
 }
 
 // ── Create a new log entry ───────────────────────────────────
 // Supports both full creation (admin) and partial (trainee: Time In only)
 export const createLog = async (req: Request, res: Response) => {
   try {
+    const auth = (req as Request & { auth?: { role: "admin" | "trainee"; traineeId?: string } }).auth;
     const {
       traineeId, date, timeIn, timeOut, lunchStart, lunchEnd,
       accomplishment, applyOffset, offsetAmount,
     } = req.body;
+
+    if (auth?.role === "trainee" && auth.traineeId !== traineeId) {
+      return res.status(403).json({ error: "Access denied." });
+    }
 
     const logDate = new Date(date);
     const inDate = new Date(timeIn);
@@ -193,19 +195,20 @@ export const createLog = async (req: Request, res: Response) => {
       where: { id: traineeId },
       select: { workSchedule: true },
     });
-    const standardHours = getStandardHoursForDay(
+    const standardMinutes = getStandardMinutesForDay(
       trainee?.workSchedule as WorkScheduleMap | null,
       logDate.getDay(),
     );
 
-    const hoursWorked = calcHoursWorked(inDate, outDate, lStart, lEnd);
-    const overtime = parseFloat(Math.max(0, hoursWorked - standardHours).toFixed(2));
+    let hoursWorked = calcWorkedMinutes(inDate, outDate, lStart, lEnd);
+    const overtime = Math.max(0, hoursWorked - standardMinutes);
 
     let offsetUsed = 0;
     if (applyOffset) {
-      const available = await getAvailableOffset(traineeId);
+      const available = await getAvailableOffsetMinutes(traineeId);
       const requested = typeof offsetAmount === "number" && offsetAmount > 0 ? offsetAmount : available;
-      offsetUsed = parseFloat(Math.min(requested, available).toFixed(2));
+      offsetUsed = Math.max(0, Math.min(Math.floor(requested), available));
+      hoursWorked += offsetUsed;
     }
 
     const log = await prisma.logEntry.create({
@@ -243,13 +246,13 @@ export const getLogsByTrainee = async (req: Request, res: Response) => {
     const totalHours = logs.reduce((sum, l) => sum + l.hoursWorked, 0);
     const totalOvertime = logs.reduce((sum, l) => sum + l.overtime, 0);
     const totalOffsetUsed = logs.reduce((sum, l) => sum + l.offsetUsed, 0);
-    const availableOffset = parseFloat(Math.max(0, totalOvertime - totalOffsetUsed).toFixed(2));
+    const availableOffset = Math.max(0, Math.floor(totalOvertime - totalOffsetUsed));
 
     return res.json({
       logs,
-      totalHours: parseFloat(totalHours.toFixed(2)),
-      totalOvertime: parseFloat(totalOvertime.toFixed(2)),
-      totalOffsetUsed: parseFloat(totalOffsetUsed.toFixed(2)),
+      totalHours,
+      totalOvertime,
+      totalOffsetUsed,
       availableOffset,
     });
   } catch (err) {
@@ -261,6 +264,7 @@ export const getLogsByTrainee = async (req: Request, res: Response) => {
 // ── Update a log entry ───────────────────────────────────────
 export const updateLog = async (req: Request, res: Response) => {
   try {
+    const auth = (req as Request & { auth?: { role: "admin" | "trainee"; traineeId?: string } }).auth;
     const { entryId: id } = req.params;
     const {
       date, timeIn, timeOut, lunchStart, lunchEnd,
@@ -270,6 +274,18 @@ export const updateLog = async (req: Request, res: Response) => {
     const existing = await prisma.logEntry.findUnique({ where: { id } });
     if (!existing) {
       return res.status(404).json({ error: "Log entry not found." });
+    }
+    if (auth?.role === "trainee" && auth.traineeId !== existing.traineeId) {
+      return res.status(403).json({ error: "Access denied." });
+    }
+
+    if (auth?.role === "trainee") {
+      const hasLockedFieldUpdate = [date, timeIn, timeOut, lunchStart, lunchEnd].some((v) => v !== undefined);
+      if (hasLockedFieldUpdate) {
+        return res.status(400).json({
+          error: "Only accomplishment and offset fields can be edited from trainee entry logs.",
+        });
+      }
     }
 
     const newDate = date ? new Date(date) : existing.date;
@@ -299,7 +315,7 @@ export const updateLog = async (req: Request, res: Response) => {
         if (lEnd <= lStart) return res.status(400).json({ error: "lunchEnd must be after lunchStart." });
       }
 
-      hoursWorked = calcHoursWorked(inDate, outDate, lStart, lEnd);
+      hoursWorked = calcWorkedMinutes(inDate, outDate, lStart, lEnd);
       if (hoursWorked < 0) return res.status(400).json({ error: "hoursWorked cannot be negative." });
 
       // Fetch trainee's work schedule for overtime calculation
@@ -307,19 +323,20 @@ export const updateLog = async (req: Request, res: Response) => {
         where: { id: existing.traineeId },
         select: { workSchedule: true },
       });
-      const standardHours = getStandardHoursForDay(
+      const standardMinutes = getStandardMinutesForDay(
         trainee?.workSchedule as WorkScheduleMap | null,
         newDate.getDay(),
       );
-      overtime = parseFloat(Math.max(0, hoursWorked - standardHours).toFixed(2));
+      overtime = Math.max(0, hoursWorked - standardMinutes);
     }
 
     // Offset: recalculate available bank excluding this log, then apply if requested
     let offsetUsed = 0;
     if (applyOffset) {
-      const available = await getAvailableOffset(existing.traineeId, id);
+      const available = await getAvailableOffsetMinutes(existing.traineeId, id);
       const requested = typeof offsetAmount === "number" && offsetAmount > 0 ? offsetAmount : available;
-      offsetUsed = parseFloat(Math.min(requested, available).toFixed(2));
+      offsetUsed = Math.max(0, Math.min(Math.floor(requested), available));
+      hoursWorked += offsetUsed;
     }
 
     const log = await prisma.logEntry.update({
@@ -347,7 +364,15 @@ export const updateLog = async (req: Request, res: Response) => {
 // ── Delete a log entry ────────────────────────────────────────
 export const deleteLog = async (req: Request, res: Response) => {
   try {
+    const auth = (req as Request & { auth?: { role: "admin" | "trainee"; traineeId?: string } }).auth;
     const { entryId: id } = req.params;
+    if (auth?.role === "trainee") {
+      const existing = await prisma.logEntry.findUnique({ where: { id }, select: { traineeId: true } });
+      if (!existing) return res.status(404).json({ error: "Log entry not found." });
+      if (auth.traineeId !== existing.traineeId) {
+        return res.status(403).json({ error: "Access denied." });
+      }
+    }
     await prisma.logEntry.delete({ where: { id } });
     // No extra recalculation needed — the deleted row's overtime
     // and offsetUsed are simply removed from the running totals.
@@ -362,7 +387,7 @@ export const deleteLog = async (req: Request, res: Response) => {
 export const getOffset = async (req: Request, res: Response) => {
   try {
     const { traineeId } = req.params;
-    const available = await getAvailableOffset(traineeId);
+    const available = await getAvailableOffsetMinutes(traineeId);
     return res.json({ availableOffset: available });
   } catch (err) {
     console.error("getOffset error:", err);
@@ -375,17 +400,24 @@ export const getOffset = async (req: Request, res: Response) => {
 // one step at a time.
 export const patchLogAction = async (req: Request, res: Response) => {
   try {
+    const auth = (req as Request & { auth?: { role: "admin" | "trainee"; traineeId?: string } }).auth;
     const { id } = req.params;
-    const { action, timestamp, accomplishment } = req.body;
+    const { action, timestamp, accomplishment, offsetMinutes } = req.body;
 
     const log = await prisma.logEntry.findUnique({ where: { id } });
     if (!log) return res.status(404).json({ error: "Log entry not found." });
+    if (auth?.role === "trainee" && auth.traineeId !== log.traineeId) {
+      return res.status(403).json({ error: "Access denied." });
+    }
 
     const ts = timestamp ? new Date(timestamp) : new Date();
     const data: Record<string, unknown> = {};
 
     switch (action) {
       case "lunchStart":
+        if (log.timeOut) {
+          return res.status(400).json({ error: "Cannot start lunch after Time Out." });
+        }
         if (log.lunchStart.getTime() !== log.timeIn.getTime()) {
           return res.status(400).json({ error: "Lunch Start already recorded." });
         }
@@ -393,6 +425,9 @@ export const patchLogAction = async (req: Request, res: Response) => {
         break;
 
       case "lunchEnd":
+        if (log.timeOut) {
+          return res.status(400).json({ error: "Cannot end lunch after Time Out." });
+        }
         if (log.lunchStart.getTime() === log.timeIn.getTime()) {
           return res.status(400).json({ error: "Cannot end lunch without starting it." });
         }
@@ -400,22 +435,31 @@ export const patchLogAction = async (req: Request, res: Response) => {
         break;
 
       case "timeOut": {
+        if (log.timeOut) {
+          return res.status(400).json({ error: "Time Out already recorded." });
+        }
+        if (log.lunchStart.getTime() === log.timeIn.getTime()) {
+          return res.status(400).json({ error: "Please record Lunch Start first." });
+        }
+        if (log.lunchEnd.getTime() === log.timeIn.getTime()) {
+          return res.status(400).json({ error: "Please record Lunch End first." });
+        }
         const lStart = log.lunchStart;
         const lEnd = (data.lunchEnd as Date) || log.lunchEnd;
-        const hoursWorked = calcHoursWorked(log.timeIn, ts, lStart, lEnd);
+        const hoursWorked = calcWorkedMinutes(log.timeIn, ts, lStart, lEnd);
 
         const trainee = await prisma.trainee.findUnique({
           where: { id: log.traineeId },
           select: { workSchedule: true },
         });
-        const standardHours = getStandardHoursForDay(
+        const standardMinutes = getStandardMinutesForDay(
           trainee?.workSchedule as WorkScheduleMap | null,
           log.date.getDay(),
         );
 
         data.timeOut = ts;
         data.hoursWorked = hoursWorked;
-        data.overtime = parseFloat(Math.max(0, hoursWorked - standardHours).toFixed(2));
+        data.overtime = Math.max(0, hoursWorked - standardMinutes);
         break;
       }
 
@@ -423,6 +467,49 @@ export const patchLogAction = async (req: Request, res: Response) => {
         if (!accomplishment) return res.status(400).json({ error: "Accomplishment text required." });
         data.accomplishment = accomplishment;
         break;
+
+      case "offset": {
+        if (!log.timeOut) {
+          return res.status(400).json({ error: "Offset can only be applied after Time Out." });
+        }
+
+        const trainee = await prisma.trainee.findUnique({
+          where: { id: log.traineeId },
+          select: { requiredHours: true, workSchedule: true },
+        });
+        if (!trainee) return res.status(404).json({ error: "Trainee not found." });
+
+        const logs = await prisma.logEntry.findMany({
+          where: { traineeId: log.traineeId },
+          select: { hoursWorked: true },
+        });
+        const renderedMinutes = logs.reduce((sum, l) => sum + l.hoursWorked, 0);
+        const requiredMinutes = trainee.requiredHours * 60;
+        if (renderedMinutes < requiredMinutes) {
+          return res.status(400).json({ error: "Offset is allowed only after required hours are met." });
+        }
+
+        const scheduledMinutes = getStandardMinutesForDay(trainee.workSchedule as WorkScheduleMap | null, log.date.getDay());
+        const intervalMinutes = calcWorkedMinutes(log.timeIn, log.timeOut, log.lunchStart, log.lunchEnd);
+        if (intervalMinutes < scheduledMinutes) {
+          return res.status(400).json({ error: "Offset requires a completed shift that satisfies the work schedule interval." });
+        }
+
+        const available = await getAvailableOffsetMinutes(log.traineeId);
+        if (available <= 0) {
+          return res.status(400).json({ error: "No available overtime minutes for offset." });
+        }
+
+        const requested = typeof offsetMinutes === "number" && offsetMinutes > 0 ? Math.floor(offsetMinutes) : available;
+        const apply = Math.max(0, Math.min(requested, available));
+        if (apply <= 0) {
+          return res.status(400).json({ error: "Offset minutes must be greater than zero." });
+        }
+
+        data.offsetUsed = log.offsetUsed + apply;
+        data.hoursWorked = log.hoursWorked + apply;
+        break;
+      }
 
       default:
         return res.status(400).json({ error: `Invalid action: ${action}` });

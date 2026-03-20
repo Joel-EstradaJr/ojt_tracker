@@ -6,16 +6,17 @@ import { useState } from "react";
 import { logout } from "@/lib/api";
 
 interface SidebarProps {
+  traineeId: string;
   collapsed: boolean;
   onToggle: () => void;
 }
 
-const menuItems = [
-  { href: "/admin/user-management", label: "User Management" },
-  { href: "/admin/trainee-management", label: "Trainee Management" },
+const menuItems = (traineeId: string) => [
+  { href: `/trainee/${traineeId}/dashboard`, label: "Dashboard" },
+  { href: `/trainee/${traineeId}/entry-logs`, label: "Entry Logs" },
 ] as const;
 
-export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
+export default function Sidebar({ traineeId, collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [logoutLoading, setLogoutLoading] = useState(false);
@@ -52,18 +53,23 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "space-between", gap: "0.5rem", padding: "0 0.35rem" }}>
         {!collapsed && (
           <div>
-            <h2 style={{ fontSize: "0.98rem", marginBottom: 0 }}>Admin</h2>
+            <h2 style={{ fontSize: "0.98rem", marginBottom: 0 }}>Trainee</h2>
             <p style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Navigation</p>
           </div>
         )}
-        <button className="btn btn-outline" onClick={onToggle} style={{ padding: "0.35rem 0.5rem", minWidth: 36 }} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+        <button
+          className="btn btn-outline"
+          onClick={onToggle}
+          style={{ padding: "0.35rem 0.5rem", minWidth: 36 }}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
           {collapsed ? ">" : "<"}
         </button>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", marginTop: "0.4rem", paddingRight: "0.2rem" }}>
         <nav style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-          {menuItems.map((item) => {
+          {menuItems(traineeId).map((item) => {
             const active = pathname === item.href;
             return (
               <Link
@@ -84,7 +90,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 }}
                 title={collapsed ? item.label : undefined}
               >
-                <span aria-hidden="true">{item.label.startsWith("User") ? "U" : "T"}</span>
+                <span aria-hidden="true">{item.label.startsWith("Dashboard") ? "D" : "E"}</span>
                 {!collapsed && <span>{item.label}</span>}
               </Link>
             );

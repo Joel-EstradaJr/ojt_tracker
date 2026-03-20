@@ -9,13 +9,18 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Trainee } from "@/types";
-import { fetchTrainees, deleteTrainee, downloadAllCSV, importAllCSV, getSession, logout } from "@/lib/api";
+import { fetchTrainees, deleteTrainee, downloadAllCSV, importAllCSV, getSession } from "@/lib/api";
+import { formatMinutes } from "@/lib/duration";
+import { useActionGuard } from "@/lib/useActionGuard";
 import CreateTraineeForm from "@/components/CreateTraineeForm";
 import EditTraineeForm from "@/components/EditTraineeForm";
 import { ThemeToggle } from "@/components/ThemeProvider";
+import PageHeading from "@/components/PageHeading";
+import { formatDisplayDate } from "@/lib/date";
 
 export default function HomePage() {
   const router = useRouter();
+  const { runGuarded } = useActionGuard();
 
   const [trainees, setTrainees] = useState<Trainee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,6 +29,7 @@ export default function HomePage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editingTrainee, setEditingTrainee] = useState<Trainee | null>(null);
   const [importLoading, setImportLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
   const [exportSuccess, setExportSuccess] = useState(false);
@@ -67,12 +73,7 @@ export default function HomePage() {
     return `${user.lastName}, ${user.firstName}${middlePart}${suffixPart}`;
   };
   const formatCreatedAt = (value: string) => {
-    const date = new Date(value);
-    return date.toLocaleDateString("en-US", {
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-    });
+    return formatDisplayDate(value);
   };
   const isActivated = (user: Trainee) => !user.mustChangePassword;
   const isLocked = (user: Trainee) => {
@@ -172,7 +173,7 @@ export default function HomePage() {
         }
 
         if (session.role === "trainee") {
-          if (session.traineeId) router.replace(`/trainee/${session.traineeId}`);
+          if (session.traineeId) router.replace(`/trainee/${session.traineeId}/dashboard`);
           else router.replace("/login");
           return;
         }
@@ -195,13 +196,16 @@ export default function HomePage() {
     };
   }, [loadTrainees, router]);
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch {
-      // ignore and redirect
-    }
-    router.replace("/login");
+  const handleExportAll = async () => {
+    await runGuarded("admin-user-export-all", async () => {
+      setExportLoading(true);
+      try {
+        downloadAllCSV();
+        setExportSuccess(true);
+      } finally {
+        setExportLoading(false);
+      }
+    });
   };
 
   if (!authorized) {
@@ -218,26 +222,28 @@ export default function HomePage() {
   }
 
   const handleDelete = async () => {
-    if (!deletingTrainee) return;
-    setDeleteLoading(true);
-    setDeleteError("");
-    try {
-      const name = deletingTrainee.displayName;
-      await deleteTrainee(deletingTrainee.id, {
-        currentPassword: deletingTrainee.role === "admin" ? deletePassword : undefined,
-        typedConfirmation: deletingTrainee.role === "admin" ? deleteConfirmText : undefined,
-      });
-      setDeletingTrainee(null);
-      setDeleteConfirmText("");
-      setDeletePassword("");
+    await runGuarded("admin-user-delete", async () => {
+      if (!deletingTrainee) return;
+      setDeleteLoading(true);
       setDeleteError("");
-      setDeleteSuccess(name);
-      loadTrainees();
-    } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Failed to delete user.");
-    } finally {
-      setDeleteLoading(false);
-    }
+      try {
+        const name = deletingTrainee.displayName;
+        await deleteTrainee(deletingTrainee.id, {
+          currentPassword: deletingTrainee.role === "admin" ? deletePassword : undefined,
+          typedConfirmation: deletingTrainee.role === "admin" ? deleteConfirmText : undefined,
+        });
+        setDeletingTrainee(null);
+        setDeleteConfirmText("");
+        setDeletePassword("");
+        setDeleteError("");
+        setDeleteSuccess(name);
+        loadTrainees();
+      } catch (err) {
+        setDeleteError(err instanceof Error ? err.message : "Failed to delete user.");
+      } finally {
+        setDeleteLoading(false);
+      }
+    });
   };
 
   const closeDeletingModal = () => {
@@ -250,20 +256,22 @@ export default function HomePage() {
   };
 
   const handleImportAll = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImportLoading(true);
-    setImportError(null);
-    try {
-      const result = await importAllCSV(file);
-      setImportResult(result);
-      loadTrainees();
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Import failed.");
-    } finally {
-      setImportLoading(false);
-      if (importRef.current) importRef.current.value = "";
-    }
+    await runGuarded("admin-user-import", async () => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setImportLoading(true);
+      setImportError(null);
+      try {
+        const result = await importAllCSV(file);
+        setImportResult(result);
+        loadTrainees();
+      } catch (err) {
+        setImportError(err instanceof Error ? err.message : "Import failed.");
+      } finally {
+        setImportLoading(false);
+        if (importRef.current) importRef.current.value = "";
+      }
+    });
   };
   // Combined filter + search pipeline
   const searchTokens = searchQuery
@@ -341,51 +349,33 @@ export default function HomePage() {
 
   return (
     <div className="container">
-      {/* Hero Header */}
-      <div className="hero-header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
-          <div>
-            <h1>User Management</h1>
-            <p>Manage admin and trainee accounts.</p>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+      <PageHeading
+        title="User Management"
+        subtitle="Manage admin and trainee accounts."
+        actions={(
+          <>
             <ThemeToggle />
-            <button className="btn btn-outline" onClick={handleLogout} style={{ gap: "0.35rem" }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
-              Log Out
+          </>
+        )}
+        toolbar={(
+          <>
+            <button className="btn" onClick={handleExportAll} disabled={exportLoading}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+              {exportLoading ? "Exporting..." : "Export All"}
             </button>
-          </div>
-        </div>
-
-        <div className="hero-actions" style={{ marginTop: "1.25rem" }}>
-          <button className="btn" onClick={() => { downloadAllCSV(); setExportSuccess(true); }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-            Export All
-          </button>
-          <button
-            className="btn"
-            onClick={() => importRef.current?.click()}
-            disabled={importLoading}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
-            {importLoading ? "Importing..." : "Import CSV"}
-          </button>
-          <input
-            type="file"
-            accept=".csv"
-            ref={importRef}
-            style={{ display: "none" }}
-            onChange={handleImportAll}
-          />
-          <button className="btn btn-add" onClick={() => setShowCreate(true)}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-            Add User
-          </button>
-          <div style={{ marginLeft: "auto", textAlign: "right", fontSize: "0.82rem", color: "var(--text-muted)", lineHeight: 1.3 }}>
-            Logged in as: <strong style={{ color: "var(--text)" }}>{activeAdminLabel || "Admin"}</strong>
-          </div>
-        </div>
-      </div>
+            <button className="btn" onClick={() => importRef.current?.click()} disabled={importLoading}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+              {importLoading ? "Importing..." : "Import CSV"}
+            </button>
+            <input type="file" accept=".csv" ref={importRef} style={{ display: "none" }} onChange={handleImportAll} />
+            <button className="btn btn-add" onClick={() => setShowCreate(true)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+              Add User
+            </button>
+          </>
+        )}
+        meta={<>LOGGED IN AS: <strong style={{ color: "var(--text)" }}>{activeAdminLabel || "Admin"}</strong></>}
+      />
 
       {/* Search, filters & pagination bar */}
       {!loading && trainees.length > 0 && (
@@ -508,7 +498,7 @@ export default function HomePage() {
                   School / University <span style={{ opacity: 0.7 }}>{getSortIndicator("school")}</span>
                 </th>
                 <th style={{ textAlign: "center", cursor: "pointer", userSelect: "none" }} onClick={() => handleHeaderSort("createdAt")}>
-                  Created At <span style={{ opacity: 0.7 }}>{getSortIndicator("createdAt")}</span>
+                  CREATION DATE <span style={{ opacity: 0.7 }}>{getSortIndicator("createdAt")}</span>
                 </th>
                 <th style={{ textAlign: "center", cursor: "pointer", userSelect: "none" }} onClick={() => handleHeaderSort("activated")}>
                   Activated <span style={{ opacity: 0.7 }}>{getSortIndicator("activated")}</span>
@@ -581,7 +571,8 @@ export default function HomePage() {
       {/* Delete trainee confirmation modal */}
       {deletingTrainee && (() => {
         const t = deletingTrainee;
-        const pct = Math.min(100, Math.round((t.totalHoursRendered / t.requiredHours) * 100));
+        const requiredMinutes = t.requiredHours * 60;
+        const pct = Math.min(100, Math.round((t.totalHoursRendered / Math.max(1, requiredMinutes)) * 100));
         return (
           <div className="modal-overlay" onClick={closeDeletingModal}>
             <div className="modal-content" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
@@ -610,7 +601,7 @@ export default function HomePage() {
                     </>
                   )}
                   <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Progress:</span>
-                  <span>{t.totalHoursRendered.toFixed(1)} / {t.requiredHours} hrs ({pct}%)</span>
+                  <span>{formatMinutes(t.totalHoursRendered)} / {formatMinutes(requiredMinutes)} ({pct}%)</span>
                 </div>
               </div>
 
@@ -776,7 +767,7 @@ export default function HomePage() {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
                 <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="filter-created-from">Created At (From)</label>
+                  <label htmlFor="filter-created-from">CREATION DATE (From)</label>
                   <input
                     id="filter-created-from"
                     type="date"
@@ -785,7 +776,7 @@ export default function HomePage() {
                   />
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="filter-created-to">Created At (To)</label>
+                  <label htmlFor="filter-created-to">CREATION DATE (To)</label>
                   <input
                     id="filter-created-to"
                     type="date"
@@ -823,10 +814,12 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem" }}>
               <button className="btn btn-outline" onClick={clearAllFilters}>Clear</button>
-              <button className="btn btn-outline" onClick={() => setShowFiltersModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={applyFilters}>Apply</button>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button className="btn btn-outline" onClick={() => setShowFiltersModal(false)}>Cancel</button>
+                <button className="btn btn-primary" onClick={applyFilters}>Apply</button>
+              </div>
             </div>
           </div>
         </div>

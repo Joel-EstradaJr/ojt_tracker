@@ -10,13 +10,17 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Trainee } from "@/types";
 import { calculateExpectedEndDate } from "@/lib/ph-holidays";
-import { fetchTrainees, deleteTrainee, downloadAllCSV, importAllCSV, getSession, logout } from "@/lib/api";
+import { formatMinutes } from "@/lib/duration";
+import { useActionGuard } from "@/lib/useActionGuard";
+import { fetchTrainees, deleteTrainee, downloadAllCSV, importAllCSV, getSession } from "@/lib/api";
 import TraineeCard from "@/components/TraineeCard";
 import EditTraineeForm from "@/components/EditTraineeForm";
 import { ThemeToggle } from "@/components/ThemeProvider";
+import PageHeading from "@/components/PageHeading";
 
 export default function HomePage() {
   const router = useRouter();
+  const { runGuarded } = useActionGuard();
 
   const [trainees, setTrainees] = useState<Trainee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,6 +28,7 @@ export default function HomePage() {
   const [activeAdminLabel, setActiveAdminLabel] = useState("");
   const [editingTrainee, setEditingTrainee] = useState<Trainee | null>(null);
   const [importLoading, setImportLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
   const [exportSuccess, setExportSuccess] = useState(false);
@@ -42,12 +47,96 @@ export default function HomePage() {
 
   // Search, sort & pagination
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortField, setSortField] = useState<"name" | "createdAt" | "hoursRendered" | "hoursRemaining" | "expectedEnd">("name");
+  const [showSortModal, setShowSortModal] = useState(false);
+  const [sortField, setSortField] = useState<"name" | "role" | "createdAt" | "hoursRendered" | "hoursRemaining" | "expectedEnd" | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [draftSortField, setDraftSortField] = useState<"name" | "role" | "createdAt" | "hoursRendered" | "hoursRemaining" | "expectedEnd" | null>(null);
+  const [draftSortDir, setDraftSortDir] = useState<"asc" | "desc">("asc");
+  const [showFiltersModal, setShowFiltersModal] = useState(false);
+  const [expectedEndFrom, setExpectedEndFrom] = useState("");
+  const [expectedEndTo, setExpectedEndTo] = useState("");
+  const [requiredHoursMin, setRequiredHoursMin] = useState("");
+  const [requiredHoursMax, setRequiredHoursMax] = useState("");
+  const [totalWorkedMin, setTotalWorkedMin] = useState("");
+  const [totalWorkedMax, setTotalWorkedMax] = useState("");
+  const [draftExpectedEndFrom, setDraftExpectedEndFrom] = useState("");
+  const [draftExpectedEndTo, setDraftExpectedEndTo] = useState("");
+  const [draftRequiredHoursMin, setDraftRequiredHoursMin] = useState("");
+  const [draftRequiredHoursMax, setDraftRequiredHoursMax] = useState("");
+  const [draftTotalWorkedMin, setDraftTotalWorkedMin] = useState("");
+  const [draftTotalWorkedMax, setDraftTotalWorkedMax] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [cardsPerPage, setCardsPerPage] = useState(12);
 
   const normalizeDeleteConfirmation = (value: string) => value.trim().replace(/\s+/g, " ").toUpperCase();
+
+  const openSortModal = () => {
+    setDraftSortField(sortField);
+    setDraftSortDir(sortDir);
+    setShowSortModal(true);
+  };
+
+  const applySort = () => {
+    setSortField(draftSortField);
+    setSortDir(draftSortDir);
+    setCurrentPage(1);
+    setShowSortModal(false);
+  };
+
+  const clearSort = () => {
+    setSortField(null);
+    setSortDir("asc");
+    setDraftSortField(null);
+    setDraftSortDir("asc");
+    setCurrentPage(1);
+    setShowSortModal(false);
+  };
+
+  const openFiltersModal = () => {
+    setDraftExpectedEndFrom(expectedEndFrom);
+    setDraftExpectedEndTo(expectedEndTo);
+    setDraftRequiredHoursMin(requiredHoursMin);
+    setDraftRequiredHoursMax(requiredHoursMax);
+    setDraftTotalWorkedMin(totalWorkedMin);
+    setDraftTotalWorkedMax(totalWorkedMax);
+    setShowFiltersModal(true);
+  };
+
+  const applyFilters = () => {
+    setExpectedEndFrom(draftExpectedEndFrom);
+    setExpectedEndTo(draftExpectedEndTo);
+    setRequiredHoursMin(draftRequiredHoursMin);
+    setRequiredHoursMax(draftRequiredHoursMax);
+    setTotalWorkedMin(draftTotalWorkedMin);
+    setTotalWorkedMax(draftTotalWorkedMax);
+    setCurrentPage(1);
+    setShowFiltersModal(false);
+  };
+
+  const clearAllFilters = () => {
+    setExpectedEndFrom("");
+    setExpectedEndTo("");
+    setRequiredHoursMin("");
+    setRequiredHoursMax("");
+    setTotalWorkedMin("");
+    setTotalWorkedMax("");
+    setDraftExpectedEndFrom("");
+    setDraftExpectedEndTo("");
+    setDraftRequiredHoursMin("");
+    setDraftRequiredHoursMax("");
+    setDraftTotalWorkedMin("");
+    setDraftTotalWorkedMax("");
+    setCurrentPage(1);
+    setShowFiltersModal(false);
+  };
+
+  const activeFilterCount =
+    Number(Boolean(expectedEndFrom)) +
+    Number(Boolean(expectedEndTo)) +
+    Number(Boolean(requiredHoursMin)) +
+    Number(Boolean(requiredHoursMax)) +
+    Number(Boolean(totalWorkedMin)) +
+    Number(Boolean(totalWorkedMax));
 
   // Fetch all trainees on mount
   const loadTrainees = useCallback(async () => {
@@ -75,7 +164,7 @@ export default function HomePage() {
         }
 
         if (session.role === "trainee") {
-          if (session.traineeId) router.replace(`/trainee/${session.traineeId}`);
+          if (session.traineeId) router.replace(`/trainee/${session.traineeId}/dashboard`);
           else router.replace("/login");
           return;
         }
@@ -98,13 +187,16 @@ export default function HomePage() {
     };
   }, [loadTrainees, router]);
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch {
-      // ignore and redirect
-    }
-    router.replace("/login");
+  const handleExportAll = async () => {
+    await runGuarded("admin-trainee-export-all", async () => {
+      setExportLoading(true);
+      try {
+        downloadAllCSV();
+        setExportSuccess(true);
+      } finally {
+        setExportLoading(false);
+      }
+    });
   };
 
   if (!authorized) {
@@ -121,26 +213,28 @@ export default function HomePage() {
   }
 
   const handleDelete = async () => {
-    if (!deletingTrainee) return;
-    setDeleteLoading(true);
-    setDeleteError("");
-    try {
-      const name = deletingTrainee.displayName;
-      await deleteTrainee(deletingTrainee.id, {
-        currentPassword: deletingTrainee.role === "admin" ? deletePassword : undefined,
-        typedConfirmation: deletingTrainee.role === "admin" ? deleteConfirmText : undefined,
-      });
-      setDeletingTrainee(null);
-      setDeleteConfirmText("");
-      setDeletePassword("");
+    await runGuarded("admin-trainee-delete", async () => {
+      if (!deletingTrainee) return;
+      setDeleteLoading(true);
       setDeleteError("");
-      setDeleteSuccess(name);
-      loadTrainees();
-    } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Failed to delete user.");
-    } finally {
-      setDeleteLoading(false);
-    }
+      try {
+        const name = deletingTrainee.displayName;
+        await deleteTrainee(deletingTrainee.id, {
+          currentPassword: deletingTrainee.role === "admin" ? deletePassword : undefined,
+          typedConfirmation: deletingTrainee.role === "admin" ? deleteConfirmText : undefined,
+        });
+        setDeletingTrainee(null);
+        setDeleteConfirmText("");
+        setDeletePassword("");
+        setDeleteError("");
+        setDeleteSuccess(name);
+        loadTrainees();
+      } catch (err) {
+        setDeleteError(err instanceof Error ? err.message : "Failed to delete user.");
+      } finally {
+        setDeleteLoading(false);
+      }
+    });
   };
 
   const closeDeletingModal = () => {
@@ -153,149 +247,156 @@ export default function HomePage() {
   };
 
   const handleImportAll = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImportLoading(true);
-    setImportError(null);
-    try {
-      const result = await importAllCSV(file);
-      setImportResult(result);
-      loadTrainees();
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Import failed.");
-    } finally {
-      setImportLoading(false);
-      if (importRef.current) importRef.current.value = "";
-    }
+    await runGuarded("admin-trainee-import", async () => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setImportLoading(true);
+      setImportError(null);
+      try {
+        const result = await importAllCSV(file);
+        setImportResult(result);
+        loadTrainees();
+      } catch (err) {
+        setImportError(err instanceof Error ? err.message : "Import failed.");
+      } finally {
+        setImportLoading(false);
+        if (importRef.current) importRef.current.value = "";
+      }
+    });
   };
 
 
 
   // Helper: compute expected end date as timestamp for sorting
   const getExpectedEndTs = (t: Trainee) => {
-    const remaining = Math.max(0, t.requiredHours - t.totalHoursRendered);
-    if (remaining === 0) return Infinity;
-    return calculateExpectedEndDate(remaining, undefined, t.workSchedule).getTime();
+    const requiredMinutes = t.requiredHours * 60;
+    const remainingMinutes = Math.max(0, requiredMinutes - t.totalHoursRendered);
+    if (remainingMinutes === 0) return Infinity;
+    return calculateExpectedEndDate(remainingMinutes / 60, undefined, t.workSchedule).getTime();
   };
 
-  // Filter trainees by name, school, or company
+  const getExpectedEndDate = (t: Trainee): Date | null => {
+    const requiredMinutes = t.requiredHours * 60;
+    const remainingMinutes = Math.max(0, requiredMinutes - t.totalHoursRendered);
+    if (remainingMinutes === 0) return null;
+    return calculateExpectedEndDate(remainingMinutes / 60, undefined, t.workSchedule);
+  };
+
+  // Filter trainees by searchable fields and modal filter ranges
   const trackableTrainees = trainees.filter((t) => t.role === "trainee");
-  const q = searchQuery.toLowerCase();
+  const q = searchQuery.toLowerCase().trim();
   const filteredTrainees = trackableTrainees
-    .filter((t) =>
-      t.displayName.toLowerCase().includes(q) ||
-      t.school.toLowerCase().includes(q) ||
-      t.companyName.toLowerCase().includes(q)
-    )
-    .sort((a, b) => {
-      let cmp = 0;
-      switch (sortField) {
-        case "name":
-          cmp = a.displayName.localeCompare(b.displayName);
-          break;
-        case "createdAt":
-          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-          break;
-        case "hoursRendered":
-          cmp = a.totalHoursRendered - b.totalHoursRendered;
-          break;
-        case "hoursRemaining":
-          cmp = (a.requiredHours - a.totalHoursRendered) - (b.requiredHours - b.totalHoursRendered);
-          break;
-        case "expectedEnd":
-          cmp = getExpectedEndTs(a) - getExpectedEndTs(b);
-          break;
+    .filter((t) => {
+      const matchesSearch = !q ||
+        t.displayName.toLowerCase().includes(q) ||
+        t.school.toLowerCase().includes(q) ||
+        t.companyName.toLowerCase().includes(q) ||
+        String(t.requiredHours).includes(q);
+
+      if (!matchesSearch) return false;
+
+      const expectedEnd = getExpectedEndDate(t);
+      if (expectedEndFrom) {
+        if (!expectedEnd) return false;
+        const from = new Date(`${expectedEndFrom}T00:00:00`);
+        if (expectedEnd < from) return false;
       }
-      return sortDir === "asc" ? cmp : -cmp;
+      if (expectedEndTo) {
+        if (!expectedEnd) return false;
+        const to = new Date(`${expectedEndTo}T23:59:59.999`);
+        if (expectedEnd > to) return false;
+      }
+
+      const reqHours = t.requiredHours;
+      if (requiredHoursMin !== "" && reqHours < Number(requiredHoursMin)) return false;
+      if (requiredHoursMax !== "" && reqHours > Number(requiredHoursMax)) return false;
+
+      const totalWorkedHours = t.totalHoursRendered / 60;
+      if (totalWorkedMin !== "" && totalWorkedHours < Number(totalWorkedMin)) return false;
+      if (totalWorkedMax !== "" && totalWorkedHours > Number(totalWorkedMax)) return false;
+
+      return true;
     });
 
+  const sortedTrainees = !sortField
+    ? filteredTrainees
+    : [...filteredTrainees].sort((a, b) => {
+        let cmp = 0;
+        switch (sortField) {
+          case "name":
+            cmp = a.displayName.localeCompare(b.displayName);
+            break;
+          case "role":
+            cmp = a.role.localeCompare(b.role);
+            break;
+          case "createdAt":
+            cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+            break;
+          case "hoursRendered":
+            cmp = a.totalHoursRendered - b.totalHoursRendered;
+            break;
+          case "hoursRemaining":
+            cmp = ((a.requiredHours * 60) - a.totalHoursRendered) - ((b.requiredHours * 60) - b.totalHoursRendered);
+            break;
+          case "expectedEnd":
+            cmp = getExpectedEndTs(a) - getExpectedEndTs(b);
+            break;
+        }
+        return sortDir === "asc" ? cmp : -cmp;
+      });
+
   // Pagination
-  const totalPages = Math.max(1, Math.ceil(filteredTrainees.length / cardsPerPage));
+  const totalPages = Math.max(1, Math.ceil(sortedTrainees.length / cardsPerPage));
   const safePage = Math.min(currentPage, totalPages);
-  const paginatedTrainees = filteredTrainees.slice((safePage - 1) * cardsPerPage, safePage * cardsPerPage);
+  const paginatedTrainees = sortedTrainees.slice((safePage - 1) * cardsPerPage, safePage * cardsPerPage);
 
   return (
     <div className="container">
-      {/* Hero Header */}
-      <div className="hero-header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
-          <div>
-            <h1>Trainee Management</h1>
-            <p>Track trainee hours, accomplishments, and progress reports.</p>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+      <PageHeading
+        title="Trainee Management"
+        subtitle="Track trainee hours, accomplishments, and progress reports."
+        actions={(
+          <>
             <ThemeToggle />
-            <button className="btn btn-outline" onClick={handleLogout} style={{ gap: "0.35rem" }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
-              Log Out
+          </>
+        )}
+        toolbar={(
+          <>
+            <button className="btn" onClick={handleExportAll} disabled={exportLoading}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+              {exportLoading ? "Exporting..." : "Export All"}
             </button>
-          </div>
-        </div>
-
-        <div className="hero-actions" style={{ marginTop: "1.25rem" }}>
-          <button className="btn" onClick={() => { downloadAllCSV(); setExportSuccess(true); }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-            Export All
-          </button>
-          <button
-            className="btn"
-            onClick={() => importRef.current?.click()}
-            disabled={importLoading}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
-            {importLoading ? "Importing..." : "Import CSV"}
-          </button>
-          <input
-            type="file"
-            accept=".csv"
-            ref={importRef}
-            style={{ display: "none" }}
-            onChange={handleImportAll}
-          />
-          <div style={{ marginLeft: "auto", textAlign: "right", fontSize: "0.82rem", color: "var(--text-muted)", lineHeight: 1.3 }}>
-            Logged in as: <strong style={{ color: "var(--text)" }}>{activeAdminLabel || "Admin"}</strong>
-          </div>
-        </div>
-      </div>
+            <button className="btn" onClick={() => importRef.current?.click()} disabled={importLoading}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+              {importLoading ? "Importing..." : "Import CSV"}
+            </button>
+            <input type="file" accept=".csv" ref={importRef} style={{ display: "none" }} onChange={handleImportAll} />
+          </>
+        )}
+        meta={<>LOGGED IN AS: <strong style={{ color: "var(--text)" }}>{activeAdminLabel || "Admin"}</strong></>}
+      />
 
       {/* Search, Sort & Pagination bar */}
       {!loading && trackableTrainees.length > 0 && (
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "1.25rem", flexWrap: "wrap" }}>
           {/* Search */}
-          <div style={{ position: "relative", flex: "1 1 220px", maxWidth: "360px", minWidth: "180px" }}>
+          <div className="form-group" style={{ position: "relative", flex: "1 1 260px", minWidth: "220px", marginBottom: 0 }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)", opacity: 0.4, pointerEvents: "none" }}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             <input
               type="text"
-              placeholder="Search name, school, or company..."
+              placeholder="Search full name, school, company, required hours..."
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-              style={{ paddingLeft: "2.25rem", width: "100%" }}
+              style={{ paddingLeft: "2.25rem" }}
             />
           </div>
 
-          {/* Sort field dropdown */}
-          <select
-            className="btn btn-outline"
-            value={sortField}
-            onChange={(e) => { setSortField(e.target.value as typeof sortField); setCurrentPage(1); }}
-            style={{ fontSize: "0.82rem", padding: "0.45rem 0.6rem", cursor: "pointer", background: "var(--bg)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-          >
-            <option value="name">Sort: Name</option>
-            <option value="createdAt">Sort: Created Date</option>
-            <option value="hoursRendered">Sort: Hours Rendered</option>
-            <option value="hoursRemaining">Sort: Hours Remaining</option>
-            <option value="expectedEnd">Sort: Expected End</option>
-          </select>
+          <button className="btn btn-outline" onClick={openFiltersModal} style={{ fontSize: "0.82rem", padding: "0.5rem 0.75rem", whiteSpace: "nowrap" }}>
+            Filters {activeFilterCount > 0 ? `(${activeFilterCount})` : ""}
+          </button>
 
-          {/* Sort direction toggle */}
-          <button
-            className="btn btn-outline"
-            style={{ fontSize: "0.82rem", padding: "0.5rem 0.75rem", whiteSpace: "nowrap" }}
-            onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
-            title={sortDir === "asc" ? "Ascending" : "Descending"}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5h10M11 9h7M11 13h4M3 17l3 3 3-3M6 18V4" /></svg>
-            {sortDir === "asc" ? "↑ Asc" : "↓ Desc"}
+          <button className="btn btn-outline" onClick={openSortModal} style={{ fontSize: "0.82rem", padding: "0.5rem 0.75rem", whiteSpace: "nowrap" }}>
+            Sort {sortField ? `(${sortDir === "asc" ? "Asc" : "Desc"})` : ""}
           </button>
 
           {/* Page size selector + Pagination controls — pushed to the right */}
@@ -380,7 +481,7 @@ export default function HomePage() {
       {/* No search results */}
       {!loading && trackableTrainees.length > 0 && filteredTrainees.length === 0 && (
         <div style={{ textAlign: "center", padding: "2rem 1rem", color: "var(--text-muted)" }}>
-          <p style={{ fontSize: "0.95rem" }}>No trainees match &ldquo;{searchQuery}&rdquo;</p>
+          <p style={{ fontSize: "0.95rem" }}>No trainees match the current search and filters.</p>
         </div>
       )}
 
@@ -398,7 +499,7 @@ export default function HomePage() {
             >
               <TraineeCard
                 trainee={t}
-                onClick={() => router.push(`/trainee/${t.id}`)}
+                onClick={() => router.push(`/trainee/${t.id}/dashboard`)}
                 onEdit={() => setEditingTrainee(t)}
                 onDelete={() => setDeletingTrainee(t)}
               />
@@ -423,7 +524,8 @@ export default function HomePage() {
       {/* Delete trainee confirmation modal */}
       {deletingTrainee && (() => {
         const t = deletingTrainee;
-        const pct = Math.min(100, Math.round((t.totalHoursRendered / t.requiredHours) * 100));
+        const requiredMinutes = t.requiredHours * 60;
+        const pct = Math.min(100, Math.round((t.totalHoursRendered / Math.max(1, requiredMinutes)) * 100));
         return (
           <div className="modal-overlay" onClick={closeDeletingModal}>
             <div className="modal-content" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
@@ -452,7 +554,7 @@ export default function HomePage() {
                     </>
                   )}
                   <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Progress:</span>
-                  <span>{t.totalHoursRendered.toFixed(1)} / {t.requiredHours} hrs ({pct}%)</span>
+                  <span>{formatMinutes(t.totalHoursRendered)} / {formatMinutes(requiredMinutes)} ({pct}%)</span>
                 </div>
               </div>
 
@@ -589,6 +691,164 @@ export default function HomePage() {
               <button className="btn btn-primary" onClick={() => { setImportResult(null); setImportError(null); }}>
                 OK
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Filters modal */}
+      {showFiltersModal && (
+        <div className="modal-overlay" onClick={() => setShowFiltersModal(false)}>
+          <div className="modal-content" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.9rem" }}>
+              <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Trainee Filters</h2>
+            </div>
+
+            <div style={{ display: "grid", gap: "0.9rem", marginBottom: "1rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="expectedEndFrom">Expected End Date From</label>
+                  <input
+                    id="expectedEndFrom"
+                    type="date"
+                    value={draftExpectedEndFrom}
+                    onChange={(e) => setDraftExpectedEndFrom(e.target.value)}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="expectedEndTo">Expected End Date To</label>
+                  <input
+                    id="expectedEndTo"
+                    type="date"
+                    value={draftExpectedEndTo}
+                    onChange={(e) => setDraftExpectedEndTo(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="requiredHoursMin">Required Hours Min</label>
+                  <input
+                    id="requiredHoursMin"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={draftRequiredHoursMin}
+                    onChange={(e) => setDraftRequiredHoursMin(e.target.value)}
+                    placeholder="e.g., 120"
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="requiredHoursMax">Required Hours Max</label>
+                  <input
+                    id="requiredHoursMax"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={draftRequiredHoursMax}
+                    onChange={(e) => setDraftRequiredHoursMax(e.target.value)}
+                    placeholder="e.g., 486"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="totalWorkedMin">Total Hours Worked Min</label>
+                  <input
+                    id="totalWorkedMin"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={draftTotalWorkedMin}
+                    onChange={(e) => setDraftTotalWorkedMin(e.target.value)}
+                    placeholder="e.g., 40"
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label htmlFor="totalWorkedMax">Total Hours Worked Max</label>
+                  <input
+                    id="totalWorkedMax"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={draftTotalWorkedMax}
+                    onChange={(e) => setDraftTotalWorkedMax(e.target.value)}
+                    placeholder="e.g., 300"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem" }}>
+              <button className="btn btn-outline" onClick={clearAllFilters}>Clear All</button>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button className="btn btn-outline" onClick={() => setShowFiltersModal(false)}>Cancel</button>
+                <button className="btn btn-primary" onClick={applyFilters}>Apply Filters</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sort modal */}
+      {showSortModal && (
+        <div className="modal-overlay" onClick={() => setShowSortModal(false)}>
+          <div className="modal-content" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.9rem" }}>
+              <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Sort Trainees</h2>
+            </div>
+
+            <div style={{ display: "grid", gap: "0.9rem", marginBottom: "1rem" }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label htmlFor="sortField">Sort Field</label>
+                <select
+                  id="sortField"
+                  value={draftSortField ?? ""}
+                  onChange={(e) => setDraftSortField((e.target.value || null) as typeof draftSortField)}
+                >
+                  <option value="">No Sort</option>
+                  <option value="name">Full Name</option>
+                  <option value="role">Role</option>
+                  <option value="createdAt">Created At</option>
+                  <option value="hoursRendered">Total Hours Worked</option>
+                  <option value="hoursRemaining">Hours Remaining</option>
+                  <option value="expectedEnd">Expected End Date</option>
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ marginBottom: "0.45rem" }}>Sort Direction</label>
+                <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.9rem", color: "var(--text-secondary)" }}>
+                    <input
+                      type="radio"
+                      name="sortDirection"
+                      checked={draftSortDir === "asc"}
+                      onChange={() => setDraftSortDir("asc")}
+                    />
+                    Ascending
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.9rem", color: "var(--text-secondary)" }}>
+                    <input
+                      type="radio"
+                      name="sortDirection"
+                      checked={draftSortDir === "desc"}
+                      onChange={() => setDraftSortDir("desc")}
+                    />
+                    Descending
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem" }}>
+              <button className="btn btn-outline" onClick={clearSort}>Clear</button>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button className="btn btn-outline" onClick={() => setShowSortModal(false)}>Cancel</button>
+                <button className="btn btn-primary" onClick={applySort}>Apply</button>
+              </div>
             </div>
           </div>
         </div>
