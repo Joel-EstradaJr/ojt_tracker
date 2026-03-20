@@ -63,7 +63,6 @@ export async function createTrainee(data: {
 export function updateTrainee(
   id: string,
   data: {
-    role?: "admin" | "trainee";
     lastName: string;
     firstName: string;
     middleName?: string;

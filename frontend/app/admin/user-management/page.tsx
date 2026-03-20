@@ -544,7 +544,7 @@ export default function HomePage() {
       {showCreate && (
         <CreateTraineeForm
           title="Add User"
-          subtitle="Create an Admin or Trainee account."
+          subtitle="Create an Admin or Trainee account"
           submitLabel="Create User"
           showRoleField
           defaultRole="trainee"

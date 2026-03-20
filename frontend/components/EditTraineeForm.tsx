@@ -10,6 +10,7 @@ import { useActionGuard } from "@/lib/useActionGuard";
 import { Trainee, Supervisor, SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
 import { DEFAULT_WORK_SCHEDULE, WorkSchedule } from "@/lib/ph-holidays";
+import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -73,7 +74,8 @@ const formatWorkSchedule = (schedule: WorkSchedule): string => {
 
 export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) {
   const { runGuarded } = useActionGuard();
-  const [role, setRole] = useState<"admin" | "trainee">(trainee.role);
+  const role = trainee.role;
+  const isTraineeRole = role === "trainee";
   const [lastName, setLastName] = useState(trainee.lastName.toUpperCase());
   const [firstName, setFirstName] = useState(trainee.firstName.toUpperCase());
   const [middleName, setMiddleName] = useState((trainee.middleName ?? "").toUpperCase());
@@ -185,47 +187,53 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
     if (emailChanged && !emailVerified) { setError("Please verify the new email address before saving."); return; }
     if (!phoneCharsOnly(contactNumber)) { setError("Contact number must contain only digits, +, -, (, ), and spaces."); return; }
     if (!isValidPhone(contactNumber)) { setError("Contact number must have at least 7 digits."); return; }
-    const schErr = validateInstitution("School", school); if (schErr) { setError(schErr); return; }
-    const coErr = validateInstitution("Company name", companyName); if (coErr) { setError(coErr); return; }
-
-    for (const sup of existingSupervisors) {
-      if (deletedIds.has(sup.id)) continue;
-      const s = editedSupervisors[sup.id];
-      const sLn = validateName(`Supervisor "${sup.displayName}" last name`, s.lastName, true); if (sLn) { setError(sLn); return; }
-      const sFn = validateName(`Supervisor "${sup.displayName}" first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
-      const sMn = validateName(`Supervisor "${sup.displayName}" middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
-      if (!s.contactNumber?.trim() && !s.email?.trim()) { setError(`Supervisor "${sup.displayName}": At least one of Contact Number or Email is required.`); return; }
+    if (isTraineeRole) {
+      const schErr = validateInstitution("School", school); if (schErr) { setError(schErr); return; }
+      const coErr = validateInstitution("Company name", companyName); if (coErr) { setError(coErr); return; }
     }
-    for (let i = 0; i < newSupervisors.length; i++) {
-      const s = newSupervisors[i];
-      const sLn = validateName(`New Supervisor #${i + 1} last name`, s.lastName, true); if (sLn) { setError(sLn); return; }
-      const sFn = validateName(`New Supervisor #${i + 1} first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
-      const sMn = validateName(`New Supervisor #${i + 1} middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
-      if (!s.contactNumber?.trim() && !s.email?.trim()) { setError(`New Supervisor #${i + 1}: At least one of Contact Number or Email is required.`); return; }
+
+    if (isTraineeRole) {
+      for (const sup of existingSupervisors) {
+        if (deletedIds.has(sup.id)) continue;
+        const s = editedSupervisors[sup.id];
+        const sLn = validateName(`Supervisor "${sup.displayName}" last name`, s.lastName, true); if (sLn) { setError(sLn); return; }
+        const sFn = validateName(`Supervisor "${sup.displayName}" first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
+        const sMn = validateName(`Supervisor "${sup.displayName}" middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
+        if (!s.contactNumber?.trim() && !s.email?.trim()) { setError(`Supervisor "${sup.displayName}": At least one of Contact Number or Email is required.`); return; }
+      }
+      for (let i = 0; i < newSupervisors.length; i++) {
+        const s = newSupervisors[i];
+        const sLn = validateName(`New Supervisor #${i + 1} last name`, s.lastName, true); if (sLn) { setError(sLn); return; }
+        const sFn = validateName(`New Supervisor #${i + 1} first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
+        const sMn = validateName(`New Supervisor #${i + 1} middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
+        if (!s.contactNumber?.trim() && !s.email?.trim()) { setError(`New Supervisor #${i + 1}: At least one of Contact Number or Email is required.`); return; }
+      }
     }
 
     // Check for duplicate supervisors (existing non-deleted + new, by full name)
-    const supKeys = new Set<string>();
-    for (const sup of existingSupervisors) {
-      if (deletedIds.has(sup.id)) continue;
-      const s = editedSupervisors[sup.id];
-      const key = [s.firstName, s.middleName, s.lastName, s.suffix].map((v) => (v ?? "").trim().toLowerCase()).join("|");
-      if (supKeys.has(key)) {
-        const dupName = [s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ");
-        setError(`Duplicate supervisor: "${dupName}". Each supervisor must be unique per trainee.`);
-        return;
+    if (isTraineeRole) {
+      const supKeys = new Set<string>();
+      for (const sup of existingSupervisors) {
+        if (deletedIds.has(sup.id)) continue;
+        const s = editedSupervisors[sup.id];
+        const key = [s.firstName, s.middleName, s.lastName, s.suffix].map((v) => (v ?? "").trim().toLowerCase()).join("|");
+        if (supKeys.has(key)) {
+          const dupName = [s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ");
+          setError(`Duplicate supervisor: "${dupName}". Each supervisor must be unique per trainee.`);
+          return;
+        }
+        supKeys.add(key);
       }
-      supKeys.add(key);
-    }
-    for (let i = 0; i < newSupervisors.length; i++) {
-      const s = newSupervisors[i];
-      const key = [s.firstName, s.middleName, s.lastName, s.suffix].map((v) => (v ?? "").trim().toLowerCase()).join("|");
-      if (supKeys.has(key)) {
-        const dupName = [s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ");
-        setError(`Duplicate supervisor: "${dupName}". Each supervisor must be unique per trainee.`);
-        return;
+      for (let i = 0; i < newSupervisors.length; i++) {
+        const s = newSupervisors[i];
+        const key = [s.firstName, s.middleName, s.lastName, s.suffix].map((v) => (v ?? "").trim().toLowerCase()).join("|");
+        if (supKeys.has(key)) {
+          const dupName = [s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ");
+          setError(`Duplicate supervisor: "${dupName}". Each supervisor must be unique per trainee.`);
+          return;
+        }
+        supKeys.add(key);
       }
-      supKeys.add(key);
     }
 
     const changes: FieldChange[] = [];
@@ -233,29 +241,32 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
     cmp("Last Name", trainee.lastName, lastName); cmp("First Name", trainee.firstName, firstName);
     cmp("Middle Name", trainee.middleName ?? "", middleName); cmp("Suffix", trainee.suffix ?? "", suffix);
     cmp("Email", trainee.email, email); cmp("Contact Number", trainee.contactNumber, contactNumber);
-    cmp("School", trainee.school, school); cmp("Company Name", trainee.companyName, companyName);
-    cmp("Required Hours", String(trainee.requiredHours), requiredHours);
-    cmp("Role", trainee.role, role);
-    const originalWorkSchedule = normalizeWorkSchedule(trainee.workSchedule as WorkSchedule | undefined);
-    const currentWorkSchedule = normalizeWorkSchedule(workSchedule);
-    if (!workSchedulesEqual(originalWorkSchedule, currentWorkSchedule)) {
-      changes.push({
-        label: "Work Schedule",
-        oldVal: formatWorkSchedule(originalWorkSchedule),
-        newVal: formatWorkSchedule(currentWorkSchedule),
-      });
+    if (isTraineeRole) {
+      cmp("School", trainee.school, school); cmp("Company Name", trainee.companyName, companyName);
+      cmp("Required Hours", String(trainee.requiredHours), requiredHours);
+      const originalWorkSchedule = normalizeWorkSchedule(trainee.workSchedule as WorkSchedule | undefined);
+      const currentWorkSchedule = normalizeWorkSchedule(workSchedule);
+      if (!workSchedulesEqual(originalWorkSchedule, currentWorkSchedule)) {
+        changes.push({
+          label: "Work Schedule",
+          oldVal: formatWorkSchedule(originalWorkSchedule),
+          newVal: formatWorkSchedule(currentWorkSchedule),
+        });
+      }
     }
 
-    for (const sup of existingSupervisors) {
-      if (deletedIds.has(sup.id)) { changes.push({ label: "Remove Supervisor", oldVal: sup.displayName, newVal: "(deleted)" }); continue; }
-      const ed = editedSupervisors[sup.id]; const prefix = `Supervisor "${sup.displayName}"`;
-      cmp(`${prefix} Last Name`, sup.lastName, ed.lastName); cmp(`${prefix} First Name`, sup.firstName, ed.firstName);
-      cmp(`${prefix} Middle Name`, sup.middleName ?? "", ed.middleName ?? ""); cmp(`${prefix} Suffix`, sup.suffix ?? "", ed.suffix ?? "");
-      cmp(`${prefix} Contact`, sup.contactNumber ?? "", ed.contactNumber ?? ""); cmp(`${prefix} Email`, sup.email ?? "", ed.email ?? "");
-    }
-    for (let i = 0; i < newSupervisors.length; i++) {
-      const s = newSupervisors[i]; const name = `${s.firstName} ${s.lastName}`.trim() || `#${i + 1}`;
-      changes.push({ label: "Add Supervisor", oldVal: "(none)", newVal: name });
+    if (isTraineeRole) {
+      for (const sup of existingSupervisors) {
+        if (deletedIds.has(sup.id)) { changes.push({ label: "Remove Supervisor", oldVal: sup.displayName, newVal: "(deleted)" }); continue; }
+        const ed = editedSupervisors[sup.id]; const prefix = `Supervisor "${sup.displayName}"`;
+        cmp(`${prefix} Last Name`, sup.lastName, ed.lastName); cmp(`${prefix} First Name`, sup.firstName, ed.firstName);
+        cmp(`${prefix} Middle Name`, sup.middleName ?? "", ed.middleName ?? ""); cmp(`${prefix} Suffix`, sup.suffix ?? "", ed.suffix ?? "");
+        cmp(`${prefix} Contact`, sup.contactNumber ?? "", ed.contactNumber ?? ""); cmp(`${prefix} Email`, sup.email ?? "", ed.email ?? "");
+      }
+      for (let i = 0; i < newSupervisors.length; i++) {
+        const s = newSupervisors[i]; const name = `${s.firstName} ${s.lastName}`.trim() || `#${i + 1}`;
+        changes.push({ label: "Add Supervisor", oldVal: "(none)", newVal: name });
+      }
     }
     if (changes.length === 0) { setError("No changes detected."); return; }
     setPendingChanges(changes); setShowConfirm(true);
@@ -265,10 +276,24 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
     await runGuarded("edit-save", async () => {
       setShowConfirm(false); setLoading(true);
       try {
-        await updateTrainee(trainee.id, { role, lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined, email, contactNumber, school, companyName, requiredHours: Number(requiredHours), workSchedule: Object.keys(workSchedule).length > 0 ? workSchedule : undefined, ...(emailChanged ? { verificationToken } : {}) });
-        for (const id of deletedIds) { await deleteSupervisor(id); }
-        for (const sup of existingSupervisors) { if (deletedIds.has(sup.id)) continue; await updateSupervisor(sup.id, editedSupervisors[sup.id]); }
-        for (const s of newSupervisors) { await createSupervisor(trainee.id, s); }
+        await updateTrainee(trainee.id, {
+          lastName,
+          firstName,
+          middleName: middleName || undefined,
+          suffix: suffix || undefined,
+          email,
+          contactNumber,
+          school,
+          companyName,
+          requiredHours: Number(requiredHours),
+          workSchedule: Object.keys(workSchedule).length > 0 ? workSchedule : undefined,
+          ...(emailChanged ? { verificationToken } : {}),
+        });
+        if (isTraineeRole) {
+          for (const id of deletedIds) { await deleteSupervisor(id); }
+          for (const sup of existingSupervisors) { if (deletedIds.has(sup.id)) continue; await updateSupervisor(sup.id, editedSupervisors[sup.id]); }
+          for (const s of newSupervisors) { await createSupervisor(trainee.id, s); }
+        }
         setSaveResult("success");
       } catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to update trainee."); }
       finally { setLoading(false); }
@@ -384,9 +409,9 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
       )}
 
       {/* Main edit modal */}
-      <div className="modal-overlay" onClick={onClose}>
-        <div className="modal-content" style={{ maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.25rem" }}>
+      <RightSidebarDrawer onClose={onClose} width={620}>
+        <div className="card drawer-form-card" style={{ margin: 0 }}>
+          <div className="drawer-form-header" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--accent-light)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
             </div>
@@ -396,26 +421,27 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
             </div>
           </div>
 
-          <form onSubmit={handleSubmit}>
-            {/* Resend Temporary Password — only for users who haven't set their password */}
-            {trainee.mustChangePassword && (
-              <div style={{ background: "var(--warning-light)", border: "1px solid var(--warning)", borderRadius: "var(--radius-sm)", padding: "0.75rem 1rem", marginBottom: "1rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warning-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-                  <span style={{ fontSize: "0.82rem", color: "var(--warning-text)" }}>This user hasn&apos;t set their password yet.</span>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  style={{ fontSize: "0.78rem", padding: "0.35rem 0.7rem", whiteSpace: "nowrap", flexShrink: 0 }}
-                  disabled={resendLoading}
-                  onClick={handleResendTempPassword}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>
-                  {resendLoading ? "Sending…" : "Resend Temp Password"}
-                </button>
+          {trainee.mustChangePassword && (
+            <div className="drawer-form-header" style={{ borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warning-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                <span style={{ fontSize: "0.82rem", color: "var(--warning-text)" }}>This user hasn&apos;t set their password yet.</span>
               </div>
-            )}
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{ fontSize: "0.78rem", padding: "0.35rem 0.7rem", whiteSpace: "nowrap", flexShrink: 0 }}
+                disabled={resendLoading}
+                onClick={handleResendTempPassword}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>
+                {resendLoading ? "Sending…" : "Resend Temp Password"}
+              </button>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="drawer-form">
+            <div className="drawer-form-body">
             {resendMsg && (
               <div style={{ padding: "0.5rem 0.75rem", borderRadius: "var(--radius-xs)", marginBottom: "0.75rem", fontSize: "0.82rem", background: resendMsg.type === "success" ? "var(--success-light)" : "var(--danger-light)", color: resendMsg.type === "success" ? "var(--success-text)" : "var(--danger)", border: `1px solid ${resendMsg.type === "success" ? "var(--success)" : "var(--danger)"}` }}>
                 {resendMsg.text}
@@ -424,7 +450,7 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
 
             <div className="form-group">
               <label>Role *</label>
-              <select value={role} onChange={(e) => setRole(e.target.value as "admin" | "trainee")}>
+              <select value={role} disabled aria-readonly="true">
                 <option value="trainee">Trainee</option>
                 <option value="admin">Admin</option>
               </select>
@@ -460,34 +486,39 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
               <div className="form-group"><label>Contact Number *</label><input value={contactNumber} onChange={(e) => setContactNumber(sanitizeInput(e.target.value))} /></div>
             </div>
 
-            <div className="form-group"><label>School *</label><input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
-            <div className="form-group"><label>Company / Institution Name *</label><input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
-            <div className="form-group"><label>Required Hours *</label><input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} /></div>
+            {isTraineeRole && (
+              <>
+                <div className="form-group"><label>School *</label><input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
+                <div className="form-group"><label>Company / Institution Name *</label><input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
+                <div className="form-group"><label>Required Hours *</label><input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} /></div>
 
-            {/* Work Schedule */}
-            <fieldset style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "1rem", marginBottom: "0.5rem" }}>
-              <legend style={{ fontWeight: 600, fontSize: "0.9rem", padding: "0 0.5rem" }}>Work Schedule</legend>
-              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
-                {DAY_LABELS.map((label, idx) => (
-                  <label key={idx} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: "0.85rem" }}>
-                    <input type="checkbox" checked={String(idx) in workSchedule} onChange={() => toggleDay(idx)} />
-                    {label}
-                  </label>
-                ))}
-              </div>
-              {Object.keys(workSchedule).sort((a, b) => Number(a) - Number(b)).map((dayNum) => (
-                <div key={dayNum} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
-                  <span style={{ fontWeight: 500, fontSize: "0.85rem" }}>{DAY_LABELS[Number(dayNum)]}</span>
-                  <input type="time" value={workSchedule[dayNum].start} onChange={(e) => updateDayTime(Number(dayNum), "start", e.target.value)} />
-                  <input type="time" value={workSchedule[dayNum].end} onChange={(e) => updateDayTime(Number(dayNum), "end", e.target.value)} />
-                </div>
-              ))}
-              {Object.keys(workSchedule).length === 0 && (
-                <p style={{ color: "var(--danger)", fontSize: "0.82rem", margin: 0 }}>At least one work day is required.</p>
-              )}
-            </fieldset>
+                {/* Work Schedule */}
+                <fieldset style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "1rem", marginBottom: "0.5rem" }}>
+                  <legend style={{ fontWeight: 600, fontSize: "0.9rem", padding: "0 0.5rem" }}>Work Schedule</legend>
+                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+                    {DAY_LABELS.map((label, idx) => (
+                      <label key={idx} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: "0.85rem" }}>
+                        <input type="checkbox" checked={String(idx) in workSchedule} onChange={() => toggleDay(idx)} />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                  {Object.keys(workSchedule).sort((a, b) => Number(a) - Number(b)).map((dayNum) => (
+                    <div key={dayNum} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
+                      <span style={{ fontWeight: 500, fontSize: "0.85rem" }}>{DAY_LABELS[Number(dayNum)]}</span>
+                      <input type="time" value={workSchedule[dayNum].start} onChange={(e) => updateDayTime(Number(dayNum), "start", e.target.value)} />
+                      <input type="time" value={workSchedule[dayNum].end} onChange={(e) => updateDayTime(Number(dayNum), "end", e.target.value)} />
+                    </div>
+                  ))}
+                  {Object.keys(workSchedule).length === 0 && (
+                    <p style={{ color: "var(--danger)", fontSize: "0.82rem", margin: 0 }}>At least one work day is required.</p>
+                  )}
+                </fieldset>
+              </>
+            )}
 
             {/* Supervisors section */}
+            {isTraineeRole && (
             <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border)", paddingTop: "0.75rem" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
                 <label style={{ fontWeight: 600, fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
@@ -505,28 +536,33 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
                 <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>No supervisors assigned.</p>
               )}
             </div>
-
-            {error && (
-              <div style={{ padding: "0.6rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem", marginTop: "0.5rem", display: "flex", alignItems: "flex-start", gap: "0.4rem" }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: "0.1rem" }}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
-                {error}
-              </div>
             )}
 
-            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end", marginTop: "1rem" }}>
-              <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
-                {loading ? "Saving\u2026" : (
-                  <>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                    Save Changes
-                  </>
-                )}
-              </button>
+            </div>
+
+            <div className="drawer-form-footer">
+              {error && (
+                <div style={{ padding: "0.6rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem", display: "flex", alignItems: "flex-start", gap: "0.4rem" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: "0.1rem" }}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+                  {error}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+                <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
+                  {loading ? "Saving\u2026" : (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                      Save Changes
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </form>
         </div>
-      </div>
+      </RightSidebarDrawer>
     </>
   );
 }

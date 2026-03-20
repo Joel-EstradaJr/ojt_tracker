@@ -182,9 +182,9 @@ button {
 
 /* -- Container ------------------------------------------------- */
 .container {
-  max-width: 1200px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 2rem 1.5rem;
+  padding: 2rem 1.75rem;
 }
 
 /* -- Card ------------------------------------------------------ */
@@ -403,6 +403,94 @@ button {
   animation: slideUp 0.25s ease;
 }
 
+/* -- Side Drawer ---------------------------------------------- */
+.side-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.side-drawer-panel {
+  --drawer-width: 600px;
+  width: min(100vw, var(--drawer-width));
+  height: 100dvh;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-xl);
+  position: relative;
+  animation: slideInFromRight 0.22s ease;
+}
+
+.side-drawer-scroll {
+  height: 100%;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.drawer-form-card {
+  height: calc(100dvh - 2rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.drawer-form-header {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 1.25rem 1.25rem 1rem;
+  background: var(--gradient-surface);
+}
+
+.drawer-form {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-form-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.1rem 1.25rem;
+}
+
+.drawer-form-footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--gradient-surface);
+  padding: 0.9rem 1.25rem 1.1rem;
+}
+
+.side-drawer-close {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text-secondary);
+  line-height: 1;
+  font-size: 1.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.side-drawer-close:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -411,6 +499,11 @@ button {
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(12px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes slideInFromRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
 }
 
 /* -- Trainee cards grid ---------------------------------------- */
@@ -1006,6 +1099,12 @@ input[type="time"]:focus { border-color: var(--primary); box-shadow: 0 0 0 3px v
   .trainee-grid { grid-template-columns: 1fr; }
   .stat-row { grid-template-columns: repeat(2, 1fr); }
   .modal-content { width: 95%; padding: 1.5rem; }
+  .side-drawer-panel { width: 100vw; border-left: none; }
+  .side-drawer-scroll { padding: 0.85rem; }
+  .drawer-form-card { height: calc(100dvh - 1.7rem); }
+  .drawer-form-header { padding: 1rem 1rem 0.85rem; }
+  .drawer-form-body { padding: 0.9rem 1rem; }
+  .drawer-form-footer { padding: 0.8rem 1rem 1rem; }
   .logs-table th, .logs-table td { padding: 0.5rem 0.6rem; font-size: 0.82rem; }
 }
 

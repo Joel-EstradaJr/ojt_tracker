@@ -10,6 +10,7 @@ import { useActionGuard } from "@/lib/useActionGuard";
 import { SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
 import { DEFAULT_WORK_SCHEDULE, WorkSchedule } from "@/lib/ph-holidays";
+import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -50,6 +51,7 @@ export default function CreateTraineeForm({
   const isModal = mode === "modal";
   const isAdminCreating = showRoleField; // admin dashboard passes showRoleField=true
   const [role, setRole] = useState<"admin" | "trainee">(defaultRole);
+  const isTraineeRole = !showRoleField || role === "trainee";
   const [lastName, setLastName] = useState("");
   const [firstName, setFirstName] = useState("");
   const [middleName, setMiddleName] = useState("");
@@ -135,7 +137,10 @@ export default function CreateTraineeForm({
     e.preventDefault();
     await runGuarded("create-submit", async () => {
       setError("");
-      if (!lastName || !firstName || !email || !contactNumber || !school || !companyName || !requiredHours) {
+      if (!lastName || !firstName || !email || !contactNumber) {
+        setError("All required fields must be filled."); return;
+      }
+      if (isTraineeRole && (!school || !companyName || !requiredHours)) {
         setError("All required fields must be filled."); return;
       }
       if (!isAdminCreating && (!password || !confirmPassword)) {
@@ -150,40 +155,50 @@ export default function CreateTraineeForm({
       if (!isAdminCreating && !emailVerified) { setError("Please verify your email address before creating."); return; }
       if (!phoneCharsOnly(contactNumber)) { setError("Contact number must contain only digits, +, -, (, ), and spaces."); return; }
       if (!isValidPhone(contactNumber)) { setError("Contact number must have at least 7 digits."); return; }
-      const schErr = validateInstitution("School", school); if (schErr) { setError(schErr); return; }
-      const coErr = validateInstitution("Company name", companyName); if (coErr) { setError(coErr); return; }
+      if (isTraineeRole) {
+        const schErr = validateInstitution("School", school); if (schErr) { setError(schErr); return; }
+        const coErr = validateInstitution("Company name", companyName); if (coErr) { setError(coErr); return; }
+      }
 
-      for (let i = 0; i < supervisors.length; i++) {
-        const s = supervisors[i];
-        const sLn = validateName(`Supervisor #${i + 1} last name`, s.lastName, true); if (sLn) { setError(sLn); return; }
-        const sFn = validateName(`Supervisor #${i + 1} first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
-        const sMn = validateName(`Supervisor #${i + 1} middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
-        if (!s.contactNumber?.trim() && !s.email?.trim()) {
-          setError(`Supervisor #${i + 1}: At least one of Contact Number or Email is required.`); return;
+      if (isTraineeRole) {
+        for (let i = 0; i < supervisors.length; i++) {
+          const s = supervisors[i];
+          const sLn = validateName(`Supervisor #${i + 1} last name`, s.lastName, true); if (sLn) { setError(sLn); return; }
+          const sFn = validateName(`Supervisor #${i + 1} first name`, s.firstName, true); if (sFn) { setError(sFn); return; }
+          const sMn = validateName(`Supervisor #${i + 1} middle name`, s.middleName ?? "", false); if (sMn) { setError(sMn); return; }
+          if (!s.contactNumber?.trim() && !s.email?.trim()) {
+            setError(`Supervisor #${i + 1}: At least one of Contact Number or Email is required.`); return;
+          }
         }
       }
 
       // Check for duplicate supervisors (same full name)
-      const supKeys = new Set<string>();
-      for (let i = 0; i < supervisors.length; i++) {
-        const s = supervisors[i];
-        const key = [s.firstName, s.middleName, s.lastName, s.suffix].map((v) => (v ?? "").trim().toLowerCase()).join("|");
-        if (supKeys.has(key)) {
-          const dupName = [s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ");
-          setError(`Duplicate supervisor: "${dupName}". Each supervisor must be unique per trainee.`);
-          return;
+      if (isTraineeRole) {
+        const supKeys = new Set<string>();
+        for (let i = 0; i < supervisors.length; i++) {
+          const s = supervisors[i];
+          const key = [s.firstName, s.middleName, s.lastName, s.suffix].map((v) => (v ?? "").trim().toLowerCase()).join("|");
+          if (supKeys.has(key)) {
+            const dupName = [s.firstName, s.middleName, s.lastName, s.suffix].filter(Boolean).join(" ");
+            setError(`Duplicate supervisor: "${dupName}". Each supervisor must be unique per trainee.`);
+            return;
+          }
+          supKeys.add(key);
         }
-        supKeys.add(key);
       }
       setLoading(true);
       try {
         await createTrainee({
           role: showRoleField ? role : defaultRole,
           lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined,
-          email, contactNumber, school, companyName, requiredHours: Number(requiredHours),
-          workSchedule: Object.keys(workSchedule).length > 0 ? workSchedule : undefined,
+          email,
+          contactNumber,
+          school: isTraineeRole ? school : "N/A",
+          companyName: isTraineeRole ? companyName : "N/A",
+          requiredHours: isTraineeRole ? Number(requiredHours) : 1,
+          workSchedule: isTraineeRole && Object.keys(workSchedule).length > 0 ? workSchedule : undefined,
           ...(isAdminCreating ? {} : { password, verificationToken }),
-          supervisors: supervisors.length > 0 ? supervisors : undefined,
+          supervisors: isTraineeRole && supervisors.length > 0 ? supervisors : undefined,
         });
         onCreated();
       } catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to create trainee."); }
@@ -192,9 +207,9 @@ export default function CreateTraineeForm({
   };
 
   const formContent = (
-    <div className={isModal ? "modal-content" : "card"} style={{ maxWidth: 560, maxHeight: isModal ? "90vh" : undefined, overflowY: isModal ? "auto" : undefined, margin: isModal ? undefined : "0 auto" }} onClick={isModal ? (e) => e.stopPropagation() : undefined}>
+    <div className={isModal ? "card drawer-form-card" : "card"} style={{ margin: isModal ? 0 : "0 auto" }}>
       {showFormHeader && (
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.25rem" }}>
+        <div className={isModal ? "drawer-form-header" : undefined} style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: isModal ? 0 : "1.25rem" }}>
           <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--primary-light)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><line x1="20" y1="8" x2="20" y2="14" /><line x1="23" y1="11" x2="17" y2="11" /></svg>
           </div>
@@ -205,8 +220,9 @@ export default function CreateTraineeForm({
         </div>
       )}
 
-      <form id={formId} onSubmit={handleSubmit}>
-        {showRoleField && (
+      <form id={formId} onSubmit={handleSubmit} className={isModal ? "drawer-form" : undefined}>
+        <div className={isModal ? "drawer-form-body" : undefined}>
+          {showRoleField && (
           <div className="form-group">
             <label>Role *</label>
             <select value={role} onChange={(e) => setRole(e.target.value as "admin" | "trainee")}>
@@ -214,7 +230,7 @@ export default function CreateTraineeForm({
               <option value="admin">Admin</option>
             </select>
           </div>
-        )}
+          )}
 
         {/* Name fields */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
@@ -274,42 +290,46 @@ export default function CreateTraineeForm({
           </div>
         </div>
 
-        {/* School, Company, Hours */}
-        <div className="form-group">
-          <label>School *</label>
-          <input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value).toUpperCase())} placeholder="SCHOOL / UNIVERSITY NAME HERE" style={{ textTransform: "uppercase" }} />
-        </div>
-        <div className="form-group">
-          <label>Company / Institution Name *</label>
-          <input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value).toUpperCase())} placeholder="COMPANY / INSTITUTION WHERE OJT IS RENDERED" style={{ textTransform: "uppercase" }} />
-        </div>
-        <div className="form-group">
-          <label>Required Hours *</label>
-          <input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} />
-        </div>
-
-        {/* Work Schedule */}
-        <fieldset style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "1rem", marginBottom: "0.5rem" }}>
-          <legend style={{ fontWeight: 600, fontSize: "0.9rem", padding: "0 0.5rem" }}>Work Schedule</legend>
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
-            {DAY_LABELS.map((label, idx) => (
-              <label key={idx} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: "0.85rem" }}>
-                <input type="checkbox" checked={String(idx) in workSchedule} onChange={() => toggleDay(idx)} />
-                {label}
-              </label>
-            ))}
-          </div>
-          {Object.keys(workSchedule).sort((a, b) => Number(a) - Number(b)).map((dayNum) => (
-            <div key={dayNum} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
-              <span style={{ fontWeight: 500, fontSize: "0.85rem" }}>{DAY_LABELS[Number(dayNum)]}</span>
-              <input type="time" value={workSchedule[dayNum].start} onChange={(e) => updateDayTime(Number(dayNum), "start", e.target.value)} />
-              <input type="time" value={workSchedule[dayNum].end} onChange={(e) => updateDayTime(Number(dayNum), "end", e.target.value)} />
+        {isTraineeRole && (
+          <>
+            {/* School, Company, Hours */}
+            <div className="form-group">
+              <label>School *</label>
+              <input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value).toUpperCase())} placeholder="SCHOOL / UNIVERSITY NAME HERE" style={{ textTransform: "uppercase" }} />
             </div>
-          ))}
-          {Object.keys(workSchedule).length === 0 && (
-            <p style={{ color: "var(--danger)", fontSize: "0.82rem", margin: 0 }}>At least one work day is required.</p>
-          )}
-        </fieldset>
+            <div className="form-group">
+              <label>Company / Institution Name *</label>
+              <input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value).toUpperCase())} placeholder="COMPANY / INSTITUTION WHERE OJT IS RENDERED" style={{ textTransform: "uppercase" }} />
+            </div>
+            <div className="form-group">
+              <label>Required Hours *</label>
+              <input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} />
+            </div>
+
+            {/* Work Schedule */}
+            <fieldset style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "1rem", marginBottom: "0.5rem" }}>
+              <legend style={{ fontWeight: 600, fontSize: "0.9rem", padding: "0 0.5rem" }}>Work Schedule</legend>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+                {DAY_LABELS.map((label, idx) => (
+                  <label key={idx} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: "0.85rem" }}>
+                    <input type="checkbox" checked={String(idx) in workSchedule} onChange={() => toggleDay(idx)} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              {Object.keys(workSchedule).sort((a, b) => Number(a) - Number(b)).map((dayNum) => (
+                <div key={dayNum} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
+                  <span style={{ fontWeight: 500, fontSize: "0.85rem" }}>{DAY_LABELS[Number(dayNum)]}</span>
+                  <input type="time" value={workSchedule[dayNum].start} onChange={(e) => updateDayTime(Number(dayNum), "start", e.target.value)} />
+                  <input type="time" value={workSchedule[dayNum].end} onChange={(e) => updateDayTime(Number(dayNum), "end", e.target.value)} />
+                </div>
+              ))}
+              {Object.keys(workSchedule).length === 0 && (
+                <p style={{ color: "var(--danger)", fontSize: "0.82rem", margin: 0 }}>At least one work day is required.</p>
+              )}
+            </fieldset>
+          </>
+        )}
 
         {!isAdminCreating && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
@@ -331,6 +351,7 @@ export default function CreateTraineeForm({
         )}
 
         {/* Supervisors section */}
+        {isTraineeRole && (
         <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border)", paddingTop: "0.75rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
             <label style={{ fontWeight: 600, fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
@@ -380,28 +401,40 @@ export default function CreateTraineeForm({
             </div>
           ))}
         </div>
-
-        {/* Error & actions */}
-        {error && (
-          <div style={{ padding: "0.6rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem", marginTop: "0.5rem", display: "flex", alignItems: "flex-start", gap: "0.4rem" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: "0.1rem" }}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
-            {error}
-          </div>
         )}
 
+          {/* Error */}
+          {error && !showSubmitActions && (
+            <div style={{ padding: "0.6rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem", marginTop: "0.5rem", display: "flex", alignItems: "flex-start", gap: "0.4rem" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: "0.1rem" }}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
         {showSubmitActions && (
-          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end", marginTop: "1rem" }}>
-            {onClose && (
-              <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <div className={isModal ? "drawer-form-footer" : undefined}>
+            {error && (
+              <div style={{ padding: "0.6rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.75rem", display: "flex", alignItems: "flex-start", gap: "0.4rem" }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: "0.1rem" }}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+                {error}
+              </div>
             )}
-            <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
-              {loading ? "Creating\u2026" : (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                  {submitLabel}
-                </>
+
+            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+              {onClose && (
+                <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
               )}
-            </button>
+              <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
+                {loading ? "Creating\u2026" : (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                    {submitLabel}
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         )}
       </form>
@@ -413,8 +446,8 @@ export default function CreateTraineeForm({
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <RightSidebarDrawer onClose={onClose ?? (() => {})} width={620}>
       {formContent}
-    </div>
+    </RightSidebarDrawer>
   );
 }

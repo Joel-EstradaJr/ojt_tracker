@@ -1,4 +1,4 @@
-// ============================================================
+// NEW SCHEMA
 // Prisma Schema — OJT Progress Tracker
 // Provider: PostgreSQL
 // ============================================================
@@ -12,141 +12,224 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── Enums ─────────────────────────────────────────────────────
+
 enum AuditAction {
   CREATE
   UPDATE
   DELETE
 }
 
-// ── Trainee ──────────────────────────────────────────────────
-// Represents an OJT trainee with structured name fields,
-// contact info, school, company, and a hashed password.
+enum UserRole {
+  ADMIN
+  TRAINEE
+}
+
+enum OvertimeType {
+  EARNED
+  USED
+  ADJUSTED // lets admins manually fix balances later
+}
+
+// ── User ──────────────────────────────────────────────────────
+// Owns authentication state for BOTH admins and trainees.
+// Separating auth from profile lets admins exist without a
+// Trainee record, and keeps security fields in one place.
+model User {
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  role                UserRole  @default(TRAINEE)
+  passwordHash        String
+  mustChangePassword  Boolean   @default(false)
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  trainee            Trainee?
+  resetCodes         PasswordResetCode[]
+  passwordHistory    PasswordHistory[]
+  auditLogsPerformed AuditLog[]
+}
+
+// ── Trainee ───────────────────────────────────────────────────
+// OJT profile linked 1-to-1 with a User account.
+// All auth fields have moved to User; this model owns only
+// identity, school, company placement, and hours requirement.
 model Trainee {
   id            String   @id @default(uuid())
-  role          String   @default("trainee") // "admin" | "trainee"
+  userId        String   @unique          // FK → User (auth identity)
   lastName      String
   firstName     String
-  middleName    String?  // optional
-  suffix        String?  // optional (e.g. Jr., III)
-  email         String   @unique
+  middleName    String?
+  suffix        String?
   contactNumber String
   school        String
-  companyName   String   // company/institution where trainee renders OJT
-  requiredHours Int      // total hours the trainee must complete
-  // Per-day work schedule: JSON mapping day numbers (0-6) to {start, end}
-  // Default: Mon-Fri 8:00-17:00
-  workSchedule  Json     @default("{\"1\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"2\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"3\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"4\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"5\":{\"start\":\"08:00\",\"end\":\"17:00\"}}")
-  passwordHash  String   // bcrypt hash of the trainee-specific password
-  mustChangePassword Boolean @default(false) // true when admin creates user with temp password
-  failedLoginAttempts Int      @default(0)
-  lockedUntil         DateTime?
+  companyId     String                    // FK → Company (normalized)
+  requiredHours Int
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   // Relations
-  logs        LogEntry[]
-  supervisors Supervisor[]
-  resetCodes  PasswordResetCode[]
-  passwordHistory PasswordHistory[]
-  auditLogsPerformed AuditLog[]
+  user         User                @relation(fields: [userId],    references: [id], onDelete: Cascade)
+  company      Company             @relation(fields: [companyId], references: [id])
+  workSchedule WorkScheduleEntry[]
+  logs         LogEntry[]
+  supervisors  Supervisor[]
+  overtimeLedger OvertimeLedger[]
+
+  @@index([companyId])
 }
 
-// ── Supervisor ───────────────────────────────────────────────
-// Each trainee can have multiple supervisors.
-// At least one of contactNumber or email must be provided
-// (enforced at application level).
-model Supervisor {
-  id            String  @id @default(uuid())
-  traineeId     String
-  lastName      String
-  firstName     String
-  middleName    String? // optional
-  suffix        String? // optional
-  contactNumber String? // at least one of contactNumber/email required
-  email         String? // at least one of contactNumber/email required
-
+// ── Company ───────────────────────────────────────────────────
+// Normalizes companyName off Trainee, enabling company-level
+// queries (e.g. how many trainees per company) and future
+// extension (company address, contact person, etc.).
+model Company {
+  id        String   @id @default(uuid())
+  name      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Relation back to trainee (cascade delete)
+  trainees Trainee[]
+}
+
+// ── WorkScheduleEntry ─────────────────────────────────────────
+// Replaces the opaque workSchedule JSON blob on Trainee.
+// Each row is one day's schedule, making it filterable and
+// individually updatable without full-document rewrites.
+// dayOfWeek: 0 = Sunday … 6 = Saturday (mirrors JS Date).
+model WorkScheduleEntry {
+  id        String @id @default(uuid())
+  traineeId String
+  dayOfWeek Int    // 0–6; unique per trainee enforced below
+  startTime DateTime // "HH:MM" 24-hour format
+  endTime   DateTime // "HH:MM" 24-hour format
+
+  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+
+  @@unique([traineeId, dayOfWeek])
+  @@index([traineeId])
+}
+
+// ── Supervisor ────────────────────────────────────────────────
+// Each trainee can have multiple supervisors.
+// At least one of contactNumber or email required (app-level).
+model Supervisor {
+  id            String   @id @default(uuid())
+  traineeId     String
+  lastName      String
+  firstName     String
+  middleName    String?
+  suffix        String?
+  contactNumber String?
+  email         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
   trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
 
   @@unique([traineeId, firstName, lastName, middleName, suffix], name: "unique_supervisor_per_trainee")
   @@index([traineeId])
 }
 
-// ── LogEntry ─────────────────────────────────────────────────
-// A single day's time-log record for a trainee.
-// Now includes lunch break fields for accurate hour calculation,
-// overtime tracking, and offset (applying previous overtime).
+// ── LogEntry ──────────────────────────────────────────────────
+// One day's time-log record per trainee.
+// Stores clock-in/out, lunch window, computed hour totals,
+// overtime, offset consumed, and optional accomplishment note.
 model LogEntry {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   traineeId      String
-  date           DateTime // calendar date of the log
-  timeIn         DateTime // clock-in timestamp
-  lunchStart     DateTime // lunch break start (default 12:00 PM)
-  lunchEnd       DateTime // lunch break end   (default 1:00 PM)
-  timeOut        DateTime? // clock-out timestamp (null until user clocks out)
-  hoursWorked    Float    @default(0) // (timeOut - timeIn) - lunch
-  overtime       Float    @default(0) // calculated from schedule + toggles
-  offsetUsed     Float    @default(0) // hours deducted from accumulated OT bank
-  accomplishment String?  // optional freeform text
+  date           DateTime  // calendar date (date-only semantics)
+  timeIn         DateTime
+  lunchStart     DateTime
+  lunchEnd       DateTime
+  timeOut        DateTime?
+  hoursWorked    Float     @default(0) // (timeOut − timeIn) − lunch
+  overtime       Float     @default(0) // excess beyond scheduled hours
+  offsetUsed     Float     @default(0) // OT bank hours applied this day
+  accomplishment String?
+  createdAt      DateTime  @default(now())
 
-  createdAt DateTime @default(now())
-
-  // Relation back to the owning trainee (cascade delete)
   trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
 
-  @@unique([traineeId, date]) // one log per trainee per date
+  @@unique([traineeId, date])
   @@index([traineeId])
+  @@index([date])            // supports date-range dashboard queries
 }
 
-// ── PasswordResetCode ────────────────────────────────────────
-// Stores a 6-digit verification code sent via email for
-// the forgot-password flow. Expires after 10 minutes.
+
+model OvertimeLedger {
+  id          String        @id @default(uuid())
+  traineeId   String
+  hours       Float         // always positive
+  type        OvertimeType
+  sourceLogId String?       // link to LogEntry (optional but important)
+  notes       String?       // admin notes or reason
+  createdAt   DateTime      @default(now())
+
+  @@unique([sourceLogId, type])
+
+  // Relations
+  trainee Trainee  @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+  sourceLog LogEntry? @relation(fields: [sourceLogId], references: [id], onDelete: SetNull)
+
+  @@index([traineeId])
+  @@index([sourceLogId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+
+// ── PasswordResetCode ─────────────────────────────────────────
+// 6-digit email verification code for the forgot-password flow.
+// References User (not Trainee) so admins can reset too.
 model PasswordResetCode {
   id        String   @id @default(uuid())
-  traineeId String
-  code      String   // 6-digit code
-  expiresAt DateTime // code expiration timestamp
+  userId    String
+  code      String
+  expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([traineeId])
+  @@index([userId])
 }
 
-// ── EmailVerificationCode ────────────────────────────────────
-// Stores a 6-digit code sent to an email address to verify
-// ownership before creating or editing a trainee record.
+// ── EmailVerificationCode ─────────────────────────────────────
+// 6-digit code sent to verify email ownership before
+// creating or editing a trainee record. Not tied to a user
+// because the email may not belong to an account yet.
 model EmailVerificationCode {
   id        String   @id @default(uuid())
-  email     String   // target email to verify
-  code      String   // 6-digit code
-  expiresAt DateTime // code expiration timestamp
+  email     String
+  code      String
+  expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
 
   @@index([email])
 }
 
-// ── PasswordHistory ──────────────────────────────────────────
-// Stores previous password hashes to prevent password reuse.
+// ── PasswordHistory ───────────────────────────────────────────
+// Previous password hashes to prevent reuse.
+// References User so the same reuse-check applies to admins.
 model PasswordHistory {
   id           String   @id @default(uuid())
-  traineeId    String
+  userId       String
   passwordHash String
   createdAt    DateTime @default(now())
 
-  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([traineeId])
+  @@index([userId])
 }
 
-// ── AuditLog ────────────────────────────────────────────────
-// Generic audit trail table designed for CREATE/UPDATE/DELETE
-// events across entities, including field-level JSON snapshots.
+// ── AuditLog ──────────────────────────────────────────────────
+// Generic CREATE/UPDATE/DELETE trail across all entities.
+// performedById → User so both admins and trainees are tracked.
 model AuditLog {
   id            String      @id @default(uuid())
   actionType    AuditAction
@@ -158,7 +241,7 @@ model AuditLog {
   metadata      Json?
   createdAt     DateTime    @default(now())
 
-  performedBy Trainee? @relation(fields: [performedById], references: [id], onDelete: SetNull)
+  performedBy User? @relation(fields: [performedById], references: [id], onDelete: SetNull)
 
   @@index([actionType])
   @@index([entityName])
@@ -167,11 +250,13 @@ model AuditLog {
   @@index([createdAt])
 }
 
-// ── SystemSettings ───────────────────────────────────────────
-// Singleton record storing admin-controlled overtime toggles.
+// ── SystemSettings ────────────────────────────────────────────
+// Singleton row (id = "default") for admin-controlled toggles.
 model SystemSettings {
   id                     String  @id @default("default")
   countEarlyInAsOT       Boolean @default(false)
   countLateOutAsOT       Boolean @default(false)
   countEarlyLunchEndAsOT Boolean @default(false)
 }
+
+// END OF NEW SCHEMA

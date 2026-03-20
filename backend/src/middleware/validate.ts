@@ -64,6 +64,10 @@ export function validateTrainee(req: Request, res: Response, next: NextFunction)
 
 // ── Validate Trainee (update — no password) ──────────────────
 export function validateTraineeUpdate(req: Request, res: Response, next: NextFunction) {
+  if (Object.prototype.hasOwnProperty.call(req.body ?? {}, "role")) {
+    return res.status(400).json({ error: "Role is read-only once the user is created." });
+  }
+
   const result = updateTraineeSchema.safeParse(req.body);
   if (!result.success) {
     return res.status(400).json({ error: formatZodErrors(result.error) });

@@ -36,7 +36,7 @@ export default function Sidebar({ traineeId, collapsed, onToggle }: SidebarProps
   return (
     <aside
       style={{
-        width: collapsed ? 76 : 248,
+        width: collapsed ? 84 : 272,
         background: "var(--surface)",
         borderRight: "1px solid var(--border)",
         padding: "1rem 0.75rem",

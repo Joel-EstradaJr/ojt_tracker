@@ -15,6 +15,9 @@ import { createAuditLog } from "../utils/audit";
 
 const SALT_ROUNDS = 10;
 const INITIAL_PASSWORD_REQUIRED_ERROR = "Forgot Password is disabled for this account until the temporary password is changed.";
+const ADMIN_DEFAULT_SCHOOL = "N/A";
+const ADMIN_DEFAULT_COMPANY = "N/A";
+const ADMIN_DEFAULT_REQUIRED_HOURS = 1;
 
 // Helper: build a display name from structured fields
 function displayName(t: { lastName: string; firstName: string; middleName?: string | null; suffix?: string | null }) {
@@ -135,6 +138,8 @@ export const createTrainee = async (req: Request, res: Response) => {
 
     const passwordHash = await bcrypt.hash(actualPassword, SALT_ROUNDS);
 
+    const isTraineeRole = resolvedRole === "trainee";
+
     const trainee = await prisma.trainee.create({
       data: {
         role: resolvedRole,
@@ -144,14 +149,14 @@ export const createTrainee = async (req: Request, res: Response) => {
         suffix: suffix || null,
         email,
         contactNumber,
-        school,
-        companyName,
-        requiredHours: Number(requiredHours),
-        ...(workSchedule ? { workSchedule } : {}),
+        school: isTraineeRole ? school : ADMIN_DEFAULT_SCHOOL,
+        companyName: isTraineeRole ? companyName : ADMIN_DEFAULT_COMPANY,
+        requiredHours: isTraineeRole ? Number(requiredHours) : ADMIN_DEFAULT_REQUIRED_HOURS,
+        ...(isTraineeRole && workSchedule ? { workSchedule } : {}),
         passwordHash,
         mustChangePassword,
         // Check for duplicate supervisors within the provided list
-        ...(Array.isArray(supervisors) && supervisors.length > 0
+        ...(isTraineeRole && Array.isArray(supervisors) && supervisors.length > 0
           ? (() => {
             const seen = new Set<string>();
             for (const s of supervisors as Record<string, string>[]) {
@@ -220,27 +225,27 @@ export const createTrainee = async (req: Request, res: Response) => {
 // ── Update trainee ───────────────────────────────────────────
 export const updateTrainee = async (req: Request, res: Response) => {
   try {
-    const auth = (req as Request & { auth?: { role: "admin" | "trainee" } }).auth;
     const { id } = req.params;
     const {
-      role,
       lastName, firstName, middleName, suffix,
       email, contactNumber, school, companyName, requiredHours,
       workSchedule,
       verificationToken,
     } = req.body;
 
-    if (role && auth?.role !== "admin") {
-      return res.status(403).json({ error: "Only admins can edit user roles." });
-    }
-
     // If email changed, verify ownership of the new email
     const currentTrainee = await prisma.trainee.findUnique({ where: { id } });
+    if (!currentTrainee) {
+      return res.status(404).json({ error: "Trainee not found." });
+    }
+
     if (currentTrainee && currentTrainee.email !== email) {
       if (!verificationToken || !(await isEmailVerified(email, verificationToken))) {
         return res.status(400).json({ error: "New email must be verified before updating." });
       }
     }
+
+    const isTraineeRole = currentTrainee.role === "trainee";
 
     // Check duplicate email (but allow same trainee to keep theirs)
     const existing = await prisma.trainee.findUnique({ where: { email } });
@@ -257,17 +262,20 @@ export const updateTrainee = async (req: Request, res: Response) => {
     const trainee = await prisma.trainee.update({
       where: { id },
       data: {
-        ...(auth?.role === "admin" && role ? { role } : {}),
         lastName,
         firstName,
         middleName: middleName || null,
         suffix: suffix || null,
         email,
         contactNumber,
-        school,
-        companyName,
-        requiredHours: Number(requiredHours),
-        ...(workSchedule ? { workSchedule } : {}),
+        ...(isTraineeRole
+          ? {
+            school,
+            companyName,
+            requiredHours: Number(requiredHours),
+            ...(workSchedule ? { workSchedule } : {}),
+          }
+          : {}),
       },
       select: { ...TRAINEE_PUBLIC_SELECT, supervisors: true, logs: { select: { hoursWorked: true } } },
     });

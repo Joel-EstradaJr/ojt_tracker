@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { deleteLog, downloadExport, patchLogAction } from "@/lib/api";
 import ImportCSV from "@/components/ImportCSV";
 import LogForm from "@/components/LogForm";
+import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 import { LogEntry } from "@/types";
 import { ThemeToggle } from "@/components/ThemeProvider";
 import PageHeading from "@/components/PageHeading";
@@ -527,12 +528,25 @@ export default function TraineeEntryLogsPage() {
         traineeId={id}
         traineeDisplayName={trainee.displayName}
         onCreated={loadData}
-        editingLog={editingLog}
-        onCancelEdit={() => setEditingLog(null)}
         availableOffset={availableOffset}
         viewerRole={viewerRole}
         logs={logs}
       />
+
+      {editingLog && (
+        <RightSidebarDrawer onClose={() => setEditingLog(null)} width={620}>
+          <LogForm
+            traineeId={id}
+            traineeDisplayName={trainee.displayName}
+            onCreated={loadData}
+            editingLog={editingLog}
+            onCancelEdit={() => setEditingLog(null)}
+            availableOffset={availableOffset}
+            viewerRole={viewerRole}
+            logs={logs}
+          />
+        </RightSidebarDrawer>
+      )}
 
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.05 }}>
         <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap" }}>
