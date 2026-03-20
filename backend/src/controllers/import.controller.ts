@@ -91,7 +91,27 @@ function parseDate(val: string): string {
   return v;
 }
 
-const STANDARD_HOURS = 8;
+// Work schedule type: maps day number (0-6) to {start, end}
+type WorkScheduleMap = Record<string, { start: string; end: string }>;
+
+const DEFAULT_SCHEDULE: WorkScheduleMap = {
+  "1": { start: "08:00", end: "17:00" },
+  "2": { start: "08:00", end: "17:00" },
+  "3": { start: "08:00", end: "17:00" },
+  "4": { start: "08:00", end: "17:00" },
+  "5": { start: "08:00", end: "17:00" },
+};
+
+function getStandardHoursForDay(schedule: WorkScheduleMap | null | undefined, dayOfWeek: number): number {
+  const sched = schedule || DEFAULT_SCHEDULE;
+  const dayEntry = sched[String(dayOfWeek)];
+  if (!dayEntry) return 8;
+  const [sh, sm] = dayEntry.start.split(":").map(Number);
+  const [eh, em] = dayEntry.end.split(":").map(Number);
+  const totalMinutes = (eh * 60 + em) - (sh * 60 + sm);
+  const workedMinutes = totalMinutes - 60;
+  return workedMinutes > 0 ? parseFloat((workedMinutes / 60).toFixed(2)) : 8;
+}
 
 export const importCSV = async (req: Request, res: Response) => {
   try {
@@ -167,7 +187,9 @@ export const importCSV = async (req: Request, res: Response) => {
         continue;
       }
 
-      const overtime = parseFloat(Math.max(0, hoursWorked - STANDARD_HOURS).toFixed(2));
+      const logDate = new Date(dateStr);
+      const standardHours = getStandardHoursForDay(trainee.workSchedule as WorkScheduleMap, logDate.getDay());
+      const overtime = parseFloat(Math.max(0, hoursWorked - standardHours).toFixed(2));
 
       // Check for duplicate date
       const existing = await prisma.logEntry.findFirst({

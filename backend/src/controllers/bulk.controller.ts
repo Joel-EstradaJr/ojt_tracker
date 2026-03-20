@@ -86,7 +86,7 @@ export const exportAllCSV = async (_req: Request, res: Response) => {
           format(l.timeIn, "HH:mm"),
           format(l.lunchStart, "HH:mm"),
           format(l.lunchEnd, "HH:mm"),
-          format(l.timeOut, "HH:mm"),
+          l.timeOut ? format(l.timeOut, "HH:mm") : "N/A",
           String(l.hoursWorked),
           String(l.overtime),
           String(l.offsetUsed),

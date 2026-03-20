@@ -12,6 +12,7 @@ import exportRoutes from "./routes/export.routes";
 import importRoutes from "./routes/import.routes";
 import authRoutes from "./routes/auth.routes";
 import emailRoutes from "./routes/email.routes";
+import settingsRoutes from "./routes/settings.routes";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -38,6 +39,7 @@ app.use("/api/export", exportRoutes);
 app.use("/api/import", importRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/email", emailRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // ── Health check ─────────────────────────────────────────────
 app.get("/health", (_req, res) => {

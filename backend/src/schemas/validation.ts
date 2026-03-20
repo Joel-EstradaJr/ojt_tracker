@@ -234,6 +234,7 @@ export const createTraineeSchema = z.object({
     .number({ message: "Required hours must be a number." })
     .int("Required hours must be a whole number.")
     .min(1, "Required hours must be at least 1."),
+  workSchedule: z.record(z.string(), z.object({ start: z.string(), end: z.string() })).optional(),
   password: z
     .string()
     .min(1, "Password is required.")
@@ -257,6 +258,7 @@ export const updateTraineeSchema = z.object({
     .number({ message: "Required hours must be a number." })
     .int("Required hours must be a whole number.")
     .min(1, "Required hours must be at least 1."),
+  workSchedule: z.record(z.string(), z.object({ start: z.string(), end: z.string() })).optional(),
   verificationToken: z.string().optional(),
 });
 
@@ -288,10 +290,10 @@ export const createLogSchema = z.object({
   traineeId: z.string().uuid("Invalid trainee ID."),
   date: z.string().min(1, "Date is required."),
   timeIn: z.string().min(1, "Time In is required."),
-  timeOut: z.string().min(1, "Time Out is required."),
-  lunchStart: z.string().min(1, "Lunch Start is required."),
-  lunchEnd: z.string().min(1, "Lunch End is required."),
-  accomplishment: textField("Accomplishment"),
+  timeOut: z.string().optional(),
+  lunchStart: z.string().optional(),
+  lunchEnd: z.string().optional(),
+  accomplishment: z.string().optional(),
   applyOffset: z.boolean().optional(),
   offsetAmount: z.number().optional(),
 });

@@ -118,47 +118,90 @@ export function getHolidayMap(year: number): Map<string, HolidayInfo> {
   return map;
 }
 
+// Work schedule type
+export type WorkSchedule = Record<string, { start: string; end: string }>;
+
+export const DEFAULT_WORK_SCHEDULE: WorkSchedule = {
+  "1": { start: "08:00", end: "17:00" },
+  "2": { start: "08:00", end: "17:00" },
+  "3": { start: "08:00", end: "17:00" },
+  "4": { start: "08:00", end: "17:00" },
+  "5": { start: "08:00", end: "17:00" },
+};
+
 /**
- * Check if a date is a weekend.
+ * Check if a date is a non-working day based on workSchedule.
  */
+export function isNonWorkDay(d: Date, schedule?: WorkSchedule | null): boolean {
+  const sched = schedule || DEFAULT_WORK_SCHEDULE;
+  return !(String(d.getDay()) in sched);
+}
+
+/** Backward-compatible alias: checks Saturday/Sunday only */
 export function isWeekend(d: Date): boolean {
   const day = d.getDay();
   return day === 0 || day === 6;
 }
 
 /**
- * Check if a given date string (yyyy-MM-dd) is a working day
- * (not a weekend and not a Philippine holiday).
+ * Check if a given date is a working day
+ * (present in workSchedule and not a Philippine holiday).
  */
-export function isWorkingDay(d: Date): boolean {
-  if (isWeekend(d)) return false;
+export function isWorkingDay(d: Date, schedule?: WorkSchedule | null): boolean {
+  if (isNonWorkDay(d, schedule)) return false;
   const ds = fmt(d);
   const map = getHolidayMap(d.getFullYear());
   return !map.has(ds);
 }
 
 /**
- * Calculate the expected end date given a number of remaining
- * working days (where 1 day = 8 hours of work).
- * Counts forward from `startDate` (default: today), skipping
- * weekends and Philippine holidays.
- * Returns the date on which the last working day falls.
+ * Calculate hours for a specific day from schedule.
+ * Subtracts 1 hour for lunch. Returns 0 for non-work days.
+ */
+export function getHoursForDay(schedule: WorkSchedule | null | undefined, dayOfWeek: number): number {
+  const sched = schedule || DEFAULT_WORK_SCHEDULE;
+  const entry = sched[String(dayOfWeek)];
+  if (!entry) return 0;
+  const [sh, sm] = entry.start.split(":").map(Number);
+  const [eh, em] = entry.end.split(":").map(Number);
+  const totalMinutes = (eh * 60 + em) - (sh * 60 + sm);
+  const workedMinutes = totalMinutes - 60;
+  return workedMinutes > 0 ? parseFloat((workedMinutes / 60).toFixed(2)) : 8;
+}
+
+/**
+ * Calculate average hours per working day from schedule.
+ */
+export function getHoursPerDay(schedule?: WorkSchedule | null): number {
+  const sched = schedule || DEFAULT_WORK_SCHEDULE;
+  const days = Object.keys(sched);
+  if (days.length === 0) return 8;
+  let total = 0;
+  for (const dayNum of days) {
+    total += getHoursForDay(sched, Number(dayNum));
+  }
+  return parseFloat((total / days.length).toFixed(2));
+}
+
+/**
+ * Calculate expected end date given remaining hours.
+ * Iterates day-by-day, subtracting each work day's specific hours.
  */
 export function calculateExpectedEndDate(
-  remainingDays: number,
+  remainingHours: number,
   startDate?: Date,
+  schedule?: WorkSchedule | null,
 ): Date {
   const cursor = startDate ? new Date(startDate) : new Date();
   cursor.setHours(0, 0, 0, 0);
 
-  if (remainingDays <= 0) return cursor;
+  if (remainingHours <= 0) return cursor;
 
-  let counted = 0;
-  // Start from the next calendar day
-  while (counted < remainingDays) {
+  let hoursLeft = remainingHours;
+  while (hoursLeft > 0) {
     cursor.setDate(cursor.getDate() + 1);
-    if (isWorkingDay(cursor)) {
-      counted++;
+    if (isWorkingDay(cursor, schedule)) {
+      hoursLeft -= getHoursForDay(schedule, cursor.getDay());
     }
   }
   return cursor;

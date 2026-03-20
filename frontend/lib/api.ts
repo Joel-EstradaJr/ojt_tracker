@@ -45,6 +45,7 @@ export async function createTrainee(data: {
   school: string;
   companyName: string;
   requiredHours: number;
+  workSchedule?: Record<string, { start: string; end: string }>;
   password?: string;
   supervisors?: import("@/types").SupervisorInput[];
   verificationToken?: string;
@@ -72,6 +73,7 @@ export function updateTrainee(
     school: string;
     companyName: string;
     requiredHours: number;
+    workSchedule?: Record<string, { start: string; end: string }>;
     verificationToken?: string;
   }
 ) {
@@ -198,15 +200,26 @@ export function createLog(data: {
   traineeId: string;
   date: string;
   timeIn: string;
-  lunchStart: string;
-  lunchEnd: string;
-  timeOut: string;
-  accomplishment: string;
+  lunchStart?: string;
+  lunchEnd?: string;
+  timeOut?: string;
+  accomplishment?: string;
   applyOffset?: boolean;
   offsetAmount?: number;
 }) {
   return request<import("@/types").LogEntry>("/api/logs", {
     method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function patchLogAction(logId: string, data: {
+  action: "lunchStart" | "lunchEnd" | "timeOut" | "accomplishment";
+  timestamp?: string;
+  accomplishment?: string;
+}) {
+  return request<import("@/types").LogEntry>(`/api/logs/${logId}/action`, {
+    method: "PATCH",
     body: JSON.stringify(data),
   });
 }
@@ -219,7 +232,7 @@ export function updateLog(
     lunchStart: string;
     lunchEnd: string;
     timeOut: string;
-    accomplishment: string;
+    accomplishment?: string;
     applyOffset?: boolean;
     offsetAmount?: number;
   }
@@ -457,4 +470,23 @@ export async function importAllCSV(file: File) {
   }
 
   return res.json() as Promise<{ trainees: number; supervisors: number; logs: number; skipped: number }>;
+}
+
+// ── Settings endpoints ────────────────────────────────────────
+
+export interface SystemSettings {
+  countEarlyInAsOT: boolean;
+  countLateOutAsOT: boolean;
+  countEarlyLunchEndAsOT: boolean;
+}
+
+export function fetchSettings() {
+  return request<SystemSettings>("/api/settings");
+}
+
+export function updateSettings(data: Partial<SystemSettings>) {
+  return request<SystemSettings>("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
 }

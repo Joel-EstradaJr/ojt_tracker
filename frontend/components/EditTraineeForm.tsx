@@ -8,6 +8,9 @@ import { useState, useEffect, useCallback } from "react";
 import { updateTrainee, fetchSupervisors, createSupervisor, updateSupervisor, deleteSupervisor, sendEmailVerification, verifyEmailCode, resendTempPassword } from "@/lib/api";
 import { Trainee, Supervisor, SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
+import { DEFAULT_WORK_SCHEDULE, WorkSchedule } from "@/lib/ph-holidays";
+
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 interface Props {
   trainee: Trainee;
@@ -32,6 +35,20 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
   const [school, setSchool] = useState(trainee.school.toUpperCase());
   const [companyName, setCompanyName] = useState(trainee.companyName.toUpperCase());
   const [requiredHours, setRequiredHours] = useState(String(trainee.requiredHours));
+  const [workSchedule, setWorkSchedule] = useState<WorkSchedule>(
+    (trainee.workSchedule as WorkSchedule | undefined) ?? { ...DEFAULT_WORK_SCHEDULE }
+  );
+
+  const toggleDay = (day: number) => {
+    setWorkSchedule((prev) => {
+      const copy = { ...prev };
+      if (String(day) in copy) { delete copy[String(day)]; } else { copy[String(day)] = { start: "08:00", end: "17:00" }; }
+      return copy;
+    });
+  };
+  const updateDayTime = (day: number, field: "start" | "end", value: string) => {
+    setWorkSchedule((prev) => ({ ...prev, [String(day)]: { ...prev[String(day)], [field]: value } }));
+  };
 
   const [existingSupervisors, setExistingSupervisors] = useState<Supervisor[]>([]);
   const [editedSupervisors, setEditedSupervisors] = useState<Record<string, SupervisorInput>>({});
@@ -186,7 +203,7 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
   const executeSave = async () => {
     setShowConfirm(false); setLoading(true);
     try {
-      await updateTrainee(trainee.id, { role, lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined, email, contactNumber, school, companyName, requiredHours: Number(requiredHours), ...(emailChanged ? { verificationToken } : {}) });
+      await updateTrainee(trainee.id, { role, lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined, email, contactNumber, school, companyName, requiredHours: Number(requiredHours), workSchedule: Object.keys(workSchedule).length > 0 ? workSchedule : undefined, ...(emailChanged ? { verificationToken } : {}) });
       for (const id of deletedIds) { await deleteSupervisor(id); }
       for (const sup of existingSupervisors) { if (deletedIds.has(sup.id)) continue; await updateSupervisor(sup.id, editedSupervisors[sup.id]); }
       for (const s of newSupervisors) { await createSupervisor(trainee.id, s); }
@@ -376,6 +393,29 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
             <div className="form-group"><label>School *</label><input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
             <div className="form-group"><label>Company / Institution Name *</label><input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
             <div className="form-group"><label>Required Hours *</label><input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} /></div>
+
+            {/* Work Schedule */}
+            <fieldset style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "1rem", marginBottom: "0.5rem" }}>
+              <legend style={{ fontWeight: 600, fontSize: "0.9rem", padding: "0 0.5rem" }}>Work Schedule</legend>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+                {DAY_LABELS.map((label, idx) => (
+                  <label key={idx} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: "0.85rem" }}>
+                    <input type="checkbox" checked={String(idx) in workSchedule} onChange={() => toggleDay(idx)} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              {Object.keys(workSchedule).sort((a, b) => Number(a) - Number(b)).map((dayNum) => (
+                <div key={dayNum} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
+                  <span style={{ fontWeight: 500, fontSize: "0.85rem" }}>{DAY_LABELS[Number(dayNum)]}</span>
+                  <input type="time" value={workSchedule[dayNum].start} onChange={(e) => updateDayTime(Number(dayNum), "start", e.target.value)} />
+                  <input type="time" value={workSchedule[dayNum].end} onChange={(e) => updateDayTime(Number(dayNum), "end", e.target.value)} />
+                </div>
+              ))}
+              {Object.keys(workSchedule).length === 0 && (
+                <p style={{ color: "var(--danger)", fontSize: "0.82rem", margin: 0 }}>At least one work day is required.</p>
+              )}
+            </fieldset>
 
             {/* Supervisors section */}
             <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border)", paddingTop: "0.75rem" }}>

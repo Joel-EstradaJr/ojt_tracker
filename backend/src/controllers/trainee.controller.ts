@@ -12,6 +12,7 @@ import { isEmailVerified } from "./email.controller";
 import { setSessionCookie } from "../middleware/auth";
 
 const SALT_ROUNDS = 10;
+const INITIAL_PASSWORD_REQUIRED_ERROR = "Forgot Password is disabled for this account until the temporary password is changed.";
 
 // Helper: build a display name from structured fields
 function displayName(t: { lastName: string; firstName: string; middleName?: string | null; suffix?: string | null }) {
@@ -35,6 +36,7 @@ const TRAINEE_PUBLIC_SELECT = {
   school: true,
   companyName: true,
   requiredHours: true,
+  workSchedule: true,
   mustChangePassword: true,
   createdAt: true,
   updatedAt: true,
@@ -78,7 +80,8 @@ export const createTrainee = async (req: Request, res: Response) => {
       role,
       lastName, firstName, middleName, suffix,
       email, contactNumber, school, companyName,
-      requiredHours, password, supervisors, verificationToken,
+      requiredHours, workSchedule,
+      password, supervisors, verificationToken,
     } = req.body;
 
     const resolvedRole: "admin" | "trainee" = auth?.role === "admin"
@@ -141,6 +144,7 @@ export const createTrainee = async (req: Request, res: Response) => {
         school,
         companyName,
         requiredHours: Number(requiredHours),
+        ...(workSchedule ? { workSchedule } : {}),
         passwordHash,
         mustChangePassword,
         // Check for duplicate supervisors within the provided list
@@ -219,6 +223,7 @@ export const updateTrainee = async (req: Request, res: Response) => {
       role,
       lastName, firstName, middleName, suffix,
       email, contactNumber, school, companyName, requiredHours,
+      workSchedule,
       verificationToken,
     } = req.body;
 
@@ -259,6 +264,7 @@ export const updateTrainee = async (req: Request, res: Response) => {
         school,
         companyName,
         requiredHours: Number(requiredHours),
+        ...(workSchedule ? { workSchedule } : {}),
       },
       select: { ...TRAINEE_PUBLIC_SELECT, supervisors: true, logs: { select: { hoursWorked: true } } },
     });
@@ -378,6 +384,10 @@ export const forgotPassword = async (req: Request, res: Response) => {
     const trainee = await prisma.trainee.findUnique({ where: { id } });
     if (!trainee) {
       return res.status(404).json({ error: "Trainee not found." });
+    }
+
+    if (trainee.mustChangePassword) {
+      return res.status(403).json({ error: INITIAL_PASSWORD_REQUIRED_ERROR });
     }
 
     // Generate a random 6-digit code
@@ -500,6 +510,10 @@ export const resetPassword = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Trainee not found." });
     }
 
+    if (trainee.mustChangePassword) {
+      return res.status(403).json({ error: INITIAL_PASSWORD_REQUIRED_ERROR });
+    }
+
     const sameAsCurrent = await bcrypt.compare(newPassword, trainee.passwordHash);
     if (sameAsCurrent) {
       return res.status(400).json({ error: "You cannot reuse a previous password." });
@@ -523,6 +537,7 @@ export const resetPassword = async (req: Request, res: Response) => {
         where: { id },
         data: {
           passwordHash,
+          mustChangePassword: false,
           failedLoginAttempts: 0,
           lockedUntil: null,
         },

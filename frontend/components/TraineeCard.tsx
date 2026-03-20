@@ -24,10 +24,9 @@ export default function TraineeCard({ trainee, onClick, onEdit, onDelete }: Prop
 
   const isComplete = percent >= 100;
 
-  // Calculate expected end date from remaining hours
+  // Calculate expected end date from remaining hours using trainee-specific schedule
   const remainingHours = Math.max(0, trainee.requiredHours - trainee.totalHoursRendered);
-  const remainingDays = Math.ceil(remainingHours / 8);
-  const endDate = isComplete ? null : calculateExpectedEndDate(remainingDays);
+  const endDate = isComplete ? null : calculateExpectedEndDate(remainingHours, undefined, trainee.workSchedule);
   const formattedEndDate = endDate
     ? endDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : null;

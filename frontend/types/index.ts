@@ -20,6 +20,7 @@ export interface Trainee {
   updatedAt: string;
   totalHoursRendered: number;
   mustChangePassword?: boolean;
+  workSchedule?: Record<string, { start: string; end: string }>;
   supervisors?: Supervisor[];
 }
 
@@ -56,11 +57,11 @@ export interface LogEntry {
   timeIn: string;
   lunchStart: string;
   lunchEnd: string;
-  timeOut: string;
+  timeOut: string | null;
   hoursWorked: number;
   overtime: number;
   offsetUsed: number;
-  accomplishment: string;
+  accomplishment: string | null;
   createdAt: string;
 }
 

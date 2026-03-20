@@ -222,7 +222,7 @@ export default function LoginPage() {
         } else {
           setActiveLockout(null);
           setPermanentLock(null);
-          setError(`Invalid credentials. Failed attempts: ${failedAttempts}/15 (${attemptsRemaining} remaining).`);
+          setError(`Invalid credentials.`);
         }
 
         return;
@@ -593,6 +593,10 @@ export default function LoginPage() {
 
               {showForgotPassword && (
                 <div className="auth-form-block">
+                  <p className="auth-switch-text" style={{ marginTop: 0, marginBottom: "0.7rem" }}>
+                    Forgot Password is unavailable for new admin-created accounts until the temporary password is changed after first sign in.
+                  </p>
+
                   {forgotStep === "request" && (
                     <>
                       <div className="form-group">

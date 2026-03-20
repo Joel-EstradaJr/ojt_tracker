@@ -50,7 +50,7 @@ export const exportCSV = async (req: Request, res: Response) => {
     const rows = trainee.logs
       .map(
         (l) =>
-          `${format(l.date, "yyyy-MM-dd")},${format(l.timeIn, "HH:mm")},${format(l.lunchStart, "HH:mm")},${format(l.lunchEnd, "HH:mm")},${format(l.timeOut, "HH:mm")},${l.hoursWorked},${l.overtime},${l.offsetUsed},"${(l.accomplishment ?? "").replace(/"/g, '""')}"`
+          `${format(l.date, "yyyy-MM-dd")},${format(l.timeIn, "HH:mm")},${format(l.lunchStart, "HH:mm")},${format(l.lunchEnd, "HH:mm")},${l.timeOut ? format(l.timeOut, "HH:mm") : "N/A"},${l.hoursWorked},${l.overtime},${l.offsetUsed},"${(l.accomplishment ?? "").replace(/"/g, '""')}"`
       )
       .join("\n");
 
@@ -93,7 +93,7 @@ export const exportExcel = async (req: Request, res: Response) => {
         timeIn: format(l.timeIn, "HH:mm"),
         lunchStart: format(l.lunchStart, "HH:mm"),
         lunchEnd: format(l.lunchEnd, "HH:mm"),
-        timeOut: format(l.timeOut, "HH:mm"),
+        timeOut: l.timeOut ? format(l.timeOut, "HH:mm") : "N/A",
         hoursWorked: l.hoursWorked,
         overtime: l.overtime,
         offsetUsed: l.offsetUsed,
@@ -154,7 +154,7 @@ export const exportPDF = async (req: Request, res: Response) => {
 
     trainee.logs.forEach((l) => {
       doc.text(
-        `${format(l.date, "yyyy-MM-dd")}  |  ${format(l.timeIn, "HH:mm")} – ${format(l.timeOut, "HH:mm")}  |  Lunch: ${format(l.lunchStart, "HH:mm")}–${format(l.lunchEnd, "HH:mm")}  |  ${l.hoursWorked} hrs  |  OT: ${l.overtime}  |  Offset: ${l.offsetUsed}  |  ${l.accomplishment ?? ""}`
+        `${format(l.date, "yyyy-MM-dd")}  |  ${format(l.timeIn, "HH:mm")} – ${l.timeOut ? format(l.timeOut, "HH:mm") : "N/A"}  |  Lunch: ${format(l.lunchStart, "HH:mm")}–${format(l.lunchEnd, "HH:mm")}  |  ${l.hoursWorked} hrs  |  OT: ${l.overtime}  |  Offset: ${l.offsetUsed}  |  ${l.accomplishment ?? ""}`
       );
     });
 

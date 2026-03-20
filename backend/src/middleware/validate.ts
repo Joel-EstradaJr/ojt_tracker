@@ -89,7 +89,6 @@ export function validateLogEntry(req: Request, res: Response, next: NextFunction
     return res.status(400).json({ error: formatZodErrors(result.error) });
   }
 
-  // Additional time-ordering validations that are hard to express in Zod
   const { date, timeIn, timeOut, lunchStart, lunchEnd } = result.data;
   const errors: string[] = [];
 
@@ -100,25 +99,29 @@ export function validateLogEntry(req: Request, res: Response, next: NextFunction
   todayDate.setHours(0, 0, 0, 0);
   if (entryDate > todayDate) errors.push("Date cannot be in the future.");
 
-  const tIn = new Date(timeIn).getTime();
-  const tOut = new Date(timeOut).getTime();
-  const lStart = new Date(lunchStart).getTime();
-  const lEnd = new Date(lunchEnd).getTime();
+  // Full validation only when all required fields are present (admin form)
+  if (timeOut) {
+    const tIn = new Date(timeIn).getTime();
+    const tOut = new Date(timeOut).getTime();
 
-  if (tOut <= tIn) errors.push("Time Out must be after Time In.");
+    if (tOut <= tIn) errors.push("Time Out must be after Time In.");
 
-  // Allow no-lunch case: lunchStart === lunchEnd
-  const hasLunch = lStart !== lEnd;
-  if (hasLunch) {
-    if (lStart <= tIn) errors.push("Lunch Start must be after Time In.");
-    if (lEnd >= tOut) errors.push("Lunch End must be before Time Out.");
-    if (lEnd <= lStart) errors.push("Lunch End must be after Lunch Start.");
+    if (lunchStart && lunchEnd) {
+      const lStart = new Date(lunchStart).getTime();
+      const lEnd = new Date(lunchEnd).getTime();
+      const hasLunch = lStart !== lEnd;
+      if (hasLunch) {
+        if (lStart <= tIn) errors.push("Lunch Start must be after Time In.");
+        if (lEnd >= tOut) errors.push("Lunch End must be before Time Out.");
+        if (lEnd <= lStart) errors.push("Lunch End must be after Lunch Start.");
+      }
+
+      const totalMinutes = (tOut - tIn) / 60000;
+      const lunchMinutes = hasLunch ? (lEnd - lStart) / 60000 : 0;
+      const worked = totalMinutes - lunchMinutes;
+      if (worked < 0) errors.push("Hours worked cannot be negative.");
+    }
   }
-
-  const totalMinutes = (tOut - tIn) / 60000;
-  const lunchMinutes = hasLunch ? (lEnd - lStart) / 60000 : 0;
-  const worked = totalMinutes - lunchMinutes;
-  if (worked < 0) errors.push("Hours worked cannot be negative.");
 
   if (errors.length) {
     return res.status(400).json({ error: errors.join(" ") });

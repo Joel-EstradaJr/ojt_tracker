@@ -27,6 +27,9 @@ model Trainee {
   school        String
   companyName   String   // company/institution where trainee renders OJT
   requiredHours Int      // total hours the trainee must complete
+  // Per-day work schedule: JSON mapping day numbers (0-6) to {start, end}
+  // Default: Mon-Fri 8:00-17:00
+  workSchedule  Json     @default("{\"1\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"2\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"3\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"4\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"5\":{\"start\":\"08:00\",\"end\":\"17:00\"}}")
   passwordHash  String   // bcrypt hash of the trainee-specific password
   mustChangePassword Boolean @default(false) // true when admin creates user with temp password
   failedLoginAttempts Int      @default(0)
@@ -76,11 +79,11 @@ model LogEntry {
   timeIn         DateTime // clock-in timestamp
   lunchStart     DateTime // lunch break start (default 12:00 PM)
   lunchEnd       DateTime // lunch break end   (default 1:00 PM)
-  timeOut        DateTime // clock-out timestamp
-  hoursWorked    Float    // (timeOut - timeIn) - (lunchEnd - lunchStart)
-  overtime       Float    @default(0) // max(hoursWorked - 8, 0)
+  timeOut        DateTime? // clock-out timestamp (null until user clocks out)
+  hoursWorked    Float    @default(0) // (timeOut - timeIn) - lunch
+  overtime       Float    @default(0) // calculated from schedule + toggles
   offsetUsed     Float    @default(0) // hours deducted from accumulated OT bank
-  accomplishment String   // required freeform text
+  accomplishment String?  // optional freeform text
 
   createdAt DateTime @default(now())
 
@@ -132,4 +135,13 @@ model PasswordHistory {
   trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
 
   @@index([traineeId])
+}
+
+// ── SystemSettings ───────────────────────────────────────────
+// Singleton record storing admin-controlled overtime toggles.
+model SystemSettings {
+  id                     String  @id @default("default")
+  countEarlyInAsOT       Boolean @default(false)
+  countLateOutAsOT       Boolean @default(false)
+  countEarlyLunchEndAsOT Boolean @default(false)
 }

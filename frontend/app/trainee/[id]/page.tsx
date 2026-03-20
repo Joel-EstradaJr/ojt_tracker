@@ -13,7 +13,9 @@ import { Trainee, LogEntry } from "@/types";
 import { fetchTrainee, fetchLogs, deleteLog, downloadExport, getSession, logout } from "@/lib/api";
 import LogForm from "@/components/LogForm";
 import ImportCSV from "@/components/ImportCSV";
-import { calculateExpectedEndDate } from "@/lib/ph-holidays";
+import { calculateExpectedEndDate, WorkSchedule } from "@/lib/ph-holidays";
+
+const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 import { ThemeToggle } from "@/components/ThemeProvider";
 
 export default function TraineeDashboard() {
@@ -215,10 +217,9 @@ export default function TraineeDashboard() {
   }
 
   const remaining = Math.max(0, trainee.requiredHours - totalHours);
-  const remainingDays = Math.ceil(remaining / 8);
   const percent = Math.min(100, Math.round((totalHours / trainee.requiredHours) * 100));
   const expectedEndDate = remaining > 0
-    ? calculateExpectedEndDate(remainingDays)
+    ? calculateExpectedEndDate(remaining, undefined, trainee.workSchedule)
     : null;
 
   return (
@@ -298,6 +299,23 @@ export default function TraineeDashboard() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Work Schedule */}
+        {trainee.workSchedule && Object.keys(trainee.workSchedule as WorkSchedule).length > 0 && (
+          <div style={{ marginTop: "0.75rem", padding: "0.75rem 1rem", background: "var(--bg-subtle)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+            <p style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--text-muted)", marginBottom: "0.4rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>Work Schedule</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: "0.35rem" }}>
+              {Object.entries(trainee.workSchedule as WorkSchedule)
+                .sort(([a], [b]) => Number(a) - Number(b))
+                .map(([dayNum, times]) => (
+                  <div key={dayNum} style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem" }}>
+                    <span style={{ fontWeight: 600, minWidth: 80 }}>{DAY_LABELS[Number(dayNum)]}</span>
+                    <span style={{ color: "var(--text-muted)" }}>{times.start} – {times.end}</span>
+                  </div>
+                ))}
+            </div>
           </div>
         )}
 
@@ -381,7 +399,7 @@ export default function TraineeDashboard() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.15 }}
       >
-        <LogForm traineeId={id} onCreated={loadData} editingLog={editingLog} onCancelEdit={() => setEditingLog(null)} availableOffset={availableOffset} />
+        <LogForm traineeId={id} traineeDisplayName={trainee.displayName} onCreated={loadData} editingLog={editingLog} onCancelEdit={() => setEditingLog(null)} availableOffset={availableOffset} viewerRole={viewerRole} logs={logs} />
       </motion.div>
 
       {/* Logs Table */}
@@ -415,7 +433,7 @@ export default function TraineeDashboard() {
           else if (filterOvertime === "no") filtered = filtered.filter(l => l.overtime === 0);
           if (filterOffset === "yes") filtered = filtered.filter(l => l.offsetUsed > 0);
           else if (filterOffset === "no") filtered = filtered.filter(l => l.offsetUsed === 0);
-          if (filterAccomplishment) { const q = filterAccomplishment.toLowerCase(); filtered = filtered.filter(l => l.accomplishment.toLowerCase().includes(q)); }
+          if (filterAccomplishment) { const q = filterAccomplishment.toLowerCase(); filtered = filtered.filter(l => (l.accomplishment || "").toLowerCase().includes(q)); }
 
           // Apply sort
           const sortedLogs = [...filtered].sort((a, b) => {
@@ -425,7 +443,7 @@ export default function TraineeDashboard() {
               case "timeIn": cmp = new Date(a.timeIn).getTime() - new Date(b.timeIn).getTime(); break;
               case "lunchStart": cmp = new Date(a.lunchStart).getTime() - new Date(b.lunchStart).getTime(); break;
               case "lunchEnd": cmp = new Date(a.lunchEnd).getTime() - new Date(b.lunchEnd).getTime(); break;
-              case "timeOut": cmp = new Date(a.timeOut).getTime() - new Date(b.timeOut).getTime(); break;
+              case "timeOut": cmp = new Date(a.timeOut || 0).getTime() - new Date(b.timeOut || 0).getTime(); break;
               case "hoursWorked": cmp = a.hoursWorked - b.hoursWorked; break;
               case "overtime": cmp = a.overtime - b.overtime; break;
               case "offsetUsed": cmp = a.offsetUsed - b.offsetUsed; break;
@@ -580,7 +598,7 @@ export default function TraineeDashboard() {
                           <td>{timeFmt(log.timeIn)}</td>
                           <td>{timeFmt(log.lunchStart)}</td>
                           <td>{timeFmt(log.lunchEnd)}</td>
-                          <td>{timeFmt(log.timeOut)}</td>
+                          <td>{log.timeOut ? timeFmt(log.timeOut) : <span style={{ color: "var(--text-faint)" }}>—</span>}</td>
                           <td style={{ whiteSpace: "nowrap", fontWeight: 500 }}>{hoursLabel}</td>
                           <td style={{ whiteSpace: "nowrap" }}>{log.overtime > 0 ? <span style={{ color: "var(--primary)", fontWeight: 500 }}>{formatH(log.overtime)}</span> : <span style={{ color: "var(--text-faint)" }}>-</span>}</td>
                           <td style={{ whiteSpace: "nowrap" }}>{log.offsetUsed > 0 ? <span style={{ color: "var(--accent)", fontWeight: 500 }}>{formatH(log.offsetUsed)}</span> : <span style={{ color: "var(--text-faint)" }}>-</span>}</td>
@@ -748,7 +766,7 @@ export default function TraineeDashboard() {
                   <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Lunch End:</span>
                   <span>{timeFmt(dl.lunchEnd)}</span>
                   <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Time Out:</span>
-                  <span>{timeFmt(dl.timeOut)}</span>
+                  <span>{dl.timeOut ? timeFmt(dl.timeOut) : "—"}</span>
                   <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Hours Worked:</span>
                   <span style={{ fontWeight: 500 }}>{hoursLabel}</span>
                   {dl.overtime > 0 && (<><span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Overtime:</span><span>{fmtH(dl.overtime)}</span></>)}

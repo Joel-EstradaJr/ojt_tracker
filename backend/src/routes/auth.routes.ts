@@ -15,6 +15,7 @@ const router = Router();
 const ACCOUNT_LOCK_THRESHOLD = 15;
 const GENERIC_LOGIN_ERROR = "Invalid credentials. Please try again.";
 const FORGOT_PASSWORD_GENERIC_SUCCESS = "If the account exists, a verification code has been sent to the registered email.";
+const INITIAL_PASSWORD_REQUIRED_ERROR = "Forgot Password is disabled for this account until the temporary password is changed.";
 
 function getLockoutMinutes(failedAttempts: number): number | null {
   if (failedAttempts === 12) return 60;
@@ -252,6 +253,14 @@ router.post("/forgot-password/request-code", async (req: Request, res: Response)
       return res.json({ message: FORGOT_PASSWORD_GENERIC_SUCCESS });
     }
 
+    const userSecurity = await prisma.trainee.findUnique({
+      where: { id: user.id },
+      select: { mustChangePassword: true },
+    });
+    if (userSecurity?.mustChangePassword) {
+      return res.status(403).json({ error: INITIAL_PASSWORD_REQUIRED_ERROR });
+    }
+
     const code = String(Math.floor(100000 + Math.random() * 900000));
 
     await prisma.passwordResetCode.updateMany({
@@ -316,6 +325,14 @@ router.post("/forgot-password/verify-code", async (req: Request, res: Response) 
 
     if (!user) {
       return res.status(401).json({ error: "Invalid or expired verification code." });
+    }
+
+    const userSecurity = await prisma.trainee.findUnique({
+      where: { id: user.id },
+      select: { mustChangePassword: true },
+    });
+    if (userSecurity?.mustChangePassword) {
+      return res.status(403).json({ error: INITIAL_PASSWORD_REQUIRED_ERROR });
     }
 
     const resetCode = await prisma.passwordResetCode.findFirst({
@@ -385,6 +402,14 @@ router.post("/forgot-password/reset", async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Invalid reset request." });
     }
 
+    const userSecurity = await prisma.trainee.findUnique({
+      where: { id: user.id },
+      select: { mustChangePassword: true },
+    });
+    if (userSecurity?.mustChangePassword) {
+      return res.status(403).json({ error: INITIAL_PASSWORD_REQUIRED_ERROR });
+    }
+
     const resetCode = await prisma.passwordResetCode.findFirst({
       where: {
         id: resetToken,
@@ -422,6 +447,7 @@ router.post("/forgot-password/reset", async (req: Request, res: Response) => {
         where: { id: user.id },
         data: {
           passwordHash: nextPasswordHash,
+          mustChangePassword: false,
           failedLoginAttempts: 0,
           lockedUntil: null,
         },

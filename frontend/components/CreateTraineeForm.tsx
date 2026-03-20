@@ -8,6 +8,9 @@ import { useState } from "react";
 import { createTrainee, sendEmailVerification, verifyEmailCode } from "@/lib/api";
 import { SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
+import { DEFAULT_WORK_SCHEDULE, WorkSchedule } from "@/lib/ph-holidays";
+
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 interface Props {
   onClose?: () => void;
@@ -54,9 +57,29 @@ export default function CreateTraineeForm({
   const [school, setSchool] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [requiredHours, setRequiredHours] = useState("500");
+  const [workSchedule, setWorkSchedule] = useState<WorkSchedule>({ ...DEFAULT_WORK_SCHEDULE });
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [supervisors, setSupervisors] = useState<SupervisorInput[]>([]);
+
+  const toggleDay = (day: number) => {
+    setWorkSchedule((prev) => {
+      const copy = { ...prev };
+      if (String(day) in copy) {
+        delete copy[String(day)];
+      } else {
+        copy[String(day)] = { start: "08:00", end: "17:00" };
+      }
+      return copy;
+    });
+  };
+
+  const updateDayTime = (day: number, field: "start" | "end", value: string) => {
+    setWorkSchedule((prev) => ({
+      ...prev,
+      [String(day)]: { ...prev[String(day)], [field]: value },
+    }));
+  };
 
   const [emailVerified, setEmailVerified] = useState(false);
   const [verificationToken, setVerificationToken] = useState("");
@@ -150,6 +173,7 @@ export default function CreateTraineeForm({
         role: showRoleField ? role : defaultRole,
         lastName, firstName, middleName: middleName || undefined, suffix: suffix || undefined,
         email, contactNumber, school, companyName, requiredHours: Number(requiredHours),
+        workSchedule: Object.keys(workSchedule).length > 0 ? workSchedule : undefined,
         ...(isAdminCreating ? {} : { password, verificationToken }),
         supervisors: supervisors.length > 0 ? supervisors : undefined,
       });
@@ -254,6 +278,29 @@ export default function CreateTraineeForm({
           <label>Required Hours *</label>
           <input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} />
         </div>
+
+        {/* Work Schedule */}
+        <fieldset style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "1rem", marginBottom: "0.5rem" }}>
+          <legend style={{ fontWeight: 600, fontSize: "0.9rem", padding: "0 0.5rem" }}>Work Schedule</legend>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+            {DAY_LABELS.map((label, idx) => (
+              <label key={idx} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: "0.85rem" }}>
+                <input type="checkbox" checked={String(idx) in workSchedule} onChange={() => toggleDay(idx)} />
+                {label}
+              </label>
+            ))}
+          </div>
+          {Object.keys(workSchedule).sort((a, b) => Number(a) - Number(b)).map((dayNum) => (
+            <div key={dayNum} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
+              <span style={{ fontWeight: 500, fontSize: "0.85rem" }}>{DAY_LABELS[Number(dayNum)]}</span>
+              <input type="time" value={workSchedule[dayNum].start} onChange={(e) => updateDayTime(Number(dayNum), "start", e.target.value)} />
+              <input type="time" value={workSchedule[dayNum].end} onChange={(e) => updateDayTime(Number(dayNum), "end", e.target.value)} />
+            </div>
+          ))}
+          {Object.keys(workSchedule).length === 0 && (
+            <p style={{ color: "var(--danger)", fontSize: "0.82rem", margin: 0 }}>At least one work day is required.</p>
+          )}
+        </fieldset>
 
         {!isAdminCreating && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>

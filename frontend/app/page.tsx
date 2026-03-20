@@ -158,9 +158,8 @@ export default function HomePage() {
   // Helper: compute expected end date as timestamp for sorting
   const getExpectedEndTs = (t: Trainee) => {
     const remaining = Math.max(0, t.requiredHours - t.totalHoursRendered);
-    if (remaining === 0) return Infinity; // completed trainees sort last/first
-    const days = Math.ceil(remaining / 8);
-    return calculateExpectedEndDate(days).getTime();
+    if (remaining === 0) return Infinity;
+    return calculateExpectedEndDate(remaining, undefined, t.workSchedule).getTime();
   };
 
   // Filter trainees by name, school, or company
