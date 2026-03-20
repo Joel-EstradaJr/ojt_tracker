@@ -1,12 +1,8 @@
-// ============================================================
-// Auth Routes — super password verification + session management
-// ============================================================
-
-import { Router, Request, Response } from "express";
+﻿import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import bcrypt from "bcrypt";
-import { Prisma } from "@prisma/client";
 import jwt from "jsonwebtoken";
+import { UserRole } from "@prisma/client";
 import prisma from "../utils/prisma";
 import { sendResetCode } from "../utils/email";
 import { AuthPayload, clearSessionCookie, setSessionCookie } from "../middleware/auth";
@@ -52,7 +48,31 @@ function maskEmail(email: string) {
   return `${local.slice(0, 3)}***@${domain}`;
 }
 
-// POST /auth/login — unified login with automatic role detection
+function roleToPayloadRole(role: UserRole): "admin" | "trainee" {
+  return role === UserRole.ADMIN ? "admin" : "trainee";
+}
+
+async function findTraineeByFullName(fullName: string) {
+  const normalizedLookupName = normalizeName(fullName);
+  const trainees = await prisma.userProfile.findMany({
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          passwordHash: true,
+          mustChangePassword: true,
+          failedLoginAttempts: true,
+          lockedUntil: true,
+        },
+      },
+    },
+  });
+
+  return trainees.find((t) => normalizeName(buildFullName(t)) === normalizedLookupName) ?? null;
+}
+
 router.post("/login", async (req: Request, res: Response) => {
   const { fullName, identifier, password } = req.body as {
     fullName?: string;
@@ -66,13 +86,8 @@ router.post("/login", async (req: Request, res: Response) => {
       ? fullName.trim()
       : "";
 
-  if (!loginIdentifier) {
-    return res.status(400).json({ error: "Full name is required." });
-  }
-
-  if (!password) {
-    return res.status(400).json({ error: "Password is required." });
-  }
+  if (!loginIdentifier) return res.status(400).json({ error: "Full name is required." });
+  if (!password) return res.status(400).json({ error: "Password is required." });
 
   const normalizedLookupName = normalizeName(loginIdentifier);
   const normalizedEmail = loginIdentifier.toLowerCase();
@@ -80,9 +95,7 @@ router.post("/login", async (req: Request, res: Response) => {
 
   const superName = process.env.SUPER_NAME;
   const superPwd = process.env.SUPER_PASSWORD;
-  if (!superName || !superPwd) {
-    return res.status(500).json({ error: "Server configuration error." });
-  }
+  if (!superName || !superPwd) return res.status(500).json({ error: "Server configuration error." });
 
   const superHash = crypto.createHash("sha256").update(superPwd).digest("hex");
   if (normalizeName(superName) === normalizedLookupName && password === superHash) {
@@ -91,31 +104,22 @@ router.post("/login", async (req: Request, res: Response) => {
   }
 
   try {
-    const selectedUserFields = {
-      id: true,
-      role: true,
-      firstName: true,
-      middleName: true,
-      lastName: true,
-      suffix: true,
-      passwordHash: true,
-      failedLoginAttempts: true,
-      lockedUntil: true,
-      mustChangePassword: true,
-    } as const;
-
-    let user = isEmailIdentifier
-      ? await prisma.trainee.findUnique({ where: { email: normalizedEmail }, select: selectedUserFields })
+    let trainee: any = isEmailIdentifier
+      ? await prisma.userProfile.findFirst({
+        where: { user: { email: normalizedEmail } },
+        include: { user: true },
+      })
       : null;
 
-    if (!user) {
-      const users = await prisma.trainee.findMany({ select: selectedUserFields });
-      user = users.find((u) => normalizeName(buildFullName(u)) === normalizedLookupName) ?? null;
+    if (!trainee) {
+      trainee = await findTraineeByFullName(loginIdentifier);
     }
 
-    if (!user) {
+    if (!trainee?.user) {
       return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
     }
+
+    const user = trainee.user;
 
     if (user.failedLoginAttempts >= ACCOUNT_LOCK_THRESHOLD) {
       return res.status(423).json({
@@ -147,7 +151,7 @@ router.post("/login", async (req: Request, res: Response) => {
       const lockoutMinutes = accountLocked ? null : getLockoutMinutes(nextFailedAttempts);
       const lockedUntil = lockoutMinutes ? new Date(Date.now() + lockoutMinutes * 60 * 1000) : null;
 
-      await prisma.trainee.update({
+      await prisma.user.update({
         where: { id: user.id },
         data: {
           failedLoginAttempts: nextFailedAttempts,
@@ -186,7 +190,7 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     if (user.failedLoginAttempts !== 0 || user.lockedUntil) {
-      await prisma.trainee.update({
+      await prisma.user.update({
         where: { id: user.id },
         data: {
           failedLoginAttempts: 0,
@@ -195,82 +199,46 @@ router.post("/login", async (req: Request, res: Response) => {
       });
     }
 
-    const role = user.role === "admin" ? "admin" : "trainee";
+    const role = roleToPayloadRole(user.role);
 
-    // If user must change password (admin-created account with temp password)
     if (user.mustChangePassword) {
       return res.json({
         message: "Password change required.",
         mustChangePassword: true,
         role,
-        traineeId: user.id,
+        traineeId: trainee.id,
       });
     }
 
-    setSessionCookie(res, { role, traineeId: user.id });
-    return res.json({
-      message: "Logged in.",
-      role,
-      traineeId: user.id,
-    });
+    setSessionCookie(res, { role, traineeId: trainee.id });
+    return res.json({ message: "Logged in.", role, traineeId: trainee.id });
   } catch (err) {
     console.error("login error:", err);
-
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2022") {
-      return res.status(503).json({
-        error: "Server authentication data is not ready. Please contact support.",
-      });
-    }
-
     return res.status(500).json({ error: "Internal server error." });
   }
 });
 
-// POST /auth/forgot-password/request-code — request reset code by full name
 router.post("/forgot-password/request-code", async (req: Request, res: Response) => {
   const { fullName } = req.body as { fullName?: string };
-
   if (!fullName || typeof fullName !== "string" || !fullName.trim()) {
     return res.status(400).json({ error: "Full name is required." });
   }
 
-  const normalizedLookupName = normalizeName(fullName);
-
   try {
-    const users = await prisma.trainee.findMany({
-      select: {
-        id: true,
-        firstName: true,
-        middleName: true,
-        lastName: true,
-        suffix: true,
-        email: true,
-      },
-    });
-
-    const user = users.find((u) => normalizeName(buildFullName(u)) === normalizedLookupName);
-    if (!user) {
-      return res.json({ message: FORGOT_PASSWORD_GENERIC_SUCCESS });
-    }
-
-    const userSecurity = await prisma.trainee.findUnique({
-      where: { id: user.id },
-      select: { mustChangePassword: true },
-    });
-    if (userSecurity?.mustChangePassword) {
-      return res.status(403).json({ error: INITIAL_PASSWORD_REQUIRED_ERROR });
-    }
+    const trainee = await findTraineeByFullName(fullName);
+    if (!trainee?.user) return res.json({ message: FORGOT_PASSWORD_GENERIC_SUCCESS });
+    if (trainee.user.mustChangePassword) return res.status(403).json({ error: INITIAL_PASSWORD_REQUIRED_ERROR });
 
     const code = String(Math.floor(100000 + Math.random() * 900000));
 
     await prisma.passwordResetCode.updateMany({
-      where: { traineeId: user.id, used: false },
+      where: { userId: trainee.user.id, used: false },
       data: { used: true },
     });
 
     await prisma.passwordResetCode.create({
       data: {
-        traineeId: user.id,
+        userId: trainee.user.id,
         code,
         expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       },
@@ -280,64 +248,39 @@ router.post("/forgot-password/request-code", async (req: Request, res: Response)
     if (internalKey && process.env.EMAIL_INTERNAL_KEY && internalKey === process.env.EMAIL_INTERNAL_KEY) {
       return res.json({
         message: FORGOT_PASSWORD_GENERIC_SUCCESS,
-        maskedEmail: maskEmail(user.email),
+        maskedEmail: maskEmail(trainee.user.email),
         code,
-        displayName: buildFullName(user),
-        email: user.email,
+        displayName: buildFullName(trainee),
+        email: trainee.user.email,
       });
     }
 
-    await sendResetCode(user.email, code, buildFullName(user));
-
-    return res.json({
-      message: FORGOT_PASSWORD_GENERIC_SUCCESS,
-      maskedEmail: maskEmail(user.email),
-    });
+    await sendResetCode(trainee.user.email, code, buildFullName(trainee));
+    return res.json({ message: FORGOT_PASSWORD_GENERIC_SUCCESS, maskedEmail: maskEmail(trainee.user.email) });
   } catch (err) {
     console.error("forgot-password request-code error:", err);
     return res.status(500).json({ error: "Failed to send verification code. Please try again." });
   }
 });
 
-// POST /auth/forgot-password/verify-code — verify reset code by full name
 router.post("/forgot-password/verify-code", async (req: Request, res: Response) => {
   const { fullName, code } = req.body as { fullName?: string; code?: string };
 
   if (!fullName || typeof fullName !== "string" || !fullName.trim()) {
     return res.status(400).json({ error: "Full name is required." });
   }
-
   if (!code || typeof code !== "string") {
     return res.status(400).json({ error: "Verification code is required." });
   }
 
   try {
-    const users = await prisma.trainee.findMany({
-      select: {
-        id: true,
-        firstName: true,
-        middleName: true,
-        lastName: true,
-        suffix: true,
-      },
-    });
-    const user = users.find((u) => normalizeName(buildFullName(u)) === normalizeName(fullName));
-
-    if (!user) {
-      return res.status(401).json({ error: "Invalid or expired verification code." });
-    }
-
-    const userSecurity = await prisma.trainee.findUnique({
-      where: { id: user.id },
-      select: { mustChangePassword: true },
-    });
-    if (userSecurity?.mustChangePassword) {
-      return res.status(403).json({ error: INITIAL_PASSWORD_REQUIRED_ERROR });
-    }
+    const trainee = await findTraineeByFullName(fullName);
+    if (!trainee?.user) return res.status(401).json({ error: "Invalid or expired verification code." });
+    if (trainee.user.mustChangePassword) return res.status(403).json({ error: INITIAL_PASSWORD_REQUIRED_ERROR });
 
     const resetCode = await prisma.passwordResetCode.findFirst({
       where: {
-        traineeId: user.id,
+        userId: trainee.user.id,
         code: code.trim(),
         used: false,
         expiresAt: { gt: new Date() },
@@ -345,15 +288,9 @@ router.post("/forgot-password/verify-code", async (req: Request, res: Response) 
       orderBy: { createdAt: "desc" },
     });
 
-    if (!resetCode) {
-      return res.status(401).json({ error: "Invalid or expired verification code." });
-    }
+    if (!resetCode) return res.status(401).json({ error: "Invalid or expired verification code." });
 
-    await prisma.passwordResetCode.update({
-      where: { id: resetCode.id },
-      data: { used: true },
-    });
-
+    await prisma.passwordResetCode.update({ where: { id: resetCode.id }, data: { used: true } });
     return res.json({ message: "Code verified.", resetToken: resetCode.id });
   } catch (err) {
     console.error("forgot-password verify-code error:", err);
@@ -361,7 +298,6 @@ router.post("/forgot-password/verify-code", async (req: Request, res: Response) 
   }
 });
 
-// POST /auth/forgot-password/reset — reset password by full name
 router.post("/forgot-password/reset", async (req: Request, res: Response) => {
   const { fullName, resetToken, newPassword, confirmPassword } = req.body as {
     fullName?: string;
@@ -373,47 +309,25 @@ router.post("/forgot-password/reset", async (req: Request, res: Response) => {
   if (!fullName || typeof fullName !== "string" || !fullName.trim()) {
     return res.status(400).json({ error: "Full name is required." });
   }
-
   if (!resetToken || typeof resetToken !== "string") {
     return res.status(400).json({ error: "Reset token is required." });
   }
-
   if (!newPassword || !confirmPassword) {
     return res.status(400).json({ error: "New password and confirmation are required." });
   }
-
   if (newPassword !== confirmPassword) {
     return res.status(400).json({ error: "Passwords do not match." });
   }
 
   try {
-    const users = await prisma.trainee.findMany({
-      select: {
-        id: true,
-        firstName: true,
-        middleName: true,
-        lastName: true,
-        suffix: true,
-        passwordHash: true,
-      },
-    });
-    const user = users.find((u) => normalizeName(buildFullName(u)) === normalizeName(fullName));
-    if (!user) {
-      return res.status(401).json({ error: "Invalid reset request." });
-    }
-
-    const userSecurity = await prisma.trainee.findUnique({
-      where: { id: user.id },
-      select: { mustChangePassword: true },
-    });
-    if (userSecurity?.mustChangePassword) {
-      return res.status(403).json({ error: INITIAL_PASSWORD_REQUIRED_ERROR });
-    }
+    const trainee = await findTraineeByFullName(fullName);
+    if (!trainee?.user) return res.status(401).json({ error: "Invalid reset request." });
+    if (trainee.user.mustChangePassword) return res.status(403).json({ error: INITIAL_PASSWORD_REQUIRED_ERROR });
 
     const resetCode = await prisma.passwordResetCode.findFirst({
       where: {
         id: resetToken,
-        traineeId: user.id,
+        userId: trainee.user.id,
         used: true,
         createdAt: { gt: new Date(Date.now() - 15 * 60 * 1000) },
       },
@@ -423,13 +337,13 @@ router.post("/forgot-password/reset", async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Invalid or expired reset token. Please request a new code." });
     }
 
-    const sameAsCurrent = await bcrypt.compare(newPassword, user.passwordHash);
+    const sameAsCurrent = await bcrypt.compare(newPassword, trainee.user.passwordHash);
     if (sameAsCurrent) {
       return res.status(400).json({ error: "You cannot reuse a previous password." });
     }
 
     const previousHashes = await prisma.passwordHistory.findMany({
-      where: { traineeId: user.id },
+      where: { userId: trainee.user.id },
       select: { passwordHash: true },
       orderBy: { createdAt: "desc" },
     });
@@ -443,8 +357,8 @@ router.post("/forgot-password/reset", async (req: Request, res: Response) => {
     const nextPasswordHash = await bcrypt.hash(newPassword, 10);
 
     await prisma.$transaction([
-      prisma.trainee.update({
-        where: { id: user.id },
+      prisma.user.update({
+        where: { id: trainee.user.id },
         data: {
           passwordHash: nextPasswordHash,
           mustChangePassword: false,
@@ -454,11 +368,11 @@ router.post("/forgot-password/reset", async (req: Request, res: Response) => {
       }),
       prisma.passwordHistory.create({
         data: {
-          traineeId: user.id,
-          passwordHash: user.passwordHash,
+          userId: trainee.user.id,
+          passwordHash: trainee.user.passwordHash,
         },
       }),
-      prisma.passwordResetCode.deleteMany({ where: { traineeId: user.id } }),
+      prisma.passwordResetCode.deleteMany({ where: { userId: trainee.user.id } }),
     ]);
 
     return res.json({ message: "Password reset successfully." });
@@ -468,38 +382,24 @@ router.post("/forgot-password/reset", async (req: Request, res: Response) => {
   }
 });
 
-// GET /auth/me — inspect current authenticated session
 router.get("/me", async (req: Request, res: Response) => {
   const token: string | undefined = req.cookies?.ojt_session;
-
-  if (!token) {
-    return res.status(401).json({ authenticated: false });
-  }
+  if (!token) return res.status(401).json({ authenticated: false });
 
   const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    return res.status(500).json({ error: "Server configuration error." });
-  }
+  if (!secret) return res.status(500).json({ error: "Server configuration error." });
 
   try {
     const raw = jwt.verify(token, secret) as AuthPayload & { exp?: number };
     const payload = normalizePayload(raw);
 
     if (payload.traineeId) {
-      const user = await prisma.trainee.findUnique({
+      const trainee = await prisma.userProfile.findUnique({
         where: { id: payload.traineeId },
-        select: {
-          id: true,
-          role: true,
-          firstName: true,
-          middleName: true,
-          lastName: true,
-          suffix: true,
-          email: true,
-        },
+        include: { user: { select: { id: true, role: true, email: true } } },
       });
 
-      if (!user || user.role !== payload.role) {
+      if (!trainee?.user || roleToPayloadRole(trainee.user.role) !== payload.role) {
         clearSessionCookie(res);
         return res.status(401).json({ authenticated: false });
       }
@@ -507,12 +407,12 @@ router.get("/me", async (req: Request, res: Response) => {
       return res.json({
         authenticated: true,
         role: payload.role,
-        traineeId: user.id,
+        traineeId: trainee.id,
         expiresAt: raw.exp ? raw.exp * 1000 : null,
         currentUser: {
-          id: user.id,
-          displayName: buildFullName(user),
-          email: user.email,
+          id: trainee.id,
+          displayName: buildFullName(trainee),
+          email: trainee.user.email,
           isSuper: false,
         },
       });
@@ -540,82 +440,58 @@ router.get("/me", async (req: Request, res: Response) => {
   }
 });
 
-// POST /auth/verify-super — verify the super password
 router.post("/verify-super", (req: Request, res: Response) => {
   const { password } = req.body;
-
-  if (!password) {
-    return res.status(400).json({ error: "Password is required." });
-  }
+  if (!password) return res.status(400).json({ error: "Password is required." });
 
   const superPwd = process.env.SUPER_PASSWORD;
-  if (!superPwd) {
-    return res.status(500).json({ error: "Server configuration error." });
-  }
+  if (!superPwd) return res.status(500).json({ error: "Server configuration error." });
 
   const superHash = crypto.createHash("sha256").update(superPwd).digest("hex");
-
-  if (password !== superHash) {
-    return res.status(401).json({ error: "Incorrect password." });
-  }
+  if (password !== superHash) return res.status(401).json({ error: "Incorrect password." });
 
   return res.json({ message: "Verified." });
 });
 
-// GET /auth/session/:traineeId — check if current session is valid for this trainee
 router.get("/session/:traineeId", async (req: Request, res: Response) => {
   const token: string | undefined = req.cookies?.ojt_session;
   const { traineeId } = req.params;
 
-  if (!token) {
-    return res.status(401).json({ authenticated: false });
-  }
+  if (!token) return res.status(401).json({ authenticated: false });
 
   const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    return res.status(500).json({ error: "Server configuration error." });
-  }
+  if (!secret) return res.status(500).json({ error: "Server configuration error." });
 
   try {
     const raw = jwt.verify(token, secret) as AuthPayload & { exp?: number };
     const payload = normalizePayload(raw);
 
     if (payload.traineeId) {
-      const user = await prisma.trainee.findUnique({
+      const trainee = await prisma.userProfile.findUnique({
         where: { id: payload.traineeId },
-        select: { id: true, role: true },
+        include: { user: { select: { role: true } } },
       });
 
-      if (!user || user.role !== payload.role) {
+      if (!trainee?.user || roleToPayloadRole(trainee.user.role) !== payload.role) {
         clearSessionCookie(res);
         return res.status(401).json({ authenticated: false });
       }
     }
 
     if (payload.role === "admin") {
-      return res.json({
-        authenticated: true,
-        role: "admin",
-        expiresAt: raw.exp ? raw.exp * 1000 : null,
-      });
+      return res.json({ authenticated: true, role: "admin", expiresAt: raw.exp ? raw.exp * 1000 : null });
     }
 
     if (!payload.traineeId || payload.traineeId !== traineeId) {
       return res.status(403).json({ authenticated: false });
     }
 
-    return res.json({
-      authenticated: true,
-      role: "trainee",
-      traineeId,
-      expiresAt: raw.exp ? raw.exp * 1000 : null,
-    });
+    return res.json({ authenticated: true, role: "trainee", traineeId, expiresAt: raw.exp ? raw.exp * 1000 : null });
   } catch {
     return res.status(401).json({ authenticated: false });
   }
 });
 
-// POST /auth/set-initial-password — set password for admin-created account (first login)
 router.post("/set-initial-password", async (req: Request, res: Response) => {
   const { traineeId, currentPassword, newPassword, confirmPassword } = req.body as {
     traineeId?: string;
@@ -627,37 +503,24 @@ router.post("/set-initial-password", async (req: Request, res: Response) => {
   if (!traineeId || !currentPassword || !newPassword || !confirmPassword) {
     return res.status(400).json({ error: "All fields are required." });
   }
-
-  if (newPassword !== confirmPassword) {
-    return res.status(400).json({ error: "Passwords do not match." });
-  }
-
-  if (newPassword.length < 4) {
-    return res.status(400).json({ error: "New password must be at least 4 characters." });
-  }
+  if (newPassword !== confirmPassword) return res.status(400).json({ error: "Passwords do not match." });
+  if (newPassword.length < 4) return res.status(400).json({ error: "New password must be at least 4 characters." });
 
   try {
-    const user = await prisma.trainee.findUnique({
+    const trainee = await prisma.userProfile.findUnique({
       where: { id: traineeId },
-      select: { id: true, role: true, passwordHash: true, mustChangePassword: true },
+      include: { user: true },
     });
 
-    if (!user) {
-      return res.status(404).json({ error: "User not found." });
-    }
-
-    if (!user.mustChangePassword) {
+    if (!trainee?.user) return res.status(404).json({ error: "User not found." });
+    if (!trainee.user.mustChangePassword) {
       return res.status(400).json({ error: "Password change is not required for this account." });
     }
 
-    // Verify the temporary password
-    const match = await bcrypt.compare(currentPassword, user.passwordHash);
-    if (!match) {
-      return res.status(401).json({ error: "Invalid temporary password." });
-    }
+    const match = await bcrypt.compare(currentPassword, trainee.user.passwordHash);
+    if (!match) return res.status(401).json({ error: "Invalid temporary password." });
 
-    // Ensure new password is different from temp password
-    const sameAsTemp = await bcrypt.compare(newPassword, user.passwordHash);
+    const sameAsTemp = await bcrypt.compare(newPassword, trainee.user.passwordHash);
     if (sameAsTemp) {
       return res.status(400).json({ error: "New password must be different from the temporary password." });
     }
@@ -665,8 +528,8 @@ router.post("/set-initial-password", async (req: Request, res: Response) => {
     const passwordHash = await bcrypt.hash(newPassword, 10);
 
     await prisma.$transaction([
-      prisma.trainee.update({
-        where: { id: traineeId },
+      prisma.user.update({
+        where: { id: trainee.user.id },
         data: {
           passwordHash,
           mustChangePassword: false,
@@ -676,31 +539,26 @@ router.post("/set-initial-password", async (req: Request, res: Response) => {
       }),
       prisma.passwordHistory.create({
         data: {
-          traineeId,
-          passwordHash: user.passwordHash,
+          userId: trainee.user.id,
+          passwordHash: trainee.user.passwordHash,
         },
       }),
     ]);
 
-    // Set session cookie and log the user in
-    const role = user.role === "admin" ? "admin" : "trainee";
-    setSessionCookie(res, { role, traineeId: user.id });
+    const role = roleToPayloadRole(trainee.user.role);
+    setSessionCookie(res, { role, traineeId: trainee.id });
 
-    return res.json({
-      message: "Password set successfully.",
-      role,
-      traineeId: user.id,
-    });
+    return res.json({ message: "Password set successfully.", role, traineeId: trainee.id });
   } catch (err) {
     console.error("set-initial-password error:", err);
     return res.status(500).json({ error: "Internal server error." });
   }
 });
 
-// POST /auth/logout — clear the session cookie
 router.post("/logout", (_req: Request, res: Response) => {
   clearSessionCookie(res);
   return res.json({ message: "Logged out." });
 });
 
 export default router;
+

@@ -27,11 +27,11 @@ async function request<T>(url: string, opts?: RequestInit): Promise<T> {
 // ── Trainee endpoints ────────────────────────────────────────
 
 export function fetchTrainees() {
-  return request<import("@/types").Trainee[]>("/api/trainees");
+  return request<import("@/types").UserProfile[]>("/api/trainees");
 }
 
 export function fetchTrainee(id: string) {
-  return request<import("@/types").Trainee>(`/api/trainees/${id}`);
+  return request<import("@/types").UserProfile>(`/api/trainees/${id}`);
 }
 
 export async function createTrainee(data: {
@@ -54,7 +54,7 @@ export async function createTrainee(data: {
   if (data.password) {
     payload.password = await sha256(data.password);
   }
-  return request<import("@/types").Trainee>("/api/trainees", {
+  return request<import("@/types").UserProfile>("/api/trainees", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -76,7 +76,7 @@ export function updateTrainee(
     verificationToken?: string;
   }
 ) {
-  return request<import("@/types").Trainee>(`/api/trainees/${id}`, {
+  return request<import("@/types").UserProfile>(`/api/trainees/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
   });
@@ -84,7 +84,7 @@ export function updateTrainee(
 
 export async function verifyPassword(id: string, password: string) {
   const hashed = await sha256(password);
-  return request<import("@/types").Trainee>(`/api/trainees/${id}/verify`, {
+  return request<import("@/types").UserProfile>(`/api/trainees/${id}/verify`, {
     method: "POST",
     body: JSON.stringify({ password: hashed }),
   });
@@ -254,6 +254,32 @@ export function updateLog(
 export function deleteLog(id: string) {
   return request<{ message: string }>(`/api/logs/entry/${id}`, {
     method: "DELETE",
+  });
+}
+
+// ── Accomplishment scripts ───────────────────────────────────
+
+export function fetchAccomplishmentScripts(traineeId: string) {
+  return request<import("@/types").AccomplishmentScript[]>(`/api/scripts/${traineeId}`);
+}
+
+export function createAccomplishmentScript(
+  traineeId: string,
+  data: { title: string; content: string }
+) {
+  return request<import("@/types").AccomplishmentScript>(`/api/scripts/${traineeId}`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateAccomplishmentScript(
+  scriptId: string,
+  data: { title: string; content: string }
+) {
+  return request<import("@/types").AccomplishmentScript>(`/api/scripts/entry/${scriptId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
   });
 }
 

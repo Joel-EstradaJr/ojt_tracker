@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // Supervisor Controller
 // Handles CRUD for supervisors belonging to a trainee.
 // ============================================================
@@ -41,14 +41,14 @@ async function findDuplicateSupervisor(
   });
 }
 
-// ── Create a supervisor for a trainee ────────────────────────
+// â”€â”€ Create a supervisor for a trainee â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const createSupervisor = async (req: Request, res: Response) => {
   try {
     const { traineeId } = req.params;
     const { lastName, firstName, middleName, suffix, contactNumber, email } = req.body;
 
     // Verify trainee exists
-    const trainee = await prisma.trainee.findUnique({ where: { id: traineeId } });
+    const trainee = await prisma.userProfile.findUnique({ where: { id: traineeId } });
     if (!trainee) {
       return res.status(404).json({ error: "Trainee not found." });
     }
@@ -78,7 +78,7 @@ export const createSupervisor = async (req: Request, res: Response) => {
   }
 };
 
-// ── Get all supervisors for a trainee ────────────────────────
+// â”€â”€ Get all supervisors for a trainee â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getSupervisorsByTrainee = async (req: Request, res: Response) => {
   try {
     const { traineeId } = req.params;
@@ -95,7 +95,7 @@ export const getSupervisorsByTrainee = async (req: Request, res: Response) => {
   }
 };
 
-// ── Update a supervisor ──────────────────────────────────────
+// â”€â”€ Update a supervisor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const updateSupervisor = async (req: Request, res: Response) => {
   try {
     const { supervisorId: id } = req.params;
@@ -132,7 +132,7 @@ export const updateSupervisor = async (req: Request, res: Response) => {
   }
 };
 
-// ── Delete a supervisor ──────────────────────────────────────
+// â”€â”€ Delete a supervisor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const deleteSupervisor = async (req: Request, res: Response) => {
   try {
     const { supervisorId: id } = req.params;
@@ -143,3 +143,4 @@ export const deleteSupervisor = async (req: Request, res: Response) => {
     return res.status(500).json({ error: "Internal server error." });
   }
 };
+

@@ -1,4 +1,0 @@
--- AlterTable
-ALTER TABLE "Trainee" ADD COLUMN     "workDays" INTEGER[] DEFAULT ARRAY[1, 2, 3, 4, 5]::INTEGER[],
-ADD COLUMN     "workEndTime" TEXT NOT NULL DEFAULT '17:00',
-ADD COLUMN     "workStartTime" TEXT NOT NULL DEFAULT '08:00';

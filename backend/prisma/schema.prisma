@@ -34,7 +34,7 @@ enum OvertimeType {
 // ── User ──────────────────────────────────────────────────────
 // Owns authentication state for BOTH admins and trainees.
 // Separating auth from profile lets admins exist without a
-// Trainee record, and keeps security fields in one place.
+// UserProfile record, and keeps security fields in one place.
 model User {
   id                  String    @id @default(uuid())
   email               String    @unique
@@ -47,17 +47,17 @@ model User {
   updatedAt           DateTime  @updatedAt
 
   // Relations
-  trainee            Trainee?
+  trainee            UserProfile?
   resetCodes         PasswordResetCode[]
   passwordHistory    PasswordHistory[]
   auditLogsPerformed AuditLog[]
 }
 
-// ── Trainee ───────────────────────────────────────────────────
+// ── UserProfile ───────────────────────────────────────────────
 // OJT profile linked 1-to-1 with a User account.
 // All auth fields have moved to User; this model owns only
 // identity, school, company placement, and hours requirement.
-model Trainee {
+model UserProfile {
   id            String   @id @default(uuid())
   userId        String   @unique          // FK → User (auth identity)
   lastName      String
@@ -78,12 +78,13 @@ model Trainee {
   logs         LogEntry[]
   supervisors  Supervisor[]
   overtimeLedger OvertimeLedger[]
+  accomplishmentScripts AccomplishmentScript[]
 
   @@index([companyId])
 }
 
 // ── Company ───────────────────────────────────────────────────
-// Normalizes companyName off Trainee, enabling company-level
+// Normalizes companyName off UserProfile, enabling company-level
 // queries (e.g. how many trainees per company) and future
 // extension (company address, contact person, etc.).
 model Company {
@@ -92,11 +93,11 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  trainees Trainee[]
+  trainees UserProfile[]
 }
 
 // ── WorkScheduleEntry ─────────────────────────────────────────
-// Replaces the opaque workSchedule JSON blob on Trainee.
+// Replaces the opaque workSchedule JSON blob on UserProfile.
 // Each row is one day's schedule, making it filterable and
 // individually updatable without full-document rewrites.
 // dayOfWeek: 0 = Sunday … 6 = Saturday (mirrors JS Date).
@@ -107,7 +108,7 @@ model WorkScheduleEntry {
   startTime DateTime // "HH:MM" 24-hour format
   endTime   DateTime // "HH:MM" 24-hour format
 
-  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+  trainee UserProfile @relation(fields: [traineeId], references: [id], onDelete: Cascade)
 
   @@unique([traineeId, dayOfWeek])
   @@index([traineeId])
@@ -128,7 +129,7 @@ model Supervisor {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+  trainee UserProfile @relation(fields: [traineeId], references: [id], onDelete: Cascade)
 
   @@unique([traineeId, firstName, lastName, middleName, suffix], name: "unique_supervisor_per_trainee")
   @@index([traineeId])
@@ -152,11 +153,26 @@ model LogEntry {
   accomplishment String?
   createdAt      DateTime  @default(now())
 
-  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+  trainee UserProfile @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+  overtimeLedger OvertimeLedger[]
 
   @@unique([traineeId, date])
   @@index([traineeId])
   @@index([date])            // supports date-range dashboard queries
+}
+
+model AccomplishmentScript {
+  id        String   @id @default(uuid())
+  traineeId String
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trainee UserProfile @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+
+  @@index([traineeId])
+  @@index([updatedAt])
 }
 
 
@@ -172,7 +188,7 @@ model OvertimeLedger {
   @@unique([sourceLogId, type])
 
   // Relations
-  trainee Trainee  @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+  trainee UserProfile  @relation(fields: [traineeId], references: [id], onDelete: Cascade)
   sourceLog LogEntry? @relation(fields: [sourceLogId], references: [id], onDelete: SetNull)
 
   @@index([traineeId])
@@ -184,7 +200,7 @@ model OvertimeLedger {
 
 // ── PasswordResetCode ─────────────────────────────────────────
 // 6-digit email verification code for the forgot-password flow.
-// References User (not Trainee) so admins can reset too.
+// References User (not UserProfile) so admins can reset too.
 model PasswordResetCode {
   id        String   @id @default(uuid())
   userId    String

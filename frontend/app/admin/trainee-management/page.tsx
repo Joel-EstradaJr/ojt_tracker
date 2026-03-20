@@ -499,7 +499,7 @@ export default function HomePage() {
             >
               <TraineeCard
                 trainee={t}
-                onClick={() => router.push(`/trainee/${t.id}/dashboard`)}
+                onClick={() => router.push(`/trainee/${t.id}/entry-logs?from=admin`)}
                 onEdit={() => setEditingTrainee(t)}
                 onDelete={() => setDeletingTrainee(t)}
               />
@@ -568,7 +568,7 @@ export default function HomePage() {
                     Admin deletion requires confirmation.
                   </p>
                   <div className="form-group" style={{ marginBottom: "0.55rem" }}>
-                    <label htmlFor="deleteAdminPassword">Your Current Password (or SUPER_PASSWORD)</label>
+                    <label htmlFor="deleteAdminPassword">Your Current Password</label>
                     <input
                       id="deleteAdminPassword"
                       type="password"

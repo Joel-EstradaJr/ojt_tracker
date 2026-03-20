@@ -64,7 +64,9 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", marginTop: "0.4rem", paddingRight: "0.2rem" }}>
         <nav style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
           {menuItems.map((item) => {
-            const active = pathname === item.href;
+            const active =
+              pathname === item.href ||
+              (item.href === "/admin/trainee-management" && pathname.startsWith("/trainee/"));
             return (
               <Link
                 key={item.href}

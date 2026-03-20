@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // Export Controller
 // Exports a trainee's log entries to CSV, Excel, or PDF.
 // Updated for new schema: lunchStart, lunchEnd, hoursWorked, accomplishment
@@ -11,11 +11,11 @@ import PDFDocument from "pdfkit";
 import prisma from "../utils/prisma";
 import { calculateExpectedEndDate } from "../utils/ph-holidays";
 
-// ── Helper: fetch trainee + logs ─────────────────────────────
+// â”€â”€ Helper: fetch trainee + logs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function getTraineeWithLogs(traineeId: string) {
-  const trainee = await prisma.trainee.findUnique({
+  const trainee = await prisma.userProfile.findUnique({
     where: { id: traineeId },
-    include: { logs: { orderBy: { date: "asc" } } },
+    include: { company: true, logs: { orderBy: { date: "asc" } } },
   });
   return trainee;
 }
@@ -46,7 +46,7 @@ function formatMinutes(mins: number): string {
   return `${h}h ${m}m`;
 }
 
-// ── Export as CSV ────────────────────────────────────────────
+// â”€â”€ Export as CSV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const exportCSV = async (req: Request, res: Response) => {
   try {
     const { traineeId } = req.params;
@@ -72,7 +72,7 @@ export const exportCSV = async (req: Request, res: Response) => {
   }
 };
 
-// ── Export as Excel (.xlsx) ──────────────────────────────────
+// â”€â”€ Export as Excel (.xlsx) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const exportExcel = async (req: Request, res: Response) => {
   try {
     const { traineeId } = req.params;
@@ -137,7 +137,7 @@ export const exportExcel = async (req: Request, res: Response) => {
   }
 };
 
-// ── Export as PDF ────────────────────────────────────────────
+// â”€â”€ Export as PDF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const exportPDF = async (req: Request, res: Response) => {
   try {
     const { traineeId } = req.params;
@@ -153,9 +153,9 @@ export const exportPDF = async (req: Request, res: Response) => {
     doc.pipe(res);
 
     // Title
-    doc.fontSize(18).text(`OJT Logs — ${name}`, { align: "center" });
+    doc.fontSize(18).text(`OJT Logs â€” ${name}`, { align: "center" });
     doc.moveDown(0.5);
-    doc.fontSize(11).text(`School: ${trainee.school}  |  Company: ${trainee.companyName}  |  Required Hours: ${trainee.requiredHours}`);
+    doc.fontSize(11).text(`School: ${trainee.school}  |  Company: ${trainee.company?.name ?? ""}  |  Required Hours: ${trainee.requiredHours}`);
     doc.moveDown(1);
 
     const totalHours = trainee.logs.reduce((s, l) => s + l.hoursWorked, 0);
@@ -164,7 +164,7 @@ export const exportPDF = async (req: Request, res: Response) => {
 
     trainee.logs.forEach((l) => {
       doc.text(
-        `${format(l.date, "yyyy-MM-dd")}  |  ${format(l.timeIn, "HH:mm")} – ${l.timeOut ? format(l.timeOut, "HH:mm") : "N/A"}  |  Lunch: ${format(l.lunchStart, "HH:mm")}–${format(l.lunchEnd, "HH:mm")}  |  ${formatMinutes(l.hoursWorked)}  |  OT: ${formatMinutes(l.overtime)}  |  Offset: ${formatMinutes(l.offsetUsed)}  |  ${l.accomplishment ?? ""}`
+        `${format(l.date, "yyyy-MM-dd")}  |  ${format(l.timeIn, "HH:mm")} â€“ ${l.timeOut ? format(l.timeOut, "HH:mm") : "N/A"}  |  Lunch: ${format(l.lunchStart, "HH:mm")}â€“${format(l.lunchEnd, "HH:mm")}  |  ${formatMinutes(l.hoursWorked)}  |  OT: ${formatMinutes(l.overtime)}  |  Offset: ${formatMinutes(l.offsetUsed)}  |  ${l.accomplishment ?? ""}`
       );
     });
 
@@ -187,3 +187,4 @@ export const exportPDF = async (req: Request, res: Response) => {
     return res.status(500).json({ error: "Internal server error." });
   }
 };
+

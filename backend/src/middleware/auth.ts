@@ -1,9 +1,10 @@
-// ============================================================
-// Auth Middleware — verifies JWT session cookie
+﻿// ============================================================
+// Auth Middleware â€” verifies JWT session cookie
 // ============================================================
 
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { UserRole } from "@prisma/client";
 import prisma from "../utils/prisma";
 
 const JWT_SECRET = () => {
@@ -42,12 +43,13 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       : { role: "trainee", traineeId: (payload as unknown as { traineeId?: string }).traineeId };
 
     if (normalized.traineeId) {
-      const user = await prisma.trainee.findUnique({
+      const trainee = await prisma.userProfile.findUnique({
         where: { id: normalized.traineeId },
-        select: { id: true, role: true },
+        include: { user: { select: { role: true } } },
       });
 
-      if (!user || user.role !== normalized.role) {
+      const mappedRole = trainee?.user?.role === UserRole.ADMIN ? "admin" : "trainee";
+      if (!trainee?.user || mappedRole !== normalized.role) {
         return res.status(401).json({ error: "Session expired or invalid." });
       }
     }
@@ -143,3 +145,4 @@ export function clearSessionCookie(res: Response): void {
     path: "/",
   });
 }
+

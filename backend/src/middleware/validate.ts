@@ -10,6 +10,8 @@ import {
   supervisorSchema,
   createLogSchema,
   updateLogSchema,
+  scriptCreateSchema,
+  scriptUpdateSchema,
   sanitizeString,
   formatZodErrors,
 } from "../schemas/validation";
@@ -176,6 +178,25 @@ export function validateLogUpdate(req: Request, res: Response, next: NextFunctio
     }
   }
 
+  req.body = result.data;
+  next();
+}
+
+// ── Validate Script (create/update) ─────────────────────────
+export function validateScriptCreate(req: Request, res: Response, next: NextFunction) {
+  const result = scriptCreateSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: formatZodErrors(result.error) });
+  }
+  req.body = result.data;
+  next();
+}
+
+export function validateScriptUpdate(req: Request, res: Response, next: NextFunction) {
+  const result = scriptUpdateSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: formatZodErrors(result.error) });
+  }
   req.body = result.data;
   next();
 }

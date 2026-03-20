@@ -7,9 +7,18 @@
 // ============================================================
 
 import { useState, useEffect, useCallback } from "react";
-import { createLog, updateLog, fetchOffset, patchLogAction } from "@/lib/api";
-import { LogEntry } from "@/types";
+import {
+  createLog,
+  updateLog,
+  fetchOffset,
+  patchLogAction,
+  fetchAccomplishmentScripts,
+  createAccomplishmentScript,
+  updateAccomplishmentScript,
+} from "@/lib/api";
+import { AccomplishmentScript, LogEntry } from "@/types";
 import DatePicker from "@/components/DatePicker";
+import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 import { sanitizeInput } from "@/lib/sanitize";
 import { formatMinutes } from "@/lib/duration";
 import { useActionGuard } from "@/lib/useActionGuard";
@@ -115,6 +124,14 @@ export default function LogForm({
   const [showAccomplishmentModal, setShowAccomplishmentModal] = useState(false);
   const [accomplishmentTargetLogId, setAccomplishmentTargetLogId] = useState<string | null>(null);
   const [accomplishmentText, setAccomplishmentText] = useState("");
+  const [showScriptsPanel, setShowScriptsPanel] = useState(false);
+  const [scriptsLoading, setScriptsLoading] = useState(false);
+  const [scriptsError, setScriptsError] = useState("");
+  const [scripts, setScripts] = useState<AccomplishmentScript[]>([]);
+  const [scriptMode, setScriptMode] = useState<"list" | "create" | "edit">("list");
+  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
+  const [scriptTitle, setScriptTitle] = useState("");
+  const [scriptContent, setScriptContent] = useState("");
 
   // Find today's log from passed logs
   useEffect(() => {
@@ -140,21 +157,61 @@ export default function LogForm({
     } catch { /* silent */ }
   }, [traineeId]);
 
+  const loadScripts = useCallback(async () => {
+    setScriptsLoading(true);
+    setScriptsError("");
+    try {
+      const data = await fetchAccomplishmentScripts(traineeId);
+      setScripts(data);
+    } catch (err: unknown) {
+      setScriptsError(err instanceof Error ? err.message : "Failed to load scripts.");
+    } finally {
+      setScriptsLoading(false);
+    }
+  }, [traineeId]);
+
+  useEffect(() => {
+    if (!showAccomplishmentModal) return;
+    loadScripts();
+  }, [showAccomplishmentModal, loadScripts]);
+
+  useEffect(() => {
+    if (!showAccomplishmentModal) {
+      setShowScriptsPanel(false);
+      setScriptMode("list");
+      setEditingScriptId(null);
+      setScriptTitle("");
+      setScriptContent("");
+      setScriptsError("");
+    }
+  }, [showAccomplishmentModal]);
+
   // Compute preview hours (admin form)
   const previewHours = (() => {
     if (!timeIn || !timeOut || !date) return null;
     try {
       const tIn = new Date(`${date}T${timeIn}:00`).getTime();
       const tOut = new Date(`${date}T${timeOut}:00`).getTime();
-      const lS = noLunch ? tIn : new Date(`${date}T${lunchStart}:00`).getTime();
-      const lE = noLunch ? tIn : new Date(`${date}T${lunchEnd}:00`).getTime();
-      const mins = (tOut - tIn) / 60000 - (lE - lS) / 60000;
+      const hasLunchWindow = !noLunch && Boolean(lunchStart) && Boolean(lunchEnd);
+      const lS = hasLunchWindow ? new Date(`${date}T${lunchStart}:00`).getTime() : tIn;
+      const lE = hasLunchWindow ? new Date(`${date}T${lunchEnd}:00`).getTime() : tIn;
+      const lunchDeduction = hasLunchWindow ? Math.max(0, (lE - lS) / 60000) : 0;
+      const mins = (tOut - tIn) / 60000 - lunchDeduction;
       if (mins < 0) return null;
       const hw = Math.floor(mins);
       const ot = Math.max(0, hw - STANDARD_MINUTES);
       return { hoursWorked: hw, overtime: ot };
     } catch { return null; }
   })();
+
+  const offsetBlockedByOvertime = Boolean(previewHours && previewHours.overtime > 0);
+
+  useEffect(() => {
+    if (offsetBlockedByOvertime && applyOffset) {
+      setApplyOffset(false);
+      setOffsetAmount("");
+    }
+  }, [offsetBlockedByOvertime, applyOffset]);
 
   // When editingLog changes, populate all fields (admin edit mode)
   useEffect(() => {
@@ -195,6 +252,11 @@ export default function LogForm({
         if (!noLunch && (!lunchStart || !lunchEnd)) { setError("Lunch Start and Lunch End are required (or toggle No Lunch)."); return; }
       }
 
+      if (applyOffset && offsetBlockedByOvertime) {
+        setError("Offset can only be applied when overtime is 0.");
+        return;
+      }
+
       const offsetPayload = applyOffset
         ? { applyOffset: true, offsetAmount: offsetAmount ? Math.floor(Number(offsetAmount)) : undefined }
         : {};
@@ -202,10 +264,22 @@ export default function LogForm({
       setLoading(true);
       try {
         if (editingLog) {
-          await updateLog(editingLog.id, {
-            accomplishment: accomplishment || undefined,
-            ...offsetPayload,
-          });
+          if (isAdmin) {
+            await updateLog(editingLog.id, {
+              date: new Date(date).toISOString(),
+              timeIn: timeInISO,
+              lunchStart: noLunch ? timeInISO : lunchStartISO,
+              lunchEnd: noLunch ? timeInISO : lunchEndISO,
+              timeOut: timeOutISO,
+              accomplishment: accomplishment || undefined,
+              ...offsetPayload,
+            });
+          } else {
+            await updateLog(editingLog.id, {
+              accomplishment: accomplishment || undefined,
+              ...offsetPayload,
+            });
+          }
         } else {
           await createLog({
             traineeId,
@@ -289,11 +363,63 @@ export default function LogForm({
     });
   };
 
+  const handleUseScript = (content: string) => {
+    setAccomplishmentText((prev) => (prev.trim() ? `${prev.trim()}\n\n${content.trim()}` : content.trim()));
+    setShowScriptsPanel(false);
+    setScriptMode("list");
+  };
+
+  const handleStartCreateScript = () => {
+    setScriptMode("create");
+    setEditingScriptId(null);
+    setScriptTitle("");
+    setScriptContent("");
+    setScriptsError("");
+  };
+
+  const handleStartEditScript = (script: AccomplishmentScript) => {
+    setScriptMode("edit");
+    setEditingScriptId(script.id);
+    setScriptTitle(script.title);
+    setScriptContent(script.content);
+    setScriptsError("");
+  };
+
+  const handleSaveScript = async () => {
+    const title = sanitizeInput(scriptTitle).trim();
+    const content = sanitizeInput(scriptContent).trim();
+    if (!title || !content) {
+      setScriptsError("Title and content are required.");
+      return;
+    }
+
+    setScriptsLoading(true);
+    setScriptsError("");
+    try {
+      if (scriptMode === "edit" && editingScriptId) {
+        const updated = await updateAccomplishmentScript(editingScriptId, { title, content });
+        setScripts((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      } else {
+        const created = await createAccomplishmentScript(traineeId, { title, content });
+        setScripts((prev) => [created, ...prev]);
+      }
+      setScriptMode("list");
+      setEditingScriptId(null);
+      setScriptTitle("");
+      setScriptContent("");
+    } catch (err: unknown) {
+      setScriptsError(err instanceof Error ? err.message : "Failed to save script.");
+    } finally {
+      setScriptsLoading(false);
+    }
+  };
+
   const isEditing = !!editingLog;
-  const lockCoreFields = isEditing;
+  const lockCoreFields = isEditing && !isAdmin;
   const effectiveAvailable = isEditing && editingLog
     ? Math.max(0, Math.floor(availableOffset + editingLog.offsetUsed))
     : availableOffset;
+  const previewMetrics = previewHours ?? { hoursWorked: 0, overtime: 0 };
 
   // ════════════════════════════════════════════════════════════
   // TRAINEE BUTTON FLOW RENDER
@@ -434,28 +560,159 @@ export default function LogForm({
           </div>
         )}
 
-        {/* Required accomplishment modal after Time Out */}
         {showAccomplishmentModal && (
-          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1001 }}>
-            <div style={{ background: "var(--bg)", borderRadius: "var(--radius)", padding: "1.5rem", maxWidth: 460, width: "92%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-              <h3 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.65rem" }}>Submit Accomplishment</h3>
-              <p style={{ fontSize: "0.84rem", color: "var(--text-muted)", marginBottom: "0.65rem" }}>
-                Time Out has been recorded. Please enter your accomplishment to complete today&apos;s log.
-              </p>
-              <textarea
-                rows={4}
-                value={accomplishmentText}
-                onChange={(e) => setAccomplishmentText(sanitizeInput(e.target.value))}
-                placeholder="What did you accomplish today?"
-                style={{ fontSize: "0.9rem", width: "100%", marginBottom: "0.75rem" }}
-              />
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button type="button" className="btn btn-primary" disabled={loading || !accomplishmentText.trim()} onClick={handleSaveAccomplishment}>
-                  {loading ? "Saving..." : "Confirm Accomplishment"}
-                </button>
+          <RightSidebarDrawer
+            onClose={() => setShowAccomplishmentModal(false)}
+            width={560}
+          >
+            <div className="drawer-form-card" style={{ minHeight: "100%", display: "flex", flexDirection: "column" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+                <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600 }}>
+                  {showScriptsPanel ? "Accomplishment Scripts" : "Submit Accomplishment"}
+                </h3>
               </div>
+
+              {!showScriptsPanel && (
+                <>
+                  <p style={{ fontSize: "0.84rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>
+                    Time Out has been recorded. Add your accomplishment to complete today&apos;s log.
+                  </p>
+
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label>Accomplishment</label>
+                    <textarea
+                      rows={11}
+                      value={accomplishmentText}
+                      onChange={(e) => setAccomplishmentText(sanitizeInput(e.target.value))}
+                      placeholder="What did you accomplish today?"
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", marginTop: "0.85rem" }}>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      onClick={() => {
+                        setShowScriptsPanel(true);
+                        setScriptMode("list");
+                      }}
+                    >
+                      <span aria-hidden="true">📚</span>
+                      Scripts
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={loading || !accomplishmentText.trim()}
+                      onClick={handleSaveAccomplishment}
+                    >
+                      {loading ? "Saving..." : "Confirm Accomplishment"}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {showScriptsPanel && (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem", gap: "0.5rem" }}>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      onClick={() => {
+                        if (scriptMode === "list") {
+                          setShowScriptsPanel(false);
+                          return;
+                        }
+                        setScriptMode("list");
+                        setEditingScriptId(null);
+                        setScriptTitle("");
+                        setScriptContent("");
+                        setScriptsError("");
+                      }}
+                    >
+                      ← Back
+                    </button>
+
+                    {scriptMode === "list" && (
+                      <button type="button" className="btn btn-primary" onClick={handleStartCreateScript}>
+                        + New Script
+                      </button>
+                    )}
+                  </div>
+
+                  {scriptsError && (
+                    <div style={{ padding: "0.6rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.65rem" }}>
+                      {scriptsError}
+                    </div>
+                  )}
+
+                  {scriptMode === "list" && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", maxHeight: "calc(100vh - 220px)", overflowY: "auto", paddingRight: "0.2rem" }}>
+                      {scriptsLoading && <span style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>Loading scripts...</span>}
+
+                      {!scriptsLoading && scripts.length === 0 && (
+                        <div style={{ border: "1px dashed var(--border)", borderRadius: "var(--radius-sm)", padding: "0.8rem", color: "var(--text-muted)", fontSize: "0.84rem" }}>
+                          No scripts saved yet. Create one so you can reuse it later.
+                        </div>
+                      )}
+
+                      {scripts.map((script) => (
+                        <div key={script.id} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "0.75rem" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", marginBottom: "0.35rem" }}>
+                            <strong style={{ fontSize: "0.9rem" }}>{script.title}</strong>
+                            <div style={{ display: "flex", gap: "0.35rem" }}>
+                              <button type="button" className="btn btn-outline" style={{ padding: "0.28rem 0.55rem", fontSize: "0.74rem" }} onClick={() => handleStartEditScript(script)}>
+                                Edit
+                              </button>
+                              <button type="button" className="btn btn-primary" style={{ padding: "0.28rem 0.55rem", fontSize: "0.74rem" }} onClick={() => handleUseScript(script.content)}>
+                                Use
+                              </button>
+                            </div>
+                          </div>
+                          <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem", whiteSpace: "pre-wrap" }}>
+                            {script.content.length > 180 ? `${script.content.slice(0, 180)}...` : script.content}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {(scriptMode === "create" || scriptMode === "edit") && (
+                    <>
+                      <div className="form-group">
+                        <label>Script Title</label>
+                        <input
+                          type="text"
+                          value={scriptTitle}
+                          onChange={(e) => setScriptTitle(sanitizeInput(e.target.value))}
+                          placeholder="e.g., Daily Support Tasks"
+                          maxLength={80}
+                        />
+                      </div>
+
+                      <div className="form-group" style={{ flex: 1 }}>
+                        <label>Script Content</label>
+                        <textarea
+                          rows={10}
+                          value={scriptContent}
+                          onChange={(e) => setScriptContent(sanitizeInput(e.target.value))}
+                          placeholder="Write the reusable accomplishment text here..."
+                          maxLength={2000}
+                        />
+                      </div>
+
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.75rem" }}>
+                        <button type="button" className="btn btn-primary" onClick={handleSaveScript} disabled={scriptsLoading}>
+                          {scriptsLoading ? "Saving..." : scriptMode === "edit" ? "Update Script" : "Create Script"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
             </div>
-          </div>
+          </RightSidebarDrawer>
         )}
       </div>
     );
@@ -487,11 +744,6 @@ export default function LogForm({
             {isEditing ? "Edit Log Entry" : "Add Log Entry"}
           </h3>
         </div>
-        {isEditing && onCancelEdit && (
-          <button type="button" className="btn btn-outline" style={{ fontSize: "0.8rem", padding: "0.3rem 0.7rem" }} onClick={onCancelEdit}>
-            Cancel Edit
-          </button>
-        )}
       </div>
 
       <form onSubmit={handleAdminSubmit}>
@@ -558,61 +810,82 @@ export default function LogForm({
           </div>
         )}
 
-        {/* Preview: calculated hours & overtime */}
-        {previewHours && (
+        <div style={{
+          background: "var(--bg-subtle)",
+          borderRadius: "var(--radius-sm)",
+          padding: "0.75rem 0.85rem",
+          margin: "0.65rem 0 0.85rem",
+          border: "1px solid var(--border)",
+          display: "grid",
+          gap: "0.7rem",
+        }}>
           <div style={{
-            display: "flex", gap: "1.5rem", margin: "0.65rem 0 0.25rem",
-            fontSize: "0.82rem", color: "var(--text-muted)",
-            padding: "0.5rem 0.75rem",
+            display: "flex",
+            gap: "1.25rem",
+            fontSize: "0.82rem",
+            color: "var(--text-muted)",
+            padding: "0.5rem 0.7rem",
             background: "var(--primary-lighter)",
             borderRadius: "var(--radius-sm)",
             border: "1px solid var(--primary-light)",
+            flexWrap: "wrap",
           }}>
             <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-              Hours: <strong style={{ color: "var(--text)" }}>{formatMinutes(previewHours.hoursWorked)}</strong>
+              Hours: <strong style={{ color: "var(--text)" }}>{formatMinutes(previewMetrics.hoursWorked)}</strong>
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={previewHours.overtime > 0 ? "var(--primary)" : "var(--text-faint)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg>
-              Overtime: <strong style={{ color: previewHours.overtime > 0 ? "var(--primary)" : "var(--text)" }}>{formatMinutes(previewHours.overtime)}</strong>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={previewMetrics.overtime > 0 ? "var(--primary)" : "var(--text-faint)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg>
+              Overtime: <strong style={{ color: previewMetrics.overtime > 0 ? "var(--primary)" : "var(--text)" }}>{formatMinutes(previewMetrics.overtime)}</strong>
             </span>
           </div>
-        )}
 
-        {/* Offset section */}
-        <div style={{
-          background: "var(--bg-subtle)", borderRadius: "var(--radius-sm)",
-          padding: "0.65rem 0.85rem", margin: "0.65rem 0 0.85rem",
-          border: "1px solid var(--border)",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem", cursor: "pointer", fontWeight: 500 }}>
-              <input
-                type="checkbox"
-                checked={applyOffset}
-                onChange={(e) => {
-                  setApplyOffset(e.target.checked);
-                  if (!e.target.checked) setOffsetAmount("");
-                }}
-                disabled={effectiveAvailable <= 0}
-                style={{ width: "1rem", height: "1rem", accentColor: "var(--primary)" }}
-              />
-              Apply Offset
-            </label>
-            <span className="badge badge-info" style={{ fontSize: "0.74rem" }}>
-              Available: {formatMinutes(effectiveAvailable)}
-            </span>
-            {applyOffset && effectiveAvailable > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
-                <label style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Minutes to apply:</label>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: "0.75rem 0.9rem",
+            alignItems: "end",
+          }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", minWidth: "220px" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.45rem", fontSize: "0.9rem", cursor: "pointer", fontWeight: 600, color: "var(--text-secondary)" }}>
                 <input
-                  type="number" step="1" min="0" max={effectiveAvailable}
-                  value={offsetAmount} onChange={(e) => setOffsetAmount(e.target.value)}
-                  placeholder={`max ${effectiveAvailable}`}
-                  style={{ width: "6rem", padding: "0.3rem 0.45rem", fontSize: "0.85rem" }}
+                  type="checkbox"
+                  checked={applyOffset}
+                  onChange={(e) => {
+                    setApplyOffset(e.target.checked);
+                    if (!e.target.checked) setOffsetAmount("");
+                  }}
+                  disabled={effectiveAvailable <= 0 || offsetBlockedByOvertime}
+                  style={{ width: "1rem", height: "1rem", accentColor: "var(--primary)" }}
                 />
+                Apply Offset
+              </label>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", flexWrap: "wrap" }}>
+                <span className="badge badge-info" style={{ fontSize: "0.74rem" }}>
+                  Available: {formatMinutes(effectiveAvailable)}
+                </span>
+                {offsetBlockedByOvertime && (
+                  <span className="badge badge-warning" style={{ fontSize: "0.74rem" }}>
+                    Disabled when overtime &gt; 0
+                  </span>
+                )}
               </div>
-            )}
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label>Minutes to apply</label>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                max={effectiveAvailable}
+                value={offsetAmount}
+                onChange={(e) => setOffsetAmount(e.target.value)}
+                placeholder={`max ${effectiveAvailable}`}
+                disabled={!applyOffset || effectiveAvailable <= 0 || offsetBlockedByOvertime}
+              />
+            </div>
           </div>
         </div>
 

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { WorkSchedule } from "@/lib/ph-holidays";
+import { useRouter } from "next/navigation";
 import { ThemeToggle } from "@/components/ThemeProvider";
 import PageHeading from "@/components/PageHeading";
 import ImportCSV from "@/components/ImportCSV";
@@ -16,6 +17,7 @@ const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Fri
 
 export default function TraineeDashboardPage() {
   const { runGuarded } = useActionGuard();
+  const router = useRouter();
   const {
     id,
     trainee,
@@ -29,6 +31,7 @@ export default function TraineeDashboardPage() {
     remaining,
     expectedEndDate,
     activeUserLabel,
+    viewerRole,
     loadData,
   } = useTraineePageData();
   const [exportLoading, setExportLoading] = useState<"csv" | "excel" | null>(null);
@@ -83,6 +86,12 @@ export default function TraineeDashboardPage() {
         )}
         toolbar={(
           <>
+            {viewerRole === "admin" && (
+              <button className="btn btn-outline" onClick={() => router.push("/admin/trainee-management")} style={{ gap: "0.35rem" }}>
+                <span aria-hidden="true">←</span>
+                Back to Trainee Management
+              </button>
+            )}
             <button className="btn btn-outline" onClick={() => setShowExportPicker(true)} disabled={exportLoading !== null} style={{ gap: "0.35rem" }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
               <span>{exportLoading ? `Exporting ${exportLoading.toUpperCase()}...` : "Export"}</span>

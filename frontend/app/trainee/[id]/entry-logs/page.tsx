@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { deleteLog, downloadExport, patchLogAction } from "@/lib/api";
 import ImportCSV from "@/components/ImportCSV";
@@ -14,8 +15,11 @@ import { formatMinutes } from "@/lib/duration";
 import { useActionGuard } from "@/lib/useActionGuard";
 import { formatDisplayDate } from "@/lib/date";
 
+const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
 export default function TraineeEntryLogsPage() {
   const { runGuarded } = useActionGuard();
+  const router = useRouter();
   const {
     id,
     trainee,
@@ -25,6 +29,7 @@ export default function TraineeEntryLogsPage() {
     loading,
     authChecking,
     viewerRole,
+    percent,
     activeUserLabel,
     loadData,
   } = useTraineePageData();
@@ -397,6 +402,7 @@ export default function TraineeEntryLogsPage() {
     if (!trainee) return false;
     if (!log.timeOut) return false;
     if (availableOffset <= 0) return false;
+    if (log.overtime > 0) return false;
     const requiredMinutes = trainee.requiredHours * 60;
     if (totalHours < requiredMinutes) return false;
     return actualWorkedIntervalMinutes(log) >= getStandardMinutesForLog(log);
@@ -471,6 +477,15 @@ export default function TraineeEntryLogsPage() {
 
   return (
     <div className="container">
+      {viewerRole === "admin" && (
+        <div style={{ marginBottom: "0.75rem" }}>
+          <button className="btn btn-outline" onClick={() => router.push("/admin/trainee-management")} style={{ gap: "0.35rem" }}>
+            <span aria-hidden="true">←</span>
+            Back
+          </button>
+        </div>
+      )}
+
       <PageHeading
         title="Entry Logs"
         subtitle="Manage your daily logs and export your records."
@@ -491,6 +506,50 @@ export default function TraineeEntryLogsPage() {
         )}
         meta={<>LOGGED IN AS: <strong style={{ color: "var(--text)" }}>{activeUserLabel || "Trainee"}</strong></>}
       />
+
+      <div className="card" style={{ marginBottom: "1rem", padding: "1rem 1.1rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", alignItems: "flex-start", flexWrap: "wrap", marginBottom: "0.65rem" }}>
+          <div>
+            <h3 style={{ fontSize: "1.05rem", fontWeight: 700, marginBottom: "0.15rem" }}>{trainee.displayName}</h3>
+            <p style={{ fontSize: "0.84rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.45rem", flexWrap: "wrap" }}>
+              {trainee.companyName && <span>{trainee.companyName}</span>}
+              {trainee.companyName && <span style={{ opacity: 0.4 }}>|</span>}
+              <span>{trainee.school}</span>
+            </p>
+          </div>
+          <span className={percent >= 100 ? "badge badge-success" : "badge badge-primary"} style={{ fontSize: "0.76rem" }}>
+            {percent}% Complete
+          </span>
+        </div>
+
+        <div style={{ marginBottom: "0.65rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.35rem" }}>
+            <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>Progress</span>
+            <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--primary)" }}>{percent}%</span>
+          </div>
+          <div className="progress-bar-track">
+            <div className="progress-bar-fill" style={{ width: `${percent}%` }} />
+          </div>
+        </div>
+
+        {trainee.workSchedule && Object.keys(trainee.workSchedule).length > 0 && (
+          <div style={{ background: "var(--bg-subtle)", borderRadius: "var(--radius-sm)", padding: "0.65rem 0.75rem", border: "1px solid var(--border)" }}>
+            <p style={{ fontSize: "0.76rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: "0.35rem" }}>
+              Work Schedule
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.3rem 0.75rem" }}>
+              {Object.entries(trainee.workSchedule)
+                .sort(([a], [b]) => Number(a) - Number(b))
+                .map(([dayNum, times]) => (
+                  <div key={dayNum} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.84rem", color: "var(--text-secondary)", gap: "0.5rem" }}>
+                    <span style={{ fontWeight: 600 }}>{DAY_LABELS[Number(dayNum)]}</span>
+                    <span>{times.start} - {times.end}</span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {showExportPicker && (
         <div className="modal-overlay" onClick={() => exportLoading === null && setShowExportPicker(false)}>

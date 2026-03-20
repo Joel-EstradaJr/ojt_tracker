@@ -2,8 +2,8 @@
 // Shared TypeScript types for the frontend
 // ============================================================
 
-/** Trainee as returned by the API (no passwordHash) */
-export interface Trainee {
+/** User profile as returned by the API (no passwordHash) */
+export interface UserProfile {
   id: string;
   role: "admin" | "trainee";
   lastName: string;
@@ -24,6 +24,9 @@ export interface Trainee {
   workSchedule?: Record<string, { start: string; end: string }>;
   supervisors?: Supervisor[];
 }
+
+// Backward-compatible alias while frontend components are migrated.
+export type Trainee = UserProfile;
 
 /** Supervisor belonging to a trainee */
 export interface Supervisor {
@@ -73,4 +76,13 @@ export interface LogsResponse {
   totalOvertime: number;
   totalOffsetUsed: number;
   availableOffset: number;
+}
+
+export interface AccomplishmentScript {
+  id: string;
+  traineeId: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
 }

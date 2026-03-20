@@ -48,7 +48,7 @@ export default function HomePage() {
 
   // Search, sort & pagination
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortField, setSortField] = useState<"name" | "role" | "school" | "createdAt" | "activated" | "locked">("name");
+  const [sortField, setSortField] = useState<"name" | "role" | "email" | "createdAt" | "activated" | "locked">("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "trainee">("all");
   const [activatedFilter, setActivatedFilter] = useState<"all" | "yes" | "no">("all");
@@ -96,7 +96,7 @@ export default function HomePage() {
     }
     return monthLong.includes(token) || monthShort.includes(token);
   };
-  const handleHeaderSort = (field: "name" | "role" | "school" | "createdAt" | "activated" | "locked") => {
+  const handleHeaderSort = (field: "name" | "role" | "email" | "createdAt" | "activated" | "locked") => {
     setCurrentPage(1);
     if (sortField === field) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -105,7 +105,7 @@ export default function HomePage() {
     setSortField(field);
     setSortDir("asc");
   };
-  const getSortIndicator = (field: "name" | "role" | "school" | "createdAt" | "activated" | "locked") => {
+  const getSortIndicator = (field: "name" | "role" | "email" | "createdAt" | "activated" | "locked") => {
     if (sortField !== field) return "↕";
     return sortDir === "asc" ? "↑" : "↓";
   };
@@ -307,7 +307,7 @@ export default function HomePage() {
       const searchableValues = [
         formatFullName(t).toLowerCase(),
         t.role.toLowerCase(),
-        (t.school || "").toLowerCase(),
+        (t.email || "").toLowerCase(),
         isActivated(t) ? "yes" : "no",
         isLocked(t) ? "yes" : "no",
       ];
@@ -326,8 +326,8 @@ export default function HomePage() {
         case "role":
           cmp = a.role.localeCompare(b.role);
           break;
-        case "school":
-          cmp = a.school.localeCompare(b.school);
+        case "email":
+          cmp = a.email.localeCompare(b.email);
           break;
         case "createdAt":
           cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
@@ -385,7 +385,7 @@ export default function HomePage() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)", opacity: 0.4, pointerEvents: "none" }}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             <input
               type="text"
-              placeholder="Search all columns (name, role, school, date, status)..."
+              placeholder="Search all columns (name, role, email, date, status)..."
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
               style={{ paddingLeft: "2.25rem" }}
@@ -494,8 +494,8 @@ export default function HomePage() {
                 <th style={{ textAlign: "center", cursor: "pointer", userSelect: "none" }} onClick={() => handleHeaderSort("role")}>
                   Role <span style={{ opacity: 0.7 }}>{getSortIndicator("role")}</span>
                 </th>
-                <th style={{ textAlign: "center", cursor: "pointer", userSelect: "none" }} onClick={() => handleHeaderSort("school")}>
-                  School / University <span style={{ opacity: 0.7 }}>{getSortIndicator("school")}</span>
+                <th style={{ textAlign: "center", cursor: "pointer", userSelect: "none" }} onClick={() => handleHeaderSort("email")}>
+                  Email <span style={{ opacity: 0.7 }}>{getSortIndicator("email")}</span>
                 </th>
                 <th style={{ textAlign: "center", cursor: "pointer", userSelect: "none" }} onClick={() => handleHeaderSort("createdAt")}>
                   CREATION DATE <span style={{ opacity: 0.7 }}>{getSortIndicator("createdAt")}</span>
@@ -515,8 +515,8 @@ export default function HomePage() {
                   <td style={{ fontWeight: 600, height: "4.1rem", verticalAlign: "middle", textAlign: "center" }}>{formatFullName(t)}</td>
                   <td style={{ textTransform: "capitalize", height: "4.1rem", verticalAlign: "middle", textAlign: "center" }}>{t.role}</td>
                   <td style={{ height: "4.1rem", verticalAlign: "middle", width: "18rem", minWidth: "14rem", maxWidth: "22rem" }}>
-                    <div style={{ maxHeight: "2.7rem", overflowY: "auto", lineHeight: 1.35, paddingRight: "0.2rem", textAlign: "center" }} title={t.school}>
-                      {t.school}
+                    <div style={{ maxHeight: "2.7rem", overflowY: "auto", lineHeight: 1.35, paddingRight: "0.2rem", textAlign: "center" }} title={t.email}>
+                      {t.email}
                     </div>
                   </td>
                   <td style={{ height: "4.1rem", verticalAlign: "middle", textAlign: "center" }}>{formatCreatedAt(t.createdAt)}</td>
@@ -615,7 +615,7 @@ export default function HomePage() {
                     Admin deletion requires confirmation.
                   </p>
                   <div className="form-group" style={{ marginBottom: "0.55rem" }}>
-                    <label htmlFor="deleteAdminPassword">Your Current Password (or SUPER_PASSWORD)</label>
+                    <label htmlFor="deleteAdminPassword">Your Current Password</label>
                     <input
                       id="deleteAdminPassword"
                       type="password"

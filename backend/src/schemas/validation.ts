@@ -17,6 +17,11 @@ const NAME_RE = new RegExp(
   `[${LETTER}.]$`                           // ends with a letter or period (e.g. "Jr.")
 );
 // Single-char names (just a letter) are handled by minLength
+export const scriptCreateSchema = z.object({
+  title: z.string().trim().min(2, "Script title must be at least 2 characters.").max(80),
+  content: z.string().trim().min(2, "Script content must be at least 2 characters.").max(2000),
+});
+
 const NAME_SINGLE_RE = new RegExp(`^[${LETTER}]$`);
 
 // No consecutive punctuation / special characters
@@ -260,6 +265,8 @@ export const updateTraineeSchema = z.object({
   workSchedule: z.record(z.string(), z.object({ start: z.string(), end: z.string() })).optional(),
   verificationToken: z.string().optional(),
 });
+
+export const scriptUpdateSchema = scriptCreateSchema;
 
 // ── Supervisor Schema ────────────────────────────────────────
 
