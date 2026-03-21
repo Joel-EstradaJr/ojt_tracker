@@ -309,6 +309,12 @@ export async function downloadExport(traineeId: string, format: "csv" | "excel" 
 
 // ── Import CSV ───────────────────────────────────────────────
 
+export interface ImportCsvResult {
+  imported: number;
+  skipped: number;
+  skippedDetails?: string[];
+}
+
 export async function importCSV(traineeId: string, file: File) {
   const form = new FormData();
   form.append("file", file);
@@ -324,7 +330,7 @@ export async function importCSV(traineeId: string, file: File) {
     throw new Error((body as Record<string, string>).error || res.statusText);
   }
 
-  return res.json() as Promise<{ imported: number }>;
+  return res.json() as Promise<ImportCsvResult>;
 }
 
 // ── Bulk Export / Import (full database) ─────────────────────

@@ -4,16 +4,18 @@ import { differenceInMinutes } from "date-fns";
 import prisma from "../utils/prisma";
 
 function normaliseKey(header: string): string {
-  return header.trim().toLowerCase().replace(/[\s_]+/g, "");
+  return header.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 const KEY_MAP: Record<string, string> = {
   date: "date",
+  dates: "date",
   timein: "timeIn",
   lunchstart: "lunchStart",
   lunchend: "lunchEnd",
   timeout: "timeOut",
   accomplishment: "accomplishment",
+  remarks: "accomplishment",
   hoursworked: "_ignore",
   overtime: "_ignore",
   offsetused: "_ignore",
@@ -42,13 +44,57 @@ function parseTime(dateStr: string, timeVal: string): Date {
   return new Date(`${dateStr}T${val}`);
 }
 
+function isPlaceholder(value?: string): boolean {
+  if (!value) return true;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "" || normalized === "-" || normalized === "n/a" || normalized === "na" || normalized === "null";
+}
+
+function parseTimeOrNull(dateStr: string, timeVal?: string): Date | null {
+  if (isPlaceholder(timeVal)) return null;
+  const parsed = parseTime(dateStr, String(timeVal));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function parseDate(val: string): string {
   const v = val.trim();
   if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+
+  // Supports frontend display format: "Friday | Mar 20, 2026"
+  const display = v.match(/^[A-Za-z]+\s*\|\s*([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})$/);
+  if (display) {
+    const [, month, day, year] = display;
+    const monthMap: Record<string, string> = {
+      jan: "01", january: "01",
+      feb: "02", february: "02",
+      mar: "03", march: "03",
+      apr: "04", april: "04",
+      may: "05",
+      jun: "06", june: "06",
+      jul: "07", july: "07",
+      aug: "08", august: "08",
+      sep: "09", sept: "09", september: "09",
+      oct: "10", october: "10",
+      nov: "11", november: "11",
+      dec: "12", december: "12",
+    };
+
+    const monthNum = monthMap[month.toLowerCase()];
+    if (monthNum) return `${year}-${monthNum}-${day.padStart(2, "0")}`;
+  }
+
   const slash = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (slash) {
-    const [, a, b, y] = slash;
-    return `${y}-${a.padStart(2, "0")}-${b.padStart(2, "0")}`;
+    const [, month, day, year] = slash;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  const slashShortYear = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  if (slashShortYear) {
+    const [, month, day, yy] = slashShortYear;
+    const yearNum = Number(yy);
+    const fullYear = yearNum >= 70 ? `19${yy}` : `20${yy}`;
+    return `${fullYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
   }
   const d = new Date(v);
   if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
@@ -98,11 +144,36 @@ export const importCSV = async (req: Request, res: Response) => {
       }
 
       const dateStr = parseDate(row.date);
-      const inDate = parseTime(dateStr, row.timeIn);
-      const outDate = parseTime(dateStr, row.timeOut);
+      const logDate = new Date(`${dateStr}T00:00:00.000Z`);
+      if (Number.isNaN(logDate.getTime())) {
+        skipped.push(`Invalid date value '${row.date}'`);
+        continue;
+      }
 
-      const lStart = row.lunchStart ? parseTime(dateStr, row.lunchStart) : new Date(`${dateStr}T12:00:00`);
-      const lEnd = row.lunchEnd ? parseTime(dateStr, row.lunchEnd) : new Date(`${dateStr}T13:00:00`);
+      const inDate = parseTimeOrNull(dateStr, row.timeIn);
+      const outDate = parseTimeOrNull(dateStr, row.timeOut);
+      if (!inDate || !outDate) {
+        skipped.push(`Invalid time values for ${dateStr}`);
+        continue;
+      }
+
+      const parsedLunchStart = parseTimeOrNull(dateStr, row.lunchStart);
+      const parsedLunchEnd = parseTimeOrNull(dateStr, row.lunchEnd);
+
+      let lStart: Date;
+      let lEnd: Date;
+
+      // Exported placeholder lunch ("-") means no-lunch marker.
+      if (!parsedLunchStart && !parsedLunchEnd) {
+        lStart = inDate;
+        lEnd = inDate;
+      } else if (parsedLunchStart && parsedLunchEnd) {
+        lStart = parsedLunchStart;
+        lEnd = parsedLunchEnd;
+      } else {
+        skipped.push(`Invalid lunch values for ${dateStr}`);
+        continue;
+      }
 
       if (outDate <= inDate) {
         skipped.push(`timeOut <= timeIn for ${dateStr}`);
@@ -118,10 +189,17 @@ export const importCSV = async (req: Request, res: Response) => {
       const totalMinutes = differenceInMinutes(outDate, inDate);
       const lunchMinutes = hasLunch ? differenceInMinutes(lEnd, lStart) : 0;
       const hoursWorked = Math.max(0, totalMinutes - lunchMinutes);
+      if (!Number.isFinite(hoursWorked)) {
+        skipped.push(`Computed hoursWorked is invalid for ${dateStr}`);
+        continue;
+      }
 
-      const logDate = new Date(dateStr);
       const standardMinutes = getStandardMinutesForDay(trainee.workSchedule, logDate.getDay());
       const overtime = Math.max(0, hoursWorked - standardMinutes);
+      if (!Number.isFinite(overtime)) {
+        skipped.push(`Computed overtime is invalid for ${dateStr}`);
+        continue;
+      }
 
       const existing = await prisma.logEntry.findFirst({ where: { traineeId, date: logDate } });
       if (existing) {

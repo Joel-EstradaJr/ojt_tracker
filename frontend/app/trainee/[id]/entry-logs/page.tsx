@@ -458,10 +458,9 @@ export default function TraineeEntryLogsPage() {
   const startIdx = (safePage - 1) * pageSize;
   const paginatedLogs = filtered.slice(startIdx, startIdx + pageSize);
   const tableVisibleRows = 10;
-  const tableRowHeight = 52;
+  const tableRowHeight = 72;
   const tableHeaderHeight = 46;
   const fixedTableHeight = (tableVisibleRows * tableRowHeight) + tableHeaderHeight;
-  const shouldUseVerticalScroll = pageSize > tableVisibleRows && filtered.length > tableVisibleRows;
 
   const doDelete = async () => {
     await runGuarded("trainee-delete-log", async () => {
@@ -739,7 +738,7 @@ export default function TraineeEntryLogsPage() {
         <div
           style={{
             overflowX: "auto",
-            overflowY: shouldUseVerticalScroll ? "auto" : "hidden",
+            overflowY: "auto",
             borderRadius: "var(--radius-sm)",
             border: "1px solid var(--border)",
             height: `${fixedTableHeight}px`,

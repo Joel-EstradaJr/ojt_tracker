@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 export type ExportFormat = "csv" | "excel" | "pdf";
 
@@ -28,6 +29,12 @@ export default function ExportFormatButton({
   onSelect,
 }: ExportFormatButtonProps) {
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
 
   const handleSelect = async (format: ExportFormat) => {
     setOpen(false);
@@ -47,7 +54,7 @@ export default function ExportFormatButton({
         <span style={{ fontSize: "0.7rem", opacity: 0.8 }}>▾</span>
       </button>
 
-      {open && (
+      {open && mounted && createPortal(
         <div className="modal-overlay" onClick={() => loadingFormat === null && setOpen(false)}>
           <div className="modal-content" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
             <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>{title}</h2>
@@ -72,7 +79,8 @@ export default function ExportFormatButton({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

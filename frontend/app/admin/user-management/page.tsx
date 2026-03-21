@@ -413,10 +413,6 @@ export default function HomePage() {
               description="Choose a file format. PDF exports the current UI without the sidebar."
               onSelect={handleExport}
             />
-            <button className="btn" onClick={() => importRef.current?.click()} disabled={importLoading}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
-              {importLoading ? "Importing..." : "Import CSV"}
-            </button>
             <input type="file" accept=".csv" ref={importRef} style={{ display: "none" }} onChange={handleImportAll} />
             <button className="btn btn-add" onClick={() => setShowCreate(true)}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -743,60 +739,6 @@ export default function HomePage() {
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button className="btn btn-primary" onClick={() => setDeleteSuccess(null)}>OK</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Import result modal */}
-      {(importResult || importError) && (
-        <div className="modal-overlay" onClick={() => { setImportResult(null); setImportError(null); }}>
-          <div className="modal-content" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
-            {importError ? (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
-                  <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
-                  </div>
-                  <h2 style={{ fontSize: "1.15rem", color: "var(--danger)" }}>Import Failed</h2>
-                </div>
-                <p style={{ fontSize: "0.9rem", marginBottom: "1.25rem", color: "var(--text-secondary)" }}>{importError}</p>
-              </>
-            ) : importResult && (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
-                  <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--success-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                  </div>
-                  <h2 style={{ fontSize: "1.15rem", color: "var(--success-text)" }}>Import Successful</h2>
-                </div>
-                <p style={{ fontSize: "0.9rem", marginBottom: "0.75rem", color: "var(--text-secondary)" }}>
-                  The CSV file has been imported successfully.
-                </p>
-                <div className="stat-row" style={{ marginBottom: "1.25rem" }}>
-                  <div className="stat-item">
-                    <div className="label">Trainees</div>
-                    <div className="value">{importResult.trainees}</div>
-                  </div>
-                  <div className="stat-item">
-                    <div className="label">Supervisors</div>
-                    <div className="value">{importResult.supervisors}</div>
-                  </div>
-                  <div className="stat-item">
-                    <div className="label">Log Entries</div>
-                    <div className="value">{importResult.logs}</div>
-                  </div>
-                  <div className="stat-item">
-                    <div className="label">Skipped</div>
-                    <div className="value">{importResult.skipped}</div>
-                  </div>
-                </div>
-              </>
-            )}
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="btn btn-primary" onClick={() => { setImportResult(null); setImportError(null); }}>
-                OK
-              </button>
             </div>
           </div>
         </div>

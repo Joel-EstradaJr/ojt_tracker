@@ -460,13 +460,15 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 1200;
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   animation: fadeIn 0.2s ease;
 }
 
 .modal-content {
+  position: relative;
+  z-index: 1201;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -767,6 +769,12 @@ button {
 .entry-logs-table tbody td {
   text-align: center;
   vertical-align: middle;
+  height: 72px;
+  overflow: hidden;
+}
+
+.entry-logs-table tbody tr {
+  height: 72px;
 }
 
 .entry-logs-table thead th {
@@ -775,6 +783,12 @@ button {
 
 .entry-logs-table tbody td.accomplishment-cell {
   text-align: left;
+}
+
+.entry-logs-table tbody td.accomplishment-cell .accomplishment-content {
+  height: 2.9em;
+  max-height: 2.9em;
+  overflow-y: auto;
 }
 
 .entry-logs-table th:nth-child(2),
