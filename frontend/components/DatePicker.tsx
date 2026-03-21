@@ -15,6 +15,10 @@ interface Props {
 }
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_LABELS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -26,6 +30,7 @@ function fmtDate(d: Date) {
 
 export default function DatePicker({ value, onChange, max }: Props) {
   const [open, setOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"day" | "month" | "year">("day");
   const wrapperRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -63,18 +68,24 @@ export default function DatePicker({ value, onChange, max }: Props) {
   const updatePosition = useCallback(() => {
     if (!triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
+    const dropdownWidth = dropdownRef.current?.offsetWidth || 320;
+    const viewportPadding = 8;
+    const maxLeft = Math.max(viewportPadding, window.innerWidth - dropdownWidth - viewportPadding);
+    const clampedLeft = Math.min(Math.max(rect.left, viewportPadding), maxLeft);
     setDropdownPos({
       top: rect.bottom + 4,
-      left: rect.left,
+      left: clampedLeft,
     });
   }, []);
 
   useEffect(() => {
     if (open) {
       updatePosition();
+      const raf = window.requestAnimationFrame(updatePosition);
       window.addEventListener("scroll", updatePosition, true);
       window.addEventListener("resize", updatePosition);
       return () => {
+        window.cancelAnimationFrame(raf);
         window.removeEventListener("scroll", updatePosition, true);
         window.removeEventListener("resize", updatePosition);
       };
@@ -130,7 +141,58 @@ export default function DatePicker({ value, onChange, max }: Props) {
 
   const selectDate = (d: Date) => {
     onChange(fmtDate(d));
+    setViewMode("day");
     setOpen(false);
+  };
+
+  const selectMonth = (month: number) => {
+    setViewMonth(month);
+    setViewMode("day");
+  };
+
+  const selectYear = (year: number) => {
+    setViewYear(year);
+    setViewMode("month");
+  };
+
+  const clearDate = () => {
+    onChange("");
+    setViewMode("day");
+    setOpen(false);
+  };
+
+  const setNow = () => {
+    const now = new Date();
+    const candidate = maxDate && now > maxDate ? maxDate : now;
+    onChange(fmtDate(candidate));
+    setViewYear(candidate.getFullYear());
+    setViewMonth(candidate.getMonth());
+    setViewMode("day");
+    setOpen(false);
+  };
+
+  const movePrev = () => {
+    if (viewMode === "day") {
+      prevMonth();
+      return;
+    }
+    if (viewMode === "month") {
+      setViewYear((y) => y - 1);
+      return;
+    }
+    setViewYear((y) => y - 12);
+  };
+
+  const moveNext = () => {
+    if (viewMode === "day") {
+      nextMonth();
+      return;
+    }
+    if (viewMode === "month") {
+      setViewYear((y) => y + 1);
+      return;
+    }
+    setViewYear((y) => y + 12);
   };
 
   // Display text
@@ -139,6 +201,8 @@ export default function DatePicker({ value, onChange, max }: Props) {
     : "Select date";
 
   const monthLabel = formatDisplayDateFromDateOnly(`${viewYear}-${pad(viewMonth + 1)}-01`);
+  const yearGridStart = viewYear - 5;
+  const yearGrid = Array.from({ length: 12 }, (_, i) => yearGridStart + i);
 
   const selectedStr = value || "";
 
@@ -148,7 +212,10 @@ export default function DatePicker({ value, onChange, max }: Props) {
         type="button"
         className="dp-trigger"
         ref={triggerRef}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen((prev) => !prev);
+          setViewMode("day");
+        }}
       >
         {displayText}
         <span className="dp-caret">▾</span>
@@ -162,62 +229,125 @@ export default function DatePicker({ value, onChange, max }: Props) {
         >
           {/* Header */}
           <div className="dp-header">
-            <button type="button" className="dp-nav" onClick={prevMonth}>‹</button>
-            <span className="dp-month-label">{monthLabel}</span>
-            <button type="button" className="dp-nav" onClick={nextMonth}>›</button>
+            <button type="button" className="dp-nav" onClick={movePrev}>‹</button>
+            <button
+              type="button"
+              className="dp-month-label dp-month-toggle"
+              onClick={() => {
+                if (viewMode === "day") setViewMode("month");
+                else if (viewMode === "month") setViewMode("year");
+                else setViewMode("day");
+              }}
+            >
+              {viewMode === "day" ? monthLabel : viewMode === "month" ? String(viewYear) : `${yearGridStart} - ${yearGridStart + 11}`}
+            </button>
+            <button type="button" className="dp-nav" onClick={moveNext}>›</button>
           </div>
 
-          {/* Day labels */}
-          <div className="dp-grid dp-day-labels">
-            {DAY_LABELS.map((l) => (
-              <span key={l} className={`dp-day-label${l === "Sun" || l === "Sat" ? " dp-weekend-label" : ""}`}>{l}</span>
-            ))}
-          </div>
+          {viewMode === "day" && (
+            <>
+              {/* Day labels */}
+              <div className="dp-grid dp-day-labels">
+                {DAY_LABELS.map((l) => (
+                  <span key={l} className={`dp-day-label${l === "Sun" || l === "Sat" ? " dp-weekend-label" : ""}`}>{l}</span>
+                ))}
+              </div>
 
-          {/* Calendar cells */}
-          <div className="dp-grid">
-            {cells.map(({ date: cellDate, inMonth }, idx) => {
-              const ds = fmtDate(cellDate);
-              const weekend = isWeekend(cellDate);
-              const holiday = holidayMap.get(ds);
-              const isSelected = ds === selectedStr;
-              const isToday = ds === fmtDate(new Date());
-              const isFuture = maxDate ? cellDate > maxDate : false;
+              {/* Calendar cells */}
+              <div className="dp-grid">
+                {cells.map(({ date: cellDate, inMonth }, idx) => {
+                  const ds = fmtDate(cellDate);
+                  const weekend = isWeekend(cellDate);
+                  const holiday = holidayMap.get(ds);
+                  const isSelected = ds === selectedStr;
+                  const isToday = ds === fmtDate(new Date());
+                  const isFuture = maxDate ? cellDate > maxDate : false;
 
-              let cls = "dp-cell";
-              if (!inMonth) cls += " dp-outside";
-              if (isFuture) cls += " dp-disabled";
-              if (isSelected) cls += " dp-selected";
-              if (isToday && !isSelected) cls += " dp-today";
-              if (holiday) cls += holiday.type === "regular" ? " dp-holiday-regular" : " dp-holiday-special";
-              else if (weekend && !isSelected) cls += " dp-weekend";
+                  let cls = "dp-cell";
+                  if (!inMonth) cls += " dp-outside";
+                  if (isFuture) cls += " dp-disabled";
+                  if (isSelected) cls += " dp-selected";
+                  if (isToday && !isSelected) cls += " dp-today";
+                  if (holiday) cls += holiday.type === "regular" ? " dp-holiday-regular" : " dp-holiday-special";
+                  else if (weekend && !isSelected) cls += " dp-weekend";
 
-              const title = holiday
-                ? `${holiday.name}${weekend ? " (Weekend)" : ""}`
-                : weekend
-                  ? cellDate.getDay() === 0 ? "Sunday" : "Saturday"
-                  : undefined;
+                  const title = holiday
+                    ? `${holiday.name}${weekend ? " (Weekend)" : ""}`
+                    : weekend
+                      ? cellDate.getDay() === 0 ? "Sunday" : "Saturday"
+                      : undefined;
 
-              return (
-                <button
-                  key={idx}
-                  type="button"
-                  className={cls}
-                  disabled={isFuture}
-                  title={title}
-                  onClick={() => selectDate(cellDate)}
-                >
-                  {cellDate.getDate()}
-                </button>
-              );
-            })}
-          </div>
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      className={cls}
+                      disabled={isFuture}
+                      title={title}
+                      onClick={() => selectDate(cellDate)}
+                    >
+                      {cellDate.getDate()}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {viewMode === "month" && (
+            <div className="dp-month-grid">
+              {MONTH_LABELS.map((m, idx) => {
+                const monthStart = new Date(viewYear, idx, 1, 0, 0, 0, 0);
+                const disabled = maxDate ? monthStart > maxDate : false;
+                const active = idx === viewMonth;
+
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`dp-cell dp-month-cell${active ? " dp-selected" : ""}`}
+                    disabled={disabled}
+                    onClick={() => selectMonth(idx)}
+                  >
+                    {m.slice(0, 3)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {viewMode === "year" && (
+            <div className="dp-month-grid">
+              {yearGrid.map((year) => {
+                const yearStart = new Date(year, 0, 1, 0, 0, 0, 0);
+                const disabled = maxDate ? yearStart > maxDate : false;
+                const active = year === viewYear;
+
+                return (
+                  <button
+                    key={year}
+                    type="button"
+                    className={`dp-cell dp-month-cell${active ? " dp-selected" : ""}`}
+                    disabled={disabled}
+                    onClick={() => selectYear(year)}
+                  >
+                    {year}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Legend */}
           <div className="dp-legend">
             <span className="dp-legend-item"><span className="dp-swatch dp-swatch-weekend" /> Weekend</span>
             <span className="dp-legend-item"><span className="dp-swatch dp-swatch-regular" /> Regular Holiday</span>
             <span className="dp-legend-item"><span className="dp-swatch dp-swatch-special" /> Special Holiday</span>
+          </div>
+
+          <div className="dp-actions">
+            <button type="button" className="btn btn-ghost" style={{ padding: "0.25rem 0.45rem", fontSize: "0.78rem" }} onClick={clearDate}>Clear</button>
+            <button type="button" className="btn btn-outline" style={{ padding: "0.25rem 0.55rem", fontSize: "0.78rem" }} onClick={setNow}>Now</button>
           </div>
         </div>
       )}

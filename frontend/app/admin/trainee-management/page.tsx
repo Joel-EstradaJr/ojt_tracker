@@ -15,6 +15,7 @@ import { useActionGuard } from "@/lib/useActionGuard";
 import { fetchTrainees, deleteTrainee, downloadAllCSV, importAllCSV, getSession } from "@/lib/api";
 import TraineeCard from "@/components/TraineeCard";
 import EditTraineeForm from "@/components/EditTraineeForm";
+import DatePicker from "@/components/DatePicker";
 import { ThemeToggle } from "@/components/ThemeProvider";
 import PageHeading from "@/components/PageHeading";
 
@@ -708,21 +709,11 @@ export default function HomePage() {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label htmlFor="expectedEndFrom">Expected End Date From</label>
-                  <input
-                    id="expectedEndFrom"
-                    type="date"
-                    value={draftExpectedEndFrom}
-                    onChange={(e) => setDraftExpectedEndFrom(e.target.value)}
-                  />
+                  <DatePicker value={draftExpectedEndFrom} onChange={setDraftExpectedEndFrom} />
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label htmlFor="expectedEndTo">Expected End Date To</label>
-                  <input
-                    id="expectedEndTo"
-                    type="date"
-                    value={draftExpectedEndTo}
-                    onChange={(e) => setDraftExpectedEndTo(e.target.value)}
-                  />
+                  <DatePicker value={draftExpectedEndTo} onChange={setDraftExpectedEndTo} />
                 </div>
               </div>
 

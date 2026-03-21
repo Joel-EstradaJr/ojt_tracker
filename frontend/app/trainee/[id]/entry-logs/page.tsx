@@ -6,6 +6,8 @@ import { motion } from "framer-motion";
 import { deleteLog, downloadExport, patchLogAction } from "@/lib/api";
 import ImportCSV from "@/components/ImportCSV";
 import LogForm from "@/components/LogForm";
+import DatePicker from "@/components/DatePicker";
+import TimePicker from "@/components/TimePicker";
 import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 import { LogEntry } from "@/types";
 import { ThemeToggle } from "@/components/ThemeProvider";
@@ -46,7 +48,7 @@ export default function TraineeEntryLogsPage() {
   const [filterError, setFilterError] = useState("");
 
   const [query, setQuery] = useState("");
-  const [sortField, setSortField] = useState<"date" | "timeIn" | "timeOut" | "lunchStart" | "lunchEnd" | "hoursWorked" | "offsetUsed">("date");
+  const [sortField, setSortField] = useState<"date" | "timeIn" | "timeOut" | "lunchStart" | "lunchEnd" | "hoursWorked" | "overtime" | "offsetUsed" | "accomplishment">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const [dateFrom, setDateFrom] = useState("");
@@ -108,8 +110,38 @@ export default function TraineeEntryLogsPage() {
     return (hour * 60) + minute;
   };
 
-  const isPlaceholderLunch = (targetIso: string, timeInIso: string): boolean =>
-    new Date(targetIso).getTime() === new Date(timeInIso).getTime();
+  const isPlaceholderLunch = (targetIso: string | null | undefined, timeInIso: string | null | undefined): boolean => {
+    if (!targetIso || !timeInIso) return true;
+    return new Date(targetIso).getTime() === new Date(timeInIso).getTime();
+  };
+
+  const toManilaDateKey = (iso: string): string => {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(iso));
+
+    const year = parts.find((p) => p.type === "year")?.value || "0000";
+    const month = parts.find((p) => p.type === "month")?.value || "01";
+    const day = parts.find((p) => p.type === "day")?.value || "01";
+    return `${year}-${month}-${day}`;
+  };
+
+  const toSearchClock = (iso?: string | null): string => {
+    if (!iso) return "";
+    return new Date(iso).toLocaleTimeString("en-PH", { timeZone: "Asia/Manila", hour: "2-digit", minute: "2-digit" }).toLowerCase();
+  };
+
+  const toSearchFullDate = (iso: string): string =>
+    new Date(iso).toLocaleDateString("en-PH", {
+      timeZone: "Asia/Manila",
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).toLowerCase();
 
   const openFiltersModal = () => {
     setDraftDateFrom(dateFrom);
@@ -155,6 +187,31 @@ export default function TraineeEntryLogsPage() {
       draftOffsetUsedMin !== "" && draftOffsetUsedMax !== "" && Number(draftOffsetUsedMin) > Number(draftOffsetUsedMax)
     ) {
       setFilterError("Offset Used minimum cannot be greater than maximum.");
+      return;
+    }
+
+    if (draftDateFrom && draftDateTo && draftDateFrom > draftDateTo) {
+      setFilterError("Date From cannot be later than Date To.");
+      return;
+    }
+
+    if (draftTimeInFrom && draftTimeInTo && toMinutes(draftTimeInFrom) > toMinutes(draftTimeInTo)) {
+      setFilterError("Time In From cannot be later than Time In To.");
+      return;
+    }
+
+    if (draftTimeOutFrom && draftTimeOutTo && toMinutes(draftTimeOutFrom) > toMinutes(draftTimeOutTo)) {
+      setFilterError("Time Out From cannot be later than Time Out To.");
+      return;
+    }
+
+    if (draftLunchStartFrom && draftLunchStartTo && toMinutes(draftLunchStartFrom) > toMinutes(draftLunchStartTo)) {
+      setFilterError("Lunch Start From cannot be later than Lunch Start To.");
+      return;
+    }
+
+    if (draftLunchEndFrom && draftLunchEndTo && toMinutes(draftLunchEndFrom) > toMinutes(draftLunchEndTo)) {
+      setFilterError("Lunch End From cannot be later than Lunch End To.");
       return;
     }
 
@@ -251,21 +308,35 @@ export default function TraineeEntryLogsPage() {
     const base = q
       ? logs.filter((log) => {
           const dateStr = formatDisplayDate(log.date).toLowerCase();
+          const dateFullStr = toSearchFullDate(log.date);
           const accomplishment = (log.accomplishment || "").toLowerCase();
-          return dateStr.includes(q) || accomplishment.includes(q);
+          const timeIn = toSearchClock(log.timeIn);
+          const timeOut = toSearchClock(log.timeOut);
+          const lunchStart = isPlaceholderLunch(log.lunchStart, log.timeIn) ? "" : toSearchClock(log.lunchStart);
+          const lunchEnd = isPlaceholderLunch(log.lunchEnd, log.timeIn) ? "" : toSearchClock(log.lunchEnd);
+          const hoursWorked = formatMinutes(log.hoursWorked).toLowerCase();
+          const overtime = formatMinutes(log.overtime).toLowerCase();
+          const offsetUsed = formatMinutes(log.offsetUsed).toLowerCase();
+
+          return (
+            dateStr.includes(q) ||
+            dateFullStr.includes(q) ||
+            accomplishment.includes(q) ||
+            timeIn.includes(q) ||
+            timeOut.includes(q) ||
+            lunchStart.includes(q) ||
+            lunchEnd.includes(q) ||
+            hoursWorked.includes(q) ||
+            overtime.includes(q) ||
+            offsetUsed.includes(q)
+          );
         })
       : logs;
 
     const withFilters = base.filter((log) => {
-      const entryDate = new Date(log.date);
-      if (dateFrom) {
-        const from = new Date(`${dateFrom}T00:00:00`);
-        if (entryDate < from) return false;
-      }
-      if (dateTo) {
-        const to = new Date(`${dateTo}T23:59:59.999`);
-        if (entryDate > to) return false;
-      }
+      const entryDateKey = toManilaDateKey(log.date);
+      if (dateFrom && entryDateKey < dateFrom) return false;
+      if (dateTo && entryDateKey > dateTo) return false;
 
       const timeInMins = toManilaClockMinutes(log.timeIn);
       if (timeInFrom && timeInMins < toMinutes(timeInFrom)) return false;
@@ -307,33 +378,56 @@ export default function TraineeEntryLogsPage() {
     });
 
     return [...withFilters].sort((a, b) => {
-      let cmp = 0;
+      let aValue: number | string | null = null;
+      let bValue: number | string | null = null;
+
       switch (sortField) {
         case "date":
-          cmp = new Date(a.date).getTime() - new Date(b.date).getTime();
+          aValue = new Date(a.date).getTime();
+          bValue = new Date(b.date).getTime();
           break;
         case "timeIn":
-          cmp = new Date(a.timeIn).getTime() - new Date(b.timeIn).getTime();
+          aValue = toManilaClockMinutes(a.timeIn);
+          bValue = toManilaClockMinutes(b.timeIn);
           break;
-        case "timeOut": {
-          const aOut = a.timeOut ? new Date(a.timeOut).getTime() : -1;
-          const bOut = b.timeOut ? new Date(b.timeOut).getTime() : -1;
-          cmp = aOut - bOut;
+        case "timeOut":
+          aValue = a.timeOut ? toManilaClockMinutes(a.timeOut) : null;
+          bValue = b.timeOut ? toManilaClockMinutes(b.timeOut) : null;
           break;
-        }
         case "lunchStart":
-          cmp = new Date(a.lunchStart).getTime() - new Date(b.lunchStart).getTime();
+          aValue = isPlaceholderLunch(a.lunchStart, a.timeIn) ? null : toManilaClockMinutes(a.lunchStart);
+          bValue = isPlaceholderLunch(b.lunchStart, b.timeIn) ? null : toManilaClockMinutes(b.lunchStart);
           break;
         case "lunchEnd":
-          cmp = new Date(a.lunchEnd).getTime() - new Date(b.lunchEnd).getTime();
+          aValue = isPlaceholderLunch(a.lunchEnd, a.timeIn) ? null : toManilaClockMinutes(a.lunchEnd);
+          bValue = isPlaceholderLunch(b.lunchEnd, b.timeIn) ? null : toManilaClockMinutes(b.lunchEnd);
           break;
         case "hoursWorked":
-          cmp = a.hoursWorked - b.hoursWorked;
+          aValue = a.timeOut ? a.hoursWorked : null;
+          bValue = b.timeOut ? b.hoursWorked : null;
+          break;
+        case "overtime":
+          aValue = a.timeOut ? a.overtime : null;
+          bValue = b.timeOut ? b.overtime : null;
           break;
         case "offsetUsed":
-          cmp = a.offsetUsed - b.offsetUsed;
+          aValue = typeof a.offsetUsed === "number" ? a.offsetUsed : null;
+          bValue = typeof b.offsetUsed === "number" ? b.offsetUsed : null;
+          break;
+        case "accomplishment":
+          aValue = (a.accomplishment || "").toLowerCase();
+          bValue = (b.accomplishment || "").toLowerCase();
           break;
       }
+
+      if (aValue === null && bValue === null) return 0;
+      if (aValue === null) return 1;
+      if (bValue === null) return -1;
+
+      const cmp = typeof aValue === "string" && typeof bValue === "string"
+        ? aValue.localeCompare(bValue)
+        : Number(aValue) - Number(bValue);
+
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [
@@ -361,6 +455,11 @@ export default function TraineeEntryLogsPage() {
   const safePage = Math.min(currentPage, totalPages);
   const startIdx = (safePage - 1) * pageSize;
   const paginatedLogs = filtered.slice(startIdx, startIdx + pageSize);
+  const tableVisibleRows = 10;
+  const tableRowHeight = 52;
+  const tableHeaderHeight = 46;
+  const fixedTableHeight = (tableVisibleRows * tableRowHeight) + tableHeaderHeight;
+  const shouldUseVerticalScroll = pageSize > tableVisibleRows && filtered.length > tableVisibleRows;
 
   const doDelete = async () => {
     await runGuarded("trainee-delete-log", async () => {
@@ -630,7 +729,15 @@ export default function TraineeEntryLogsPage() {
           </div>
         </div>
 
-        <div style={{ overflowX: "auto", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+        <div
+          style={{
+            overflowX: "auto",
+            overflowY: shouldUseVerticalScroll ? "auto" : "hidden",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--border)",
+            height: `${fixedTableHeight}px`,
+          }}
+        >
           <table className="logs-table entry-logs-table">
             <thead>
               <tr>
@@ -640,9 +747,9 @@ export default function TraineeEntryLogsPage() {
                 {sortTh("lunchEnd", "Lunch End")}
                 {sortTh("timeOut", "Time Out")}
                 {sortTh("hoursWorked", "Hours Worked")}
-                <th>Overtime</th>
+                {sortTh("overtime", "Overtime")}
                 {sortTh("offsetUsed", "Offset Used")}
-                <th>Accomplishment</th>
+                {sortTh("accomplishment", "Accomplishment")}
                 <th style={{ textAlign: "center" }}>Actions</th>
               </tr>
             </thead>
@@ -709,129 +816,161 @@ export default function TraineeEntryLogsPage() {
 
       {showFiltersModal && (
         <div className="modal-overlay" onClick={() => setShowFiltersModal(false)}>
-          <div className="modal-content" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.9rem" }}>
-              <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Entry Log Filters</h2>
+          <div
+            className="modal-content"
+            style={{
+              maxWidth: 760,
+              width: "min(92vw, 760px)",
+              maxHeight: "85vh",
+              display: "flex",
+              flexDirection: "column",
+              padding: 0,
+              overflow: "hidden",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: "1rem 1.1rem 0.8rem", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", marginBottom: "0.35rem" }}>
+                <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Entry Log Filters</h2>
+              </div>
+              <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                Set only the fields you need. Use From and To values to narrow exact ranges.
+              </p>
             </div>
 
-            {filterError && (
-              <div style={{ background: "var(--danger-light)", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", padding: "0.5rem 0.75rem", marginBottom: "0.75rem" }}>
-                <p style={{ color: "var(--danger)", fontSize: "0.84rem", margin: 0 }}>{filterError}</p>
-              </div>
-            )}
+            <div style={{ overflowY: "auto", padding: "0.9rem 1.1rem 1rem" }}>
+              {filterError && (
+                <div style={{ background: "var(--danger-light)", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", padding: "0.5rem 0.75rem", marginBottom: "0.75rem" }}>
+                  <p style={{ color: "var(--danger)", fontSize: "0.84rem", margin: 0 }}>{filterError}</p>
+                </div>
+              )}
 
-            <div style={{ display: "grid", gap: "0.8rem", marginBottom: "1rem" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-date-from">Date From</label>
-                  <input id="log-date-from" type="date" value={draftDateFrom} onChange={(e) => setDraftDateFrom(e.target.value)} />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-date-to">Date To</label>
-                  <input id="log-date-to" type="date" value={draftDateTo} onChange={(e) => setDraftDateTo(e.target.value)} />
-                </div>
-              </div>
+              <div style={{ display: "grid", gap: "0.85rem" }}>
+                <section style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "0.8rem", background: "var(--bg-subtle)" }}>
+                  <p style={{ margin: "0 0 0.55rem", fontSize: "0.76rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Date Range</p>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label htmlFor="log-date-from">Date From</label>
+                      <DatePicker value={draftDateFrom} onChange={setDraftDateFrom} />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label htmlFor="log-date-to">Date To</label>
+                      <DatePicker value={draftDateTo} onChange={setDraftDateTo} />
+                    </div>
+                  </div>
+                </section>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-time-in-from">Time In From</label>
-                  <input id="log-time-in-from" type="time" value={draftTimeInFrom} onChange={(e) => setDraftTimeInFrom(e.target.value)} />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-time-in-to">Time In To</label>
-                  <input id="log-time-in-to" type="time" value={draftTimeInTo} onChange={(e) => setDraftTimeInTo(e.target.value)} />
-                </div>
-              </div>
+                <section style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "0.8rem", background: "var(--bg-subtle)" }}>
+                  <p style={{ margin: "0 0 0.55rem", fontSize: "0.76rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Time Ranges</p>
+                  <div style={{ display: "grid", gap: "0.6rem" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-time-in-from">Time In From</label>
+                        <TimePicker value={draftTimeInFrom} onChange={setDraftTimeInFrom} />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-time-in-to">Time In To</label>
+                        <TimePicker value={draftTimeInTo} onChange={setDraftTimeInTo} />
+                      </div>
+                    </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-time-out-from">Time Out From</label>
-                  <input id="log-time-out-from" type="time" value={draftTimeOutFrom} onChange={(e) => setDraftTimeOutFrom(e.target.value)} />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-time-out-to">Time Out To</label>
-                  <input id="log-time-out-to" type="time" value={draftTimeOutTo} onChange={(e) => setDraftTimeOutTo(e.target.value)} />
-                </div>
-              </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-time-out-from">Time Out From</label>
+                        <TimePicker value={draftTimeOutFrom} onChange={setDraftTimeOutFrom} />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-time-out-to">Time Out To</label>
+                        <TimePicker value={draftTimeOutTo} onChange={setDraftTimeOutTo} />
+                      </div>
+                    </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-lunch-start-from">Lunch Start From</label>
-                  <input id="log-lunch-start-from" type="time" value={draftLunchStartFrom} onChange={(e) => setDraftLunchStartFrom(e.target.value)} />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-lunch-start-to">Lunch Start To</label>
-                  <input id="log-lunch-start-to" type="time" value={draftLunchStartTo} onChange={(e) => setDraftLunchStartTo(e.target.value)} />
-                </div>
-              </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-lunch-start-from">Lunch Start From</label>
+                        <TimePicker value={draftLunchStartFrom} onChange={setDraftLunchStartFrom} />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-lunch-start-to">Lunch Start To</label>
+                        <TimePicker value={draftLunchStartTo} onChange={setDraftLunchStartTo} />
+                      </div>
+                    </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-lunch-end-from">Lunch End From</label>
-                  <input id="log-lunch-end-from" type="time" value={draftLunchEndFrom} onChange={(e) => setDraftLunchEndFrom(e.target.value)} />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-lunch-end-to">Lunch End To</label>
-                  <input id="log-lunch-end-to" type="time" value={draftLunchEndTo} onChange={(e) => setDraftLunchEndTo(e.target.value)} />
-                </div>
-              </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-lunch-end-from">Lunch End From</label>
+                        <TimePicker value={draftLunchEndFrom} onChange={setDraftLunchEndFrom} />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-lunch-end-to">Lunch End To</label>
+                        <TimePicker value={draftLunchEndTo} onChange={setDraftLunchEndTo} />
+                      </div>
+                    </div>
+                  </div>
+                </section>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-hours-worked-min">Hours Worked Min</label>
-                  <input
-                    id="log-hours-worked-min"
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    value={draftHoursWorkedMin}
-                    onChange={(e) => nonNegativeInput(e.target.value, setDraftHoursWorkedMin)}
-                    placeholder="e.g., 4"
-                  />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-hours-worked-max">Hours Worked Max</label>
-                  <input
-                    id="log-hours-worked-max"
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    value={draftHoursWorkedMax}
-                    onChange={(e) => nonNegativeInput(e.target.value, setDraftHoursWorkedMax)}
-                    placeholder="e.g., 9"
-                  />
-                </div>
-              </div>
+                <section style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "0.8rem", background: "var(--bg-subtle)" }}>
+                  <p style={{ margin: "0 0 0.55rem", fontSize: "0.76rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Numeric Thresholds</p>
+                  <div style={{ display: "grid", gap: "0.6rem" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-hours-worked-min">Hours Worked Min</label>
+                        <input
+                          id="log-hours-worked-min"
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={draftHoursWorkedMin}
+                          onChange={(e) => nonNegativeInput(e.target.value, setDraftHoursWorkedMin)}
+                          placeholder="e.g., 4"
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-hours-worked-max">Hours Worked Max</label>
+                        <input
+                          id="log-hours-worked-max"
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={draftHoursWorkedMax}
+                          onChange={(e) => nonNegativeInput(e.target.value, setDraftHoursWorkedMax)}
+                          placeholder="e.g., 9"
+                        />
+                      </div>
+                    </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-offset-used-min">Offset Used Min</label>
-                  <input
-                    id="log-offset-used-min"
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    value={draftOffsetUsedMin}
-                    onChange={(e) => nonNegativeInput(e.target.value, setDraftOffsetUsedMin)}
-                    placeholder="e.g., 0"
-                  />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="log-offset-used-max">Offset Used Max</label>
-                  <input
-                    id="log-offset-used-max"
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    value={draftOffsetUsedMax}
-                    onChange={(e) => nonNegativeInput(e.target.value, setDraftOffsetUsedMax)}
-                    placeholder="e.g., 2"
-                  />
-                </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.6rem" }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-offset-used-min">Offset Used Min</label>
+                        <input
+                          id="log-offset-used-min"
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={draftOffsetUsedMin}
+                          onChange={(e) => nonNegativeInput(e.target.value, setDraftOffsetUsedMin)}
+                          placeholder="e.g., 0"
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label htmlFor="log-offset-used-max">Offset Used Max</label>
+                        <input
+                          id="log-offset-used-max"
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={draftOffsetUsedMax}
+                          onChange={(e) => nonNegativeInput(e.target.value, setDraftOffsetUsedMax)}
+                          placeholder="e.g., 2"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </section>
               </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem", padding: "0.8rem 1.1rem 1rem", borderTop: "1px solid var(--border)", background: "var(--surface)" }}>
               <button className="btn btn-outline" onClick={clearFilters}>Clear</button>
               <div style={{ display: "flex", gap: "0.5rem" }}>
                 <button className="btn btn-outline" onClick={() => { setFilterError(""); setShowFiltersModal(false); }}>Cancel</button>

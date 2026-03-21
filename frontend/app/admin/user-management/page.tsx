@@ -14,6 +14,7 @@ import { formatMinutes } from "@/lib/duration";
 import { useActionGuard } from "@/lib/useActionGuard";
 import CreateTraineeForm from "@/components/CreateTraineeForm";
 import EditTraineeForm from "@/components/EditTraineeForm";
+import DatePicker from "@/components/DatePicker";
 import { ThemeToggle } from "@/components/ThemeProvider";
 import PageHeading from "@/components/PageHeading";
 import { formatDisplayDate } from "@/lib/date";
@@ -768,21 +769,11 @@ export default function HomePage() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label htmlFor="filter-created-from">CREATION DATE (From)</label>
-                  <input
-                    id="filter-created-from"
-                    type="date"
-                    value={draftCreatedFrom}
-                    onChange={(e) => setDraftCreatedFrom(e.target.value)}
-                  />
+                  <DatePicker value={draftCreatedFrom} onChange={setDraftCreatedFrom} />
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label htmlFor="filter-created-to">CREATION DATE (To)</label>
-                  <input
-                    id="filter-created-to"
-                    type="date"
-                    value={draftCreatedTo}
-                    onChange={(e) => setDraftCreatedTo(e.target.value)}
-                  />
+                  <DatePicker value={draftCreatedTo} onChange={setDraftCreatedTo} />
                 </div>
               </div>
 

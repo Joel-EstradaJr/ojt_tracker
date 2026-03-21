@@ -11,6 +11,7 @@ import { SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
 import { DEFAULT_WORK_SCHEDULE, WorkSchedule } from "@/lib/ph-holidays";
 import RightSidebarDrawer from "@/components/RightSidebarDrawer";
+import TimePicker from "@/components/TimePicker";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -320,8 +321,8 @@ export default function CreateTraineeForm({
               {Object.keys(workSchedule).sort((a, b) => Number(a) - Number(b)).map((dayNum) => (
                 <div key={dayNum} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
                   <span style={{ fontWeight: 500, fontSize: "0.85rem" }}>{DAY_LABELS[Number(dayNum)]}</span>
-                  <input type="time" value={workSchedule[dayNum].start} onChange={(e) => updateDayTime(Number(dayNum), "start", e.target.value)} />
-                  <input type="time" value={workSchedule[dayNum].end} onChange={(e) => updateDayTime(Number(dayNum), "end", e.target.value)} />
+                  <TimePicker value={workSchedule[dayNum].start} onChange={(v) => updateDayTime(Number(dayNum), "start", v)} />
+                  <TimePicker value={workSchedule[dayNum].end} onChange={(v) => updateDayTime(Number(dayNum), "end", v)} />
                 </div>
               ))}
               {Object.keys(workSchedule).length === 0 && (

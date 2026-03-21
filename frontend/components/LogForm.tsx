@@ -18,6 +18,7 @@ import {
 } from "@/lib/api";
 import { AccomplishmentScript, LogEntry } from "@/types";
 import DatePicker from "@/components/DatePicker";
+import TimePicker from "@/components/TimePicker";
 import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 import { sanitizeInput } from "@/lib/sanitize";
 import { formatMinutes } from "@/lib/duration";
@@ -96,11 +97,24 @@ const ACTION_ICONS: Record<ActionStep, string> = {
 
 const DEFAULT_REQUIRED_MINUTES = 8 * 60;
 const DEFAULT_LUNCH_MINUTES = 60;
+const DEFAULT_LUNCH_START = "12:00";
+const DEFAULT_LUNCH_END = "13:00";
 
 function hhmmToMinutes(value: string): number {
   const [h, m] = value.split(":").map(Number);
   if (Number.isNaN(h) || Number.isNaN(m)) return 0;
   return (h * 60) + m;
+}
+
+function minutesToHHMM(total: number): string {
+  const normalized = ((total % 1440) + 1440) % 1440;
+  const h = Math.floor(normalized / 60);
+  const m = normalized % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function addMinutesToHHMM(base: string, delta: number): string {
+  return minutesToHHMM(hhmmToMinutes(base) + delta);
 }
 
 function getRequiredMinutesForDate(
@@ -314,12 +328,21 @@ export default function LogForm({
 
       const timeInISO = new Date(`${date}T${timeIn}:00`).toISOString();
       const timeOutISO = timeOut ? new Date(`${date}T${timeOut}:00`).toISOString() : undefined;
-      const lunchStartISO = noLunch || !lunchStart ? undefined : new Date(`${date}T${lunchStart}:00`).toISOString();
-      const lunchEndISO = noLunch || !lunchEnd ? undefined : new Date(`${date}T${lunchEnd}:00`).toISOString();
 
-      if (timeOut) {
-        if (!noLunch && (!lunchStart || !lunchEnd)) { setError("Lunch Start and Lunch End are required (or toggle No Lunch)."); return; }
+      let normalizedLunchStart = lunchStart;
+      let normalizedLunchEnd = lunchEnd;
+
+      if (noLunch) {
+        normalizedLunchStart = timeIn;
+        normalizedLunchEnd = timeIn;
+      } else if (!normalizedLunchStart || !normalizedLunchEnd) {
+        // Has Lunch enabled but no explicit interval: use 12:00 PM to 1:00 PM default.
+        normalizedLunchStart = DEFAULT_LUNCH_START;
+        normalizedLunchEnd = DEFAULT_LUNCH_END;
       }
+
+      const lunchStartISO = new Date(`${date}T${normalizedLunchStart}:00`).toISOString();
+      const lunchEndISO = new Date(`${date}T${normalizedLunchEnd}:00`).toISOString();
 
       if (applyOffset && offsetBlockedByOvertime) {
         setError("Offset can only be applied when overtime is 0.");
@@ -341,8 +364,8 @@ export default function LogForm({
             await updateLog(editingLog.id, {
               date: new Date(date).toISOString(),
               timeIn: timeInISO,
-              lunchStart: noLunch ? timeInISO : lunchStartISO,
-              lunchEnd: noLunch ? timeInISO : lunchEndISO,
+              lunchStart: lunchStartISO,
+              lunchEnd: lunchEndISO,
               timeOut: timeOutISO,
               accomplishment: accomplishment || undefined,
               ...offsetPayload,
@@ -358,8 +381,8 @@ export default function LogForm({
             traineeId,
             date: new Date(date).toISOString(),
             timeIn: timeInISO,
-            lunchStart: noLunch ? timeInISO : lunchStartISO,
-            lunchEnd: noLunch ? timeInISO : lunchEndISO,
+            lunchStart: lunchStartISO,
+            lunchEnd: lunchEndISO,
             timeOut: timeOutISO,
             accomplishment: accomplishment || undefined,
             ...offsetPayload,
@@ -822,7 +845,19 @@ export default function LogForm({
       </div>
 
       <form onSubmit={handleAdminSubmit}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.75rem" }}>
+        <div style={{
+          border: "1px solid var(--border)",
+          background: "var(--bg-subtle)",
+          borderRadius: "var(--radius-sm)",
+          padding: "0.85rem",
+          marginBottom: "0.8rem",
+        }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+            gap: "0.85rem 0.75rem",
+            alignItems: "end",
+          }}>
           <div className="form-group">
             <label>Date</label>
             {lockCoreFields ? (
@@ -834,14 +869,7 @@ export default function LogForm({
 
           <div className="form-group">
             <label>Time In *</label>
-            <div style={{ display: "flex", gap: "0.35rem" }}>
-              <input type="time" value={timeIn} onChange={(e) => setTimeIn(e.target.value)} style={{ flex: 1 }} disabled={lockCoreFields} />
-              {!lockCoreFields && (
-                <button type="button" className="btn btn-outline" style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", whiteSpace: "nowrap" }} onClick={() => { const n = new Date(); setTimeIn(`${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`); }}>
-                  Now
-                </button>
-              )}
-            </div>
+            <TimePicker value={timeIn} onChange={setTimeIn} disabled={lockCoreFields} />
           </div>
 
           <div className="form-group">
@@ -850,7 +878,15 @@ export default function LogForm({
               {!lockCoreFields && (
                 <button
                   type="button"
-                  onClick={() => setNoLunch(!noLunch)}
+                  onClick={() => {
+                    const nextNoLunch = !noLunch;
+                    setNoLunch(nextNoLunch);
+
+                    if (!nextNoLunch && !lunchStart && !lunchEnd) {
+                      setLunchStart(DEFAULT_LUNCH_START);
+                      setLunchEnd(DEFAULT_LUNCH_END);
+                    }
+                  }}
                   className={noLunch ? "badge badge-warning" : "badge badge-info"}
                   style={{ cursor: "pointer", fontSize: "0.68rem", padding: "0.1rem 0.4rem", border: "none" }}
                 >
@@ -858,25 +894,19 @@ export default function LogForm({
                 </button>
               )}
             </label>
-            <input type="time" value={lunchStart} onChange={(e) => setLunchStart(e.target.value)} disabled={noLunch || lockCoreFields} style={{ opacity: noLunch || lockCoreFields ? 0.4 : 1 }} />
+            <TimePicker value={lunchStart} onChange={setLunchStart} disabled={noLunch || lockCoreFields} />
           </div>
 
           <div className="form-group">
             <label>Lunch End</label>
-            <input type="time" value={lunchEnd} onChange={(e) => setLunchEnd(e.target.value)} disabled={noLunch || lockCoreFields} style={{ opacity: noLunch || lockCoreFields ? 0.4 : 1 }} />
+            <TimePicker value={lunchEnd} onChange={setLunchEnd} disabled={noLunch || lockCoreFields} />
           </div>
 
           <div className="form-group">
             <label>Time Out</label>
-            <div style={{ display: "flex", gap: "0.35rem" }}>
-              <input type="time" value={timeOut} onChange={(e) => setTimeOut(e.target.value)} style={{ flex: 1 }} disabled={lockCoreFields} />
-              {!lockCoreFields && (
-                <button type="button" className="btn btn-outline" style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", whiteSpace: "nowrap" }} onClick={() => { const n = new Date(); setTimeOut(`${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`); }}>
-                  Now
-                </button>
-              )}
-            </div>
+            <TimePicker value={timeOut} onChange={setTimeOut} disabled={lockCoreFields} />
           </div>
+        </div>
         </div>
 
         {lockCoreFields && (
@@ -885,7 +915,7 @@ export default function LogForm({
           </div>
         )}
 
-        <div className="form-group">
+        <div className="form-group" style={{ marginBottom: "0.85rem" }}>
           <label>Accomplishment</label>
           <textarea
             rows={3}
@@ -895,7 +925,16 @@ export default function LogForm({
           />
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-start", marginTop: "-0.1rem", marginBottom: "0.85rem", minHeight: "44px" }}>
+        <div style={{
+          display: "flex",
+          justifyContent: "flex-start",
+          marginBottom: "0.9rem",
+          minHeight: "44px",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-sm)",
+          background: "var(--bg-subtle)",
+          padding: "0.65rem 0.75rem",
+        }}>
           <div style={{
             display: "flex",
             alignItems: "center",

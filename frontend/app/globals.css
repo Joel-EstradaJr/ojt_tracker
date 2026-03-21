@@ -1011,6 +1011,15 @@ button {
 
 .dp-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; padding: 0 0.2rem; }
 .dp-month-label { font-weight: 700; font-size: 0.92rem; color: var(--text); }
+.dp-month-toggle {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.dp-month-toggle:hover { background: var(--primary-light); color: var(--primary); }
 .dp-nav {
   background: none;
   border: none;
@@ -1025,6 +1034,7 @@ button {
 .dp-nav:hover { background: var(--primary-light); color: var(--primary); }
 
 .dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dp-month-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.35rem; margin-bottom: 0.3rem; }
 .dp-day-labels { margin-bottom: 2px; }
 .dp-day-label {
   text-align: center;
@@ -1061,6 +1071,7 @@ button {
 .dp-cell.dp-holiday-regular { background: rgba(220, 53, 69, 0.12); color: #dc3545; font-weight: 700; }
 .dp-cell.dp-holiday-special { background: rgba(142, 68, 173, 0.12); color: #8e44ad; font-weight: 700; }
 .dp-cell.dp-disabled { opacity: 0.25; cursor: not-allowed; }
+.dp-month-cell { min-height: 2rem; aspect-ratio: auto; font-size: 0.8rem; }
 
 .dp-legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid var(--border); justify-content: center; }
 .dp-legend-item { display: flex; align-items: center; gap: 0.25rem; font-size: 0.68rem; color: var(--text-muted); }
@@ -1068,6 +1079,89 @@ button {
 .dp-swatch-weekend { background: rgba(230, 126, 34, 0.35); }
 .dp-swatch-regular { background: rgba(220, 53, 69, 0.35); }
 .dp-swatch-special { background: rgba(142, 68, 173, 0.35); }
+.dp-actions {
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* -- TimePicker ----------------------------------------------- */
+.tp-wrapper { position: relative; width: 100%; }
+.tp-trigger {
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.92rem;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  font-family: inherit;
+}
+.tp-trigger:hover:not(:disabled) { border-color: var(--primary); }
+.tp-trigger:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); outline: none; }
+.tp-trigger:disabled { cursor: not-allowed; background: var(--bg-subtle); color: var(--text-muted); }
+.tp-placeholder { color: var(--text-faint); }
+.tp-caret { font-size: 0.75rem; color: var(--text-muted); margin-left: 0.5rem; }
+
+.tp-dropdown {
+  position: fixed;
+  z-index: 9999;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 0.75rem;
+  min-width: 280px;
+  width: max-content;
+  animation: slideUp 0.2s ease;
+}
+
+.tp-input-row { display: grid; grid-template-columns: 1fr auto; gap: 0.45rem; }
+.tp-input,
+.tp-select {
+  padding: 0.6rem 0.75rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  font-family: inherit;
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+}
+.tp-input { min-width: 120px; }
+.tp-select {
+  cursor: pointer;
+  min-width: 74px;
+}
+.tp-input:focus,
+.tp-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.tp-error {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  color: var(--danger);
+}
+
+.tp-actions {
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
 
 /* -- Checkbox -------------------------------------------------- */
 input[type="checkbox"] {
