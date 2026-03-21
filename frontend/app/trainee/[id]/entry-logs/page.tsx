@@ -780,14 +780,6 @@ export default function TraineeEntryLogsPage() {
                     <td style={{ textAlign: "center" }}>
                       <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", alignItems: "center" }}>
                         <button className="btn btn-outline" style={{ padding: "0.25rem 0.5rem", fontSize: "0.75rem", width: "100%" }} onClick={() => setEditingLog(log)}>EDIT</button>
-                        <button
-                          className="btn btn-outline"
-                          style={{ padding: "0.25rem 0.5rem", fontSize: "0.75rem", width: "100%" }}
-                          disabled={!canOffset(log)}
-                          onClick={() => { setOffsetLog(log); setOffsetMinutes(String(Math.max(1, availableOffset))); }}
-                        >
-                          OFFSET
-                        </button>
                         <button className="btn btn-danger" style={{ padding: "0.25rem 0.5rem", fontSize: "0.75rem", width: "100%" }} onClick={() => setDeletingLog(log)}>DELETE</button>
                       </div>
                     </td>

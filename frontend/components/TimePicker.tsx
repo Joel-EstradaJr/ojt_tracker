@@ -42,6 +42,12 @@ function displayTime(value: string): string {
   return `${parsed.text} ${parsed.meridiem}`;
 }
 
+function formatDigitsToTime(digitsOnly: string): string {
+  const digits = digitsOnly.replace(/\D/g, "").slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
+
 export default function TimePicker({ value, onChange, disabled = false, placeholder = "Select time" }: Props) {
   const [open, setOpen] = useState(false);
   const [draftTime, setDraftTime] = useState("");
@@ -137,6 +143,18 @@ export default function TimePicker({ value, onChange, disabled = false, placehol
   };
 
   const shown = value ? displayTime(value) : placeholder;
+  const allowedControlKeys = [
+    "Backspace",
+    "Delete",
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowUp",
+    "ArrowDown",
+    "Tab",
+    "Home",
+    "End",
+    "Enter",
+  ];
 
   return (
     <div className="tp-wrapper" ref={wrapperRef}>
@@ -167,16 +185,32 @@ export default function TimePicker({ value, onChange, disabled = false, placehol
               type="text"
               value={draftTime}
               onChange={(e) => {
-                setDraftTime(e.target.value);
+                setDraftTime(formatDigitsToTime(e.target.value));
                 if (error) setError("");
               }}
+              onBeforeInput={(e) => {
+                if (!e.data) return;
+                if (!/^\d+$/.test(e.data)) {
+                  e.preventDefault();
+                }
+              }}
               onKeyDown={(e) => {
+                if (!allowedControlKeys.includes(e.key) && !/^\d$/.test(e.key)) {
+                  e.preventDefault();
+                  return;
+                }
                 if (e.key === "Enter") {
                   e.preventDefault();
                   apply();
                 }
               }}
-              placeholder="HH:MM"
+              onPaste={(e) => {
+                e.preventDefault();
+                const pasted = e.clipboardData.getData("text");
+                setDraftTime(formatDigitsToTime(pasted));
+                if (error) setError("");
+              }}
+              placeholder="00:00"
               inputMode="numeric"
               autoFocus
             />
