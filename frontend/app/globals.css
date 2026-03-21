@@ -322,6 +322,80 @@ button {
   padding-right: 2.25rem;
 }
 
+/* -- Admin Backup FAB ------------------------------------------ */
+.admin-backup-fab {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  width: 56px;
+  height: 56px;
+  border-radius: 9999px;
+  border: 1px solid var(--primary-hover);
+  background: var(--primary);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-lg);
+  z-index: 1020;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.admin-backup-fab:hover {
+  background: var(--primary-hover);
+  transform: translateY(-2px);
+}
+
+.admin-backup-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  z-index: 1040;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.admin-backup-modal {
+  width: min(520px, 96vw);
+}
+
+.admin-backup-blocker {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.72);
+  z-index: 1060;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.admin-backup-spinner {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto;
+  border-radius: 9999px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  animation: admin-backup-spin 0.75s linear infinite;
+}
+
+@keyframes admin-backup-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 768px) {
+  .admin-backup-fab {
+    right: 0.9rem;
+    bottom: 0.9rem;
+    width: 52px;
+    height: 52px;
+  }
+}
+
 .rows-per-page-select {
   padding: 0.4rem 2rem 0.4rem 0.65rem;
   border: 1.5px solid var(--border);

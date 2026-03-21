@@ -26,6 +26,10 @@ export default function RootPage() {
         }
 
         if (session.role === "trainee" && session.traineeId) {
+          if (session.requiresPendingEmailVerification) {
+            router.replace("/login");
+            return;
+          }
           router.replace(`/trainee/${session.traineeId}/dashboard`);
           return;
         }

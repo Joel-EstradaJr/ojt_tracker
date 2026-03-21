@@ -9,7 +9,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Trainee } from "@/types";
-import { fetchTrainees, deleteTrainee, downloadAllCSV, importAllCSV, getSession } from "@/lib/api";
+import { fetchTrainees, deleteTrainee, importAllCSV, getSession } from "@/lib/api";
 import { formatMinutes } from "@/lib/duration";
 import { useActionGuard } from "@/lib/useActionGuard";
 import CreateTraineeForm from "@/components/CreateTraineeForm";
@@ -17,7 +17,9 @@ import EditTraineeForm from "@/components/EditTraineeForm";
 import DatePicker from "@/components/DatePicker";
 import { ThemeToggle } from "@/components/ThemeProvider";
 import PageHeading from "@/components/PageHeading";
+import ExportFormatButton from "@/components/ExportFormatButton";
 import { formatDisplayDate } from "@/lib/date";
+import { exportElementToPdf, exportRowsAsCSV, exportRowsAsExcel } from "@/lib/export-utils";
 
 export default function HomePage() {
   const router = useRouter();
@@ -30,10 +32,11 @@ export default function HomePage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editingTrainee, setEditingTrainee] = useState<Trainee | null>(null);
   const [importLoading, setImportLoading] = useState(false);
-  const [exportLoading, setExportLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState<"csv" | "excel" | "pdf" | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const exportRootRef = useRef<HTMLDivElement>(null);
 
-  const [exportSuccess, setExportSuccess] = useState(false);
+  const [exportSuccess, setExportSuccess] = useState<"csv" | "excel" | "pdf" | null>(null);
 
   // Import result modal
   const [importResult, setImportResult] = useState<{ trainees: number; supervisors: number; logs: number; skipped: number } | null>(null);
@@ -197,14 +200,51 @@ export default function HomePage() {
     };
   }, [loadTrainees, router]);
 
-  const handleExportAll = async () => {
-    await runGuarded("admin-user-export-all", async () => {
-      setExportLoading(true);
+  useEffect(() => {
+    const onBackupImportComplete = () => {
+      void loadTrainees();
+    };
+
+    window.addEventListener("backup-import-complete", onBackupImportComplete);
+    return () => {
+      window.removeEventListener("backup-import-complete", onBackupImportComplete);
+    };
+  }, [loadTrainees]);
+
+  const handleExport = async (format: "csv" | "excel" | "pdf") => {
+    await runGuarded(`admin-user-export-${format}`, async () => {
+      setExportLoading(format);
       try {
-        downloadAllCSV();
-        setExportSuccess(true);
+        if (format === "pdf") {
+          if (!exportRootRef.current) throw new Error("Could not export page preview.");
+          await exportElementToPdf({
+            element: exportRootRef.current,
+            fileNameBase: "user_management",
+            orientation: "landscape",
+          });
+        } else {
+          const rows = filteredTrainees.map((t) => ({
+            "First": t.firstName || "",
+            "Middl": t.middleName || "",
+            "Last": t.lastName || "",
+            "Suffix": t.suffix || "",
+            "Role": t.role,
+            "Email": t.email,
+            "Creation Date": formatCreatedAt(t.createdAt),
+            "Activated": isActivated(t) ? "Yes" : "No",
+            "Locked": isLocked(t) ? "Yes" : "No",
+          }));
+
+          if (format === "csv") {
+            exportRowsAsCSV("user_management", rows, ["First", "Middl", "Last", "Suffix", "Role", "Email", "Creation Date", "Activated", "Locked"]);
+          } else {
+            await exportRowsAsExcel("user_management", rows, "Users");
+          }
+        }
+
+        setExportSuccess(format);
       } finally {
-        setExportLoading(false);
+        setExportLoading(null);
       }
     });
   };
@@ -347,9 +387,15 @@ export default function HomePage() {
   const totalPages = Math.max(1, Math.ceil(filteredTrainees.length / cardsPerPage));
   const safePage = Math.min(currentPage, totalPages);
   const paginatedTrainees = filteredTrainees.slice((safePage - 1) * cardsPerPage, safePage * cardsPerPage);
+  const tableVisibleRows = 10;
+  const tableRowHeight = 52;
+  const tableHeaderHeight = 46;
+  const fixedTableHeight = (tableVisibleRows * tableRowHeight) + tableHeaderHeight;
+  const shouldUseVerticalScroll = cardsPerPage > tableVisibleRows && filteredTrainees.length > tableVisibleRows;
+  const userRowHeight = "3.25rem";
 
   return (
-    <div className="container">
+    <div className="container" ref={exportRootRef}>
       <PageHeading
         title="User Management"
         subtitle="Manage admin and trainee accounts."
@@ -360,10 +406,13 @@ export default function HomePage() {
         )}
         toolbar={(
           <>
-            <button className="btn" onClick={handleExportAll} disabled={exportLoading}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-              {exportLoading ? "Exporting..." : "Export All"}
-            </button>
+            <ExportFormatButton
+              buttonClassName="btn"
+              loadingFormat={exportLoading}
+              title="Export User Management"
+              description="Choose a file format. PDF exports the current UI without the sidebar."
+              onSelect={handleExport}
+            />
             <button className="btn" onClick={() => importRef.current?.click()} disabled={importLoading}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
               {importLoading ? "Importing..." : "Import CSV"}
@@ -476,16 +525,18 @@ export default function HomePage() {
         </motion.div>
       )}
 
-      {/* No search results */}
-      {!loading && trainees.length > 0 && filteredTrainees.length === 0 && (
-        <div style={{ textAlign: "center", padding: "2rem 1rem", color: "var(--text-muted)" }}>
-          <p style={{ fontSize: "0.95rem" }}>No users match the current search and filters.</p>
-        </div>
-      )}
-
       {/* User management table */}
-      {!loading && filteredTrainees.length > 0 && (
-        <div style={{ overflowX: "auto", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", marginBottom: "1rem" }}>
+      {!loading && trainees.length > 0 && (
+        <div
+          style={{
+            overflowX: "auto",
+            overflowY: shouldUseVerticalScroll ? "auto" : "hidden",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--border)",
+            marginBottom: "1rem",
+            height: `${fixedTableHeight}px`,
+          }}
+        >
           <table className="logs-table">
             <thead>
               <tr>
@@ -512,17 +563,17 @@ export default function HomePage() {
             </thead>
             <tbody>
               {paginatedTrainees.map((t) => (
-                <tr key={t.id} style={{ height: "4.1rem" }}>
-                  <td style={{ fontWeight: 600, height: "4.1rem", verticalAlign: "middle", textAlign: "center" }}>{formatFullName(t)}</td>
-                  <td style={{ textTransform: "capitalize", height: "4.1rem", verticalAlign: "middle", textAlign: "center" }}>{t.role}</td>
-                  <td style={{ height: "4.1rem", verticalAlign: "middle", width: "18rem", minWidth: "14rem", maxWidth: "22rem" }}>
+                <tr key={t.id} style={{ height: userRowHeight }}>
+                  <td style={{ fontWeight: 600, height: userRowHeight, verticalAlign: "middle", textAlign: "center" }}>{formatFullName(t)}</td>
+                  <td style={{ textTransform: "capitalize", height: userRowHeight, verticalAlign: "middle", textAlign: "center" }}>{t.role}</td>
+                  <td style={{ height: userRowHeight, verticalAlign: "middle", width: "18rem", minWidth: "14rem", maxWidth: "22rem" }}>
                     <div style={{ maxHeight: "2.7rem", overflowY: "auto", lineHeight: 1.35, paddingRight: "0.2rem", textAlign: "center" }} title={t.email}>
                       {t.email}
                     </div>
                   </td>
-                  <td style={{ height: "4.1rem", verticalAlign: "middle", textAlign: "center" }}>{formatCreatedAt(t.createdAt)}</td>
-                  <td style={{ height: "4.1rem", verticalAlign: "middle", textAlign: "center" }}>{isActivated(t) ? "Yes" : "No"}</td>
-                  <td style={{ height: "4.1rem", verticalAlign: "middle", textAlign: "center" }}>{isLocked(t) ? "Yes" : "No"}</td>
+                  <td style={{ height: userRowHeight, verticalAlign: "middle", textAlign: "center" }}>{formatCreatedAt(t.createdAt)}</td>
+                  <td style={{ height: userRowHeight, verticalAlign: "middle", textAlign: "center" }}>{isActivated(t) ? "Yes" : "No"}</td>
+                  <td style={{ height: userRowHeight, verticalAlign: "middle", textAlign: "center" }}>{isLocked(t) ? "Yes" : "No"}</td>
                   <td>
                     <div style={{ display: "flex", justifyContent: "center", gap: "0.45rem" }}>
                       <button className="btn btn-outline" style={{ padding: "0.3rem 0.55rem", fontSize: "0.76rem" }} onClick={() => setEditingTrainee(t)}>
@@ -535,6 +586,13 @@ export default function HomePage() {
                   </td>
                 </tr>
               ))}
+              {paginatedTrainees.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: "center", padding: "2rem 1rem", color: "var(--text-muted)", fontSize: "0.9rem" }}>
+                    No users match the current search and filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -820,7 +878,7 @@ export default function HomePage() {
 
       {/* Export success modal */}
       {exportSuccess && (
-        <div className="modal-overlay" onClick={() => setExportSuccess(false)}>
+        <div className="modal-overlay" onClick={() => setExportSuccess(null)}>
           <div className="modal-content" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
               <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--success-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -829,10 +887,10 @@ export default function HomePage() {
               <h2 style={{ fontSize: "1.15rem", color: "var(--success-text)" }}>Export Successful</h2>
             </div>
             <p style={{ fontSize: "0.9rem", marginBottom: "1.25rem", color: "var(--text-secondary)" }}>
-              All trainee data has been exported to CSV. Your download should begin shortly.
+              {`User data has been exported to ${exportSuccess.toUpperCase()}. Your download should begin shortly.`}
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="btn btn-primary" onClick={() => setExportSuccess(false)}>OK</button>
+              <button className="btn btn-primary" onClick={() => setExportSuccess(null)}>OK</button>
             </div>
           </div>
         </div>

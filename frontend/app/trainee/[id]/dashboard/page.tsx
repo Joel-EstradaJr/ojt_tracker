@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { ThemeToggle } from "@/components/ThemeProvider";
 import PageHeading from "@/components/PageHeading";
 import ImportCSV from "@/components/ImportCSV";
+import ExportFormatButton from "@/components/ExportFormatButton";
 import { useTraineePageData } from "../components/useTraineePageData";
 import { formatMinutes } from "@/lib/duration";
 import { formatDisplayDate } from "@/lib/date";
@@ -35,7 +36,6 @@ export default function TraineeDashboardPage() {
     loadData,
   } = useTraineePageData();
   const [exportLoading, setExportLoading] = useState<"csv" | "excel" | null>(null);
-  const [showExportPicker, setShowExportPicker] = useState(false);
 
   const handleExport = async (format: "csv" | "excel") => {
     await runGuarded(`trainee-dashboard-export-${format}`, async () => {
@@ -92,48 +92,21 @@ export default function TraineeDashboardPage() {
                 Back to Trainee Management
               </button>
             )}
-            <button className="btn btn-outline" onClick={() => setShowExportPicker(true)} disabled={exportLoading !== null} style={{ gap: "0.35rem" }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-              <span>{exportLoading ? `Exporting ${exportLoading.toUpperCase()}...` : "Export"}</span>
-              <span style={{ fontSize: "0.7rem", opacity: 0.8 }}>▾</span>
-            </button>
+            <ExportFormatButton
+              loadingFormat={exportLoading}
+              title="Export Records"
+              description="Choose the export format for your own records."
+              formats={["csv", "excel"]}
+              onSelect={(format) => {
+                if (format === "pdf") return;
+                return handleExport(format);
+              }}
+            />
             <ImportCSV traineeId={id} onImported={loadData} />
           </>
         )}
         meta={<>LOGGED IN AS: <strong style={{ color: "var(--text)" }}>{activeUserLabel || "Trainee"}</strong></>}
       />
-
-      {showExportPicker && (
-        <div className="modal-overlay" onClick={() => exportLoading === null && setShowExportPicker(false)}>
-          <div className="modal-content" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Export Records</h2>
-            <p style={{ fontSize: "0.84rem", color: "var(--text-muted)", marginBottom: "0.9rem" }}>
-              Choose the export format for your own records.
-            </p>
-            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.9rem" }}>
-              <button
-                className="btn btn-outline"
-                style={{ flex: 1 }}
-                onClick={() => { handleExport("csv"); setShowExportPicker(false); }}
-                disabled={exportLoading !== null}
-              >
-                CSV
-              </button>
-              <button
-                className="btn btn-outline"
-                style={{ flex: 1 }}
-                onClick={() => { handleExport("excel"); setShowExportPicker(false); }}
-                disabled={exportLoading !== null}
-              >
-                EXCEL
-              </button>
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="btn btn-outline" onClick={() => setShowExportPicker(false)} disabled={exportLoading !== null}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}

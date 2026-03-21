@@ -1,9 +1,9 @@
 ﻿import { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import { AuditAction, UserRole } from "@prisma/client";
+import { AuditAction, EmailVerificationPurpose, UserRole } from "@prisma/client";
 import prisma from "../utils/prisma";
-import { sendResetCode, sendTemporaryPassword } from "../utils/email";
+import { sendPendingEmailUpdateCode, sendResetCode, sendTemporaryPassword } from "../utils/email";
 import { isEmailVerified } from "./email.controller";
 import { setSessionCookie } from "../middleware/auth";
 import { createAuditLog } from "../utils/audit";
@@ -89,6 +89,15 @@ function transformTrainee(trainee: any) {
   const totalHours = (trainee.logs || []).reduce((sum: number, l: { hoursWorked: number }) => sum + l.hoursWorked, 0);
   const supervisors = (trainee.supervisors || []).map((s: any) => ({ ...s, displayName: displayName(s) }));
 
+  let emailVerificationStatus: "verified" | "pending" | "expired" = "verified";
+  if (trainee.user.pendingEmail) {
+    if (trainee.user.pendingEmailExpiresAt && new Date(trainee.user.pendingEmailExpiresAt).getTime() > Date.now()) {
+      emailVerificationStatus = "pending";
+    } else {
+      emailVerificationStatus = "expired";
+    }
+  }
+
   return {
     id: trainee.id,
     role: roleToString(trainee.user.role),
@@ -97,6 +106,10 @@ function transformTrainee(trainee: any) {
     middleName: trainee.middleName,
     suffix: trainee.suffix,
     email: trainee.user.email,
+    pendingEmail: trainee.user.pendingEmail ?? null,
+    pendingEmailRequestedAt: trainee.user.pendingEmailRequestedAt ?? null,
+    pendingEmailExpiresAt: trainee.user.pendingEmailExpiresAt ?? null,
+    emailVerificationStatus,
     contactNumber: trainee.contactNumber,
     school: trainee.school,
     companyName: trainee.company?.name ?? "",
@@ -277,6 +290,8 @@ export const createTrainee = async (req: Request, res: Response) => {
 
 export const updateTrainee = async (req: Request, res: Response) => {
   try {
+    const auth = (req as Request & { auth?: { role?: "admin" | "trainee"; traineeId?: string } }).auth;
+    const isAdminRequester = auth?.role === "admin";
     const { id } = req.params;
     const requestedRole = req.body?.role as string | undefined;
     const {
@@ -293,12 +308,17 @@ export const updateTrainee = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Role cannot be changed after user creation." });
     }
 
-    if (email && current.user.email !== email) {
-      if (!verificationToken || !(await isEmailVerified(email, verificationToken))) {
-        return res.status(400).json({ error: "New email must be verified before updating." });
+    const normalizedNextEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    const shouldUsePendingEmailFlow = isAdminRequester && !current.user.mustChangePassword;
+
+    if (normalizedNextEmail && current.user.email !== normalizedNextEmail) {
+      if (!isAdminRequester) {
+        if (!verificationToken || !(await isEmailVerified(email, verificationToken))) {
+          return res.status(400).json({ error: "New email must be verified before updating." });
+        }
       }
 
-      const existingUser = await prisma.user.findUnique({ where: { email } });
+      const existingUser = await prisma.user.findUnique({ where: { email: normalizedNextEmail } });
       if (existingUser && existingUser.id !== current.userId) {
         return res.status(409).json({ error: "A trainee with this email already exists." });
       }
@@ -313,10 +333,38 @@ export const updateTrainee = async (req: Request, res: Response) => {
     const company = await upsertCompany(isTraineeRole ? String(companyName) : ADMIN_DEFAULT_COMPANY);
 
     await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: current.userId },
-        data: email ? { email } : {},
-      });
+      const userUpdateData: {
+        email?: string;
+        pendingEmail?: string | null;
+        pendingEmailRequestedAt?: Date | null;
+        pendingEmailExpiresAt?: Date | null;
+        pendingEmailVerifyAttempts?: number;
+        pendingEmailAdminResendRequired?: boolean;
+      } = {};
+
+      if (normalizedNextEmail && current.user.email !== normalizedNextEmail) {
+        if (shouldUsePendingEmailFlow) {
+          userUpdateData.pendingEmail = normalizedNextEmail;
+          userUpdateData.pendingEmailRequestedAt = new Date();
+          userUpdateData.pendingEmailExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          userUpdateData.pendingEmailVerifyAttempts = 0;
+          userUpdateData.pendingEmailAdminResendRequired = false;
+        } else {
+          userUpdateData.email = normalizedNextEmail;
+          userUpdateData.pendingEmail = null;
+          userUpdateData.pendingEmailRequestedAt = null;
+          userUpdateData.pendingEmailExpiresAt = null;
+          userUpdateData.pendingEmailVerifyAttempts = 0;
+          userUpdateData.pendingEmailAdminResendRequired = false;
+        }
+      }
+
+      if (Object.keys(userUpdateData).length > 0) {
+        await tx.user.update({
+          where: { id: current.userId },
+          data: userUpdateData,
+        });
+      }
 
       await tx.userProfile.update({
         where: { id },
@@ -717,6 +765,211 @@ export const resendTempPassword = async (req: Request, res: Response) => {
   } catch (err) {
     console.error("resendTempPassword error:", err);
     return res.status(500).json({ error: "Internal server error." });
+  }
+};
+
+export const requestPendingEmailVerificationCode = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const auth = (req as Request & { auth?: { role: "admin" | "trainee"; traineeId?: string } }).auth;
+
+    if (!auth?.role) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    if (auth.role !== "admin") {
+      return res.status(403).json({ error: "Only admins can resend pending email verification codes." });
+    }
+
+    const trainee = await getTraineeWithRelations(id);
+    if (!trainee?.user) return res.status(404).json({ error: "Trainee not found." });
+    if (!trainee.user.pendingEmail) {
+      return res.status(400).json({ error: "No pending email change found for this account." });
+    }
+
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await prisma.$transaction([
+      prisma.emailVerificationCode.updateMany({
+        where: {
+          userId: trainee.user.id,
+          purpose: EmailVerificationPurpose.EMAIL_UPDATE,
+          used: false,
+        },
+        data: { used: true },
+      }),
+      prisma.emailVerificationCode.create({
+        data: {
+          userId: trainee.user.id,
+          email: trainee.user.pendingEmail,
+          purpose: EmailVerificationPurpose.EMAIL_UPDATE,
+          code,
+          expiresAt,
+        },
+      }),
+      prisma.user.update({
+        where: { id: trainee.user.id },
+        data: {
+          pendingEmailRequestedAt: new Date(),
+          pendingEmailExpiresAt: expiresAt,
+          pendingEmailVerifyAttempts: 0,
+          pendingEmailAdminResendRequired: false,
+        },
+      }),
+    ]);
+
+    const internalKey = req.headers["x-internal-key"] as string | undefined;
+    if (internalKey && process.env.EMAIL_INTERNAL_KEY && internalKey === process.env.EMAIL_INTERNAL_KEY) {
+      return res.json({
+        message: "Pending email verification code generated.",
+        code,
+        pendingEmail: trainee.user.pendingEmail,
+        displayName: displayName(trainee),
+        expiresInHours: 24,
+      });
+    }
+
+    // Fallback for environments that send email directly from backend.
+    // If this fails, return an error instead of silently succeeding.
+    await sendPendingEmailUpdateCode(trainee.user.pendingEmail, code, displayName(trainee));
+
+    return res.json({ message: "Verification code sent to the pending email address." });
+  } catch (err) {
+    console.error("requestPendingEmailVerificationCode error:", err);
+    return res.status(500).json({ error: "Failed to generate verification code." });
+  }
+};
+
+export const verifyPendingEmailChange = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { code } = req.body as { code?: string };
+    const auth = (req as Request & { auth?: { role: "admin" | "trainee"; traineeId?: string } }).auth;
+
+    if (!auth?.role) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    if (auth.role === "trainee" && auth.traineeId !== id) {
+      return res.status(403).json({ error: "You can only verify your own account email change." });
+    }
+
+    if (!code || typeof code !== "string") {
+      return res.status(400).json({ error: "Verification code is required." });
+    }
+
+    const trainee = await getTraineeWithRelations(id);
+    if (!trainee?.user) return res.status(404).json({ error: "Trainee not found." });
+    if (!trainee.user.pendingEmail) {
+      return res.status(400).json({ error: "No pending email change found for this account." });
+    }
+
+    if (trainee.user.pendingEmailAdminResendRequired) {
+      return res.status(403).json({ error: "Maximum verification attempts reached. Ask your admin to resend a new code." });
+    }
+
+    const pendingExpired = trainee.user.pendingEmailExpiresAt && trainee.user.pendingEmailExpiresAt.getTime() <= Date.now();
+    if (pendingExpired) {
+      await prisma.$transaction([
+        prisma.user.update({
+          where: { id: trainee.user.id },
+          data: {
+            pendingEmail: null,
+            pendingEmailRequestedAt: null,
+            pendingEmailExpiresAt: null,
+          },
+        }),
+        prisma.emailVerificationCode.updateMany({
+          where: {
+            userId: trainee.user.id,
+            purpose: EmailVerificationPurpose.EMAIL_UPDATE,
+            used: false,
+          },
+          data: { used: true },
+        }),
+      ]);
+
+      return res.status(400).json({ error: "Verification code expired. Ask your admin to update your email again." });
+    }
+
+    const verificationCode = await prisma.emailVerificationCode.findFirst({
+      where: {
+        userId: trainee.user.id,
+        email: trainee.user.pendingEmail,
+        purpose: EmailVerificationPurpose.EMAIL_UPDATE,
+        code: code.trim(),
+        used: false,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!verificationCode) {
+      const nextAttempts = (trainee.user.pendingEmailVerifyAttempts || 0) + 1;
+      const attemptsRemaining = Math.max(0, 3 - nextAttempts);
+
+      await prisma.user.update({
+        where: { id: trainee.user.id },
+        data: {
+          pendingEmailVerifyAttempts: nextAttempts,
+          pendingEmailAdminResendRequired: nextAttempts >= 3,
+        },
+      });
+
+      if (nextAttempts >= 3) {
+        await prisma.emailVerificationCode.updateMany({
+          where: {
+            userId: trainee.user.id,
+            purpose: EmailVerificationPurpose.EMAIL_UPDATE,
+            used: false,
+          },
+          data: { used: true },
+        });
+        return res.status(403).json({ error: "Maximum verification attempts reached. Ask your admin to resend a new code." });
+      }
+
+      return res.status(400).json({ error: `Invalid or expired verification code. ${attemptsRemaining} attempt(s) remaining.` });
+    }
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: trainee.user.id },
+        data: {
+          email: trainee.user.pendingEmail,
+          pendingEmail: null,
+          pendingEmailRequestedAt: null,
+          pendingEmailExpiresAt: null,
+          pendingEmailVerifyAttempts: 0,
+          pendingEmailAdminResendRequired: false,
+        },
+      }),
+      prisma.emailVerificationCode.update({
+        where: { id: verificationCode.id },
+        data: { used: true },
+      }),
+      prisma.emailVerificationCode.updateMany({
+        where: {
+          userId: trainee.user.id,
+          purpose: EmailVerificationPurpose.EMAIL_UPDATE,
+          used: false,
+        },
+        data: { used: true },
+      }),
+    ]);
+
+    const updated = await getTraineeWithRelations(id);
+    if (!updated?.user) {
+      return res.status(500).json({ error: "Failed to load updated account." });
+    }
+
+    return res.json({
+      message: "Email verified successfully. Your new email is now active.",
+      trainee: transformTrainee(updated),
+    });
+  } catch (err) {
+    console.error("verifyPendingEmailChange error:", err);
+    return res.status(500).json({ error: "Failed to verify pending email change." });
   }
 };
 

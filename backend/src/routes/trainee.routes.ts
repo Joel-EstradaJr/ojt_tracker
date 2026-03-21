@@ -14,6 +14,8 @@ import {
   resetPassword,
   deleteTrainee,
   resendTempPassword,
+  requestPendingEmailVerificationCode,
+  verifyPendingEmailChange,
 } from "../controllers/trainee.controller";
 import { validateTrainee, validateTraineeUpdate, sanitizeBody } from "../middleware/validate";
 import { requireAuth, requireAdmin, attachAuthIfPresent } from "../middleware/auth";
@@ -49,5 +51,11 @@ router.delete("/:id", requireAuth, requireAdmin, deleteTrainee);
 
 // POST /trainees/:id/resend-temp-password — resend temp password (admin only)
 router.post("/:id/resend-temp-password", requireAuth, requireAdmin, resendTempPassword);
+
+// POST /trainees/:id/pending-email/request-code — send/resend 24-hour email update code
+router.post("/:id/pending-email/request-code", requireAuth, requireAdmin, requestPendingEmailVerificationCode);
+
+// POST /trainees/:id/verify-pending-email — verify pending email change code
+router.post("/:id/verify-pending-email", requireAuth, verifyPendingEmailChange);
 
 export default router;

@@ -12,12 +12,14 @@ import { Trainee } from "@/types";
 import { calculateExpectedEndDate } from "@/lib/ph-holidays";
 import { formatMinutes } from "@/lib/duration";
 import { useActionGuard } from "@/lib/useActionGuard";
-import { fetchTrainees, deleteTrainee, downloadAllCSV, importAllCSV, getSession } from "@/lib/api";
+import { fetchTrainees, deleteTrainee, importAllCSV, getSession } from "@/lib/api";
 import TraineeCard from "@/components/TraineeCard";
 import EditTraineeForm from "@/components/EditTraineeForm";
 import DatePicker from "@/components/DatePicker";
 import { ThemeToggle } from "@/components/ThemeProvider";
 import PageHeading from "@/components/PageHeading";
+import ExportFormatButton from "@/components/ExportFormatButton";
+import { exportElementToPdf, exportRowsAsCSV, exportRowsAsExcel } from "@/lib/export-utils";
 
 export default function HomePage() {
   const router = useRouter();
@@ -29,10 +31,11 @@ export default function HomePage() {
   const [activeAdminLabel, setActiveAdminLabel] = useState("");
   const [editingTrainee, setEditingTrainee] = useState<Trainee | null>(null);
   const [importLoading, setImportLoading] = useState(false);
-  const [exportLoading, setExportLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState<"csv" | "excel" | "pdf" | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const exportRootRef = useRef<HTMLDivElement>(null);
 
-  const [exportSuccess, setExportSuccess] = useState(false);
+  const [exportSuccess, setExportSuccess] = useState<"csv" | "excel" | "pdf" | null>(null);
 
   // Import result modal
   const [importResult, setImportResult] = useState<{ trainees: number; supervisors: number; logs: number; skipped: number } | null>(null);
@@ -188,14 +191,60 @@ export default function HomePage() {
     };
   }, [loadTrainees, router]);
 
-  const handleExportAll = async () => {
-    await runGuarded("admin-trainee-export-all", async () => {
-      setExportLoading(true);
+  useEffect(() => {
+    const onBackupImportComplete = () => {
+      void loadTrainees();
+    };
+
+    window.addEventListener("backup-import-complete", onBackupImportComplete);
+    return () => {
+      window.removeEventListener("backup-import-complete", onBackupImportComplete);
+    };
+  }, [loadTrainees]);
+
+  const handleExport = async (format: "csv" | "excel" | "pdf") => {
+    await runGuarded(`admin-trainee-export-${format}`, async () => {
+      setExportLoading(format);
       try {
-        downloadAllCSV();
-        setExportSuccess(true);
+        if (format === "pdf") {
+          if (!exportRootRef.current) throw new Error("Could not export page preview.");
+          await exportElementToPdf({
+            element: exportRootRef.current,
+            fileNameBase: "trainee_management",
+            orientation: "landscape",
+          });
+        } else {
+          const rows = sortedTrainees.map((t) => {
+            const requiredMinutes = t.requiredHours * 60;
+            const remainingMinutes = Math.max(0, requiredMinutes - t.totalHoursRendered);
+            const expectedEnd = remainingMinutes === 0
+              ? "Completed"
+              : calculateExpectedEndDate(remainingMinutes / 60, undefined, t.workSchedule).toLocaleDateString("en-PH");
+
+            return {
+              "First": t.firstName || "",
+              "Middl": t.middleName || "",
+              "Last": t.lastName || "",
+              "Suffix": t.suffix || "",
+              "School": t.school,
+              "Company": t.companyName,
+              "Required Hours": t.requiredHours,
+              "Hours Rendered": (t.totalHoursRendered / 60).toFixed(2),
+              "Hours Remaining": (remainingMinutes / 60).toFixed(2),
+              "Expected End": expectedEnd,
+            };
+          });
+
+          if (format === "csv") {
+            exportRowsAsCSV("trainee_management", rows, ["First", "Middl", "Last", "Suffix", "School", "Company", "Required Hours", "Hours Rendered", "Hours Remaining", "Expected End"]);
+          } else {
+            await exportRowsAsExcel("trainee_management", rows, "Trainees");
+          }
+        }
+
+        setExportSuccess(format);
       } finally {
-        setExportLoading(false);
+        setExportLoading(null);
       }
     });
   };
@@ -352,7 +401,7 @@ export default function HomePage() {
   const paginatedTrainees = sortedTrainees.slice((safePage - 1) * cardsPerPage, safePage * cardsPerPage);
 
   return (
-    <div className="container">
+    <div className="container" ref={exportRootRef}>
       <PageHeading
         title="Trainee Management"
         subtitle="Track trainee hours, accomplishments, and progress reports."
@@ -363,10 +412,13 @@ export default function HomePage() {
         )}
         toolbar={(
           <>
-            <button className="btn" onClick={handleExportAll} disabled={exportLoading}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-              {exportLoading ? "Exporting..." : "Export All"}
-            </button>
+            <ExportFormatButton
+              buttonClassName="btn"
+              loadingFormat={exportLoading}
+              title="Export Trainee Management"
+              description="Choose a file format. PDF exports the current UI without the sidebar."
+              onSelect={handleExport}
+            />
             <button className="btn" onClick={() => importRef.current?.click()} disabled={importLoading}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
               {importLoading ? "Importing..." : "Import CSV"}
@@ -849,7 +901,7 @@ export default function HomePage() {
 
       {/* Export success modal */}
       {exportSuccess && (
-        <div className="modal-overlay" onClick={() => setExportSuccess(false)}>
+        <div className="modal-overlay" onClick={() => setExportSuccess(null)}>
           <div className="modal-content" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
               <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "var(--radius-sm)", background: "var(--success-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -858,10 +910,10 @@ export default function HomePage() {
               <h2 style={{ fontSize: "1.15rem", color: "var(--success-text)" }}>Export Successful</h2>
             </div>
             <p style={{ fontSize: "0.9rem", marginBottom: "1.25rem", color: "var(--text-secondary)" }}>
-              All trainee data has been exported to CSV. Your download should begin shortly.
+              {`Trainee data has been exported to ${exportSuccess.toUpperCase()}. Your download should begin shortly.`}
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="btn btn-primary" onClick={() => setExportSuccess(false)}>OK</button>
+              <button className="btn btn-primary" onClick={() => setExportSuccess(null)}>OK</button>
             </div>
           </div>
         </div>

@@ -26,6 +26,16 @@ function parseTime(dateStr: string, timeVal: string): Date {
   return isNaN(d.getTime()) ? new Date(`${dateStr}T${val}`) : d;
 }
 
+function pick(row: Record<string, string>, keys: string[]): string {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return "";
+}
+
 export const exportAllCSV = async (_req: Request, res: Response) => {
   try {
     const trainees = await prisma.userProfile.findMany({
@@ -137,6 +147,11 @@ export const importAllCSV = async (req: Request, res: Response) => {
         });
 
         const created = await prisma.$transaction(async (tx) => {
+          const firstName = pick(row, ["FirstName", "First"]);
+          const middleName = pick(row, ["MiddleName", "Middl", "Middle"]);
+          const lastName = pick(row, ["LastName", "Last"]);
+          const suffix = pick(row, ["Suffix"]);
+
           const user = await tx.user.create({
             data: {
               email: row.TraineeEmail || "",
@@ -148,10 +163,10 @@ export const importAllCSV = async (req: Request, res: Response) => {
           return tx.userProfile.create({
             data: {
               userId: user.id,
-              lastName: (row.LastName || "").toUpperCase(),
-              firstName: (row.FirstName || "").toUpperCase(),
-              middleName: row.MiddleName ? row.MiddleName.toUpperCase() : null,
-              suffix: row.Suffix ? row.Suffix.toUpperCase() : null,
+              lastName: lastName.toUpperCase(),
+              firstName: firstName.toUpperCase(),
+              middleName: middleName ? middleName.toUpperCase() : null,
+              suffix: suffix ? suffix.toUpperCase() : null,
               contactNumber: row.ContactNumber || "",
               school: (row.School || "").toUpperCase(),
               companyId: company.id,
@@ -169,13 +184,18 @@ export const importAllCSV = async (req: Request, res: Response) => {
           continue;
         }
 
+        const supervisorFirstName = pick(row, ["SupervisorFirstName", "SupervisorFirst"]);
+        const supervisorMiddleName = pick(row, ["SupervisorMiddleName", "SupervisorMiddl", "SupervisorMiddle"]);
+        const supervisorLastName = pick(row, ["SupervisorLastName", "SupervisorLast"]);
+        const supervisorSuffix = pick(row, ["SupervisorSuffix"]);
+
         await prisma.supervisor.create({
           data: {
             traineeId,
-            lastName: (row.SupervisorLastName || "").toUpperCase(),
-            firstName: (row.SupervisorFirstName || "").toUpperCase(),
-            middleName: row.SupervisorMiddleName ? row.SupervisorMiddleName.toUpperCase() : null,
-            suffix: row.SupervisorSuffix ? row.SupervisorSuffix.toUpperCase() : null,
+            lastName: supervisorLastName.toUpperCase(),
+            firstName: supervisorFirstName.toUpperCase(),
+            middleName: supervisorMiddleName ? supervisorMiddleName.toUpperCase() : null,
+            suffix: supervisorSuffix ? supervisorSuffix.toUpperCase() : null,
             contactNumber: row.SupervisorContact || null,
             email: row.SupervisorEmail || null,
           },

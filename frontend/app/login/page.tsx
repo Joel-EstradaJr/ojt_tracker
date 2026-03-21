@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import CreateTraineeForm from "@/components/CreateTraineeForm";
+import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 import { ThemeToggle } from "@/components/ThemeProvider";
 import {
   getSession,
   isLoginError,
   login,
+  logout,
   setInitialPassword,
   requestForgotPasswordCode,
+  verifyPendingEmailChange,
   verifyForgotPasswordCode,
   resetForgottenPassword,
 } from "@/lib/api";
@@ -61,6 +64,15 @@ export default function LoginPage() {
   const [setNewPwd, setSetNewPwd] = useState("");
   const [setConfirmPwd, setSetConfirmPwd] = useState("");
   const [setPasswordLoading, setSetPasswordLoading] = useState(false);
+  const [showPendingEmailVerify, setShowPendingEmailVerify] = useState(false);
+  const [pendingTraineeId, setPendingTraineeId] = useState("");
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [pendingEmailExpiresAt, setPendingEmailExpiresAt] = useState<string | null>(null);
+  const [pendingCode, setPendingCode] = useState("");
+  const [pendingAttemptsRemaining, setPendingAttemptsRemaining] = useState<number>(3);
+  const [pendingAdminResendRequired, setPendingAdminResendRequired] = useState(false);
+  const [pendingVerifyLoading, setPendingVerifyLoading] = useState(false);
+  const [pendingVerifyError, setPendingVerifyError] = useState("");
 
   const GENERIC_LOGIN_ERROR = "Invalid credentials. Please try again.";
 
@@ -131,6 +143,16 @@ export default function LoginPage() {
         }
 
         if (session.role === "trainee" && session.traineeId) {
+          if (session.requiresPendingEmailVerification) {
+            setPendingTraineeId(session.traineeId);
+            setPendingEmail(session.pendingEmail ?? null);
+            setPendingEmailExpiresAt(session.pendingEmailExpiresAt ?? null);
+            setPendingAttemptsRemaining(typeof session.pendingEmailAttemptsRemaining === "number" ? session.pendingEmailAttemptsRemaining : 3);
+            setPendingAdminResendRequired(Boolean(session.pendingEmailAdminResendRequired));
+            setPendingVerifyError("");
+            setShowPendingEmailVerify(true);
+            return;
+          }
           router.replace(`/trainee/${session.traineeId}`);
         }
       } catch {
@@ -191,6 +213,17 @@ export default function LoginPage() {
       if (result.role === "admin") {
         router.replace("/admin/trainee-management");
       } else if (result.traineeId) {
+        if (result.requiresPendingEmailVerification) {
+          setPendingTraineeId(result.traineeId);
+          setPendingEmail(result.pendingEmail ?? null);
+          setPendingEmailExpiresAt(result.pendingEmailExpiresAt ?? null);
+          setPendingAttemptsRemaining(typeof result.pendingEmailAttemptsRemaining === "number" ? result.pendingEmailAttemptsRemaining : 3);
+          setPendingAdminResendRequired(Boolean(result.pendingEmailAdminResendRequired));
+          setPendingCode("");
+          setPendingVerifyError("");
+          setShowPendingEmailVerify(true);
+          return;
+        }
         router.replace(`/trainee/${result.traineeId}`);
       } else {
         router.replace("/login");
@@ -422,6 +455,60 @@ export default function LoginPage() {
     } finally {
       setSetPasswordLoading(false);
     }
+  };
+
+  const handleVerifyPendingEmail = async () => {
+    setPendingVerifyError("");
+    if (!pendingTraineeId) {
+      setPendingVerifyError("Session is missing. Please login again.");
+      return;
+    }
+    if (!pendingCode.trim()) {
+      setPendingVerifyError("Verification code is required.");
+      return;
+    }
+    if (pendingAdminResendRequired) {
+      setPendingVerifyError("Maximum attempts reached. Ask your admin to resend a new verification code.");
+      return;
+    }
+
+    setPendingVerifyLoading(true);
+    try {
+      await verifyPendingEmailChange(pendingTraineeId, pendingCode.trim());
+      setShowPendingEmailVerify(false);
+      setPendingCode("");
+      router.replace(`/trainee/${pendingTraineeId}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to verify email change.";
+      setPendingVerifyError(message);
+
+      const lower = message.toLowerCase();
+      if (lower.includes("maximum verification attempts") || lower.includes("admin to resend")) {
+        setPendingAdminResendRequired(true);
+        setPendingAttemptsRemaining(0);
+      } else {
+        setPendingAttemptsRemaining((prev) => Math.max(0, prev - 1));
+      }
+    } finally {
+      setPendingVerifyLoading(false);
+    }
+  };
+
+  const handlePendingLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // ignore
+    }
+    setShowPendingEmailVerify(false);
+    setPendingCode("");
+    setPendingTraineeId("");
+    setPendingEmail(null);
+    setPendingEmailExpiresAt(null);
+    setPendingAttemptsRemaining(3);
+    setPendingAdminResendRequired(false);
+    setPendingVerifyError("");
+    router.replace("/login");
   };
 
   if (checkingSession) {
@@ -724,7 +811,7 @@ export default function LoginPage() {
                 </>
               )}
 
-              {displayError && !showSignUp && (
+              {displayError && !showSignUp && !showPendingEmailVerify && (
                 <div style={{ padding: "0.7rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginTop: "0.85rem" }}>
                   {displayError}
                 </div>
@@ -764,6 +851,70 @@ export default function LoginPage() {
           </div>
         </div>
       </section>
+
+      {showPendingEmailVerify && (
+        <RightSidebarDrawer onClose={handlePendingLogout} width={470}>
+          <div className="card" style={{ margin: 0 }}>
+            <div className="drawer-form-header" style={{ marginBottom: "0.85rem" }}>
+              <h3 style={{ margin: 0, fontSize: "1.1rem" }}>Verify Updated Email</h3>
+              <p style={{ margin: "0.35rem 0 0", color: "var(--text-muted)", fontSize: "0.84rem" }}>
+                Login is blocked until this account's updated email is verified.
+              </p>
+            </div>
+
+            <div style={{ background: "var(--bg-subtle)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "0.7rem", marginBottom: "0.75rem", fontSize: "0.82rem" }}>
+              <div>Pending Email: <strong>{pendingEmail || "N/A"}</strong></div>
+              {pendingEmailExpiresAt && <div style={{ marginTop: "0.2rem" }}>Expires: <strong>{new Date(pendingEmailExpiresAt).toLocaleString()}</strong></div>}
+              <div style={{ marginTop: "0.2rem" }}>Attempts Remaining: <strong>{pendingAttemptsRemaining}</strong></div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: "0.6rem" }}>
+              <label htmlFor="pendingEmailCode">Verification Code</label>
+              <input
+                id="pendingEmailCode"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={pendingCode}
+                onChange={(e) => setPendingCode(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (!pendingVerifyLoading && !pendingAdminResendRequired) {
+                      handleVerifyPendingEmail();
+                    }
+                  }
+                }}
+                placeholder="000000"
+                style={{ letterSpacing: "0.35em", textAlign: "center", fontWeight: 700 }}
+                disabled={pendingAdminResendRequired}
+              />
+            </div>
+
+            {(pendingVerifyError || pendingAdminResendRequired) && (
+              <div style={{ marginBottom: "0.7rem", padding: "0.55rem 0.7rem", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", background: "var(--danger-light)", color: "var(--danger)", fontSize: "0.82rem" }}>
+                {pendingAdminResendRequired
+                  ? "Maximum attempts reached. Ask your admin to resend a new verification code."
+                  : pendingVerifyError}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}>
+              <button type="button" className="btn btn-outline" onClick={handlePendingLogout}>
+                Logout
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleVerifyPendingEmail}
+                disabled={pendingVerifyLoading || pendingAdminResendRequired}
+              >
+                {pendingVerifyLoading ? "Verifying..." : "Verify & Continue"}
+              </button>
+            </div>
+          </div>
+        </RightSidebarDrawer>
+      )}
 
       <style jsx>{`
         .auth-shell {

@@ -15,6 +15,7 @@ import authRoutes from "./routes/auth.routes";
 import emailRoutes from "./routes/email.routes";
 import settingsRoutes from "./routes/settings.routes";
 import scriptRoutes from "./routes/script.routes";
+import backupRoutes from "./routes/backup.routes";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -43,6 +44,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/email", emailRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/scripts", scriptRoutes);
+app.use("/api/backup", backupRoutes);
 
 // ── Health check ─────────────────────────────────────────────
 app.get("/health", (_req, res) => {
@@ -51,7 +53,7 @@ app.get("/health", (_req, res) => {
 
 // ── Start ────────────────────────────────────────────────────
 const server: Server = app.listen(PORT, () => {
-  console.log(`🚀 Backend running on http://localhost:${PORT}`);
+  console.log(`Backend running on http://localhost:${PORT}`);
 });
 
 function shutdown(signal: string) {

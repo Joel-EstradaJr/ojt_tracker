@@ -1003,29 +1003,13 @@ export default function LogForm({
           </div>
         )}
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
-          <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
-            {loading ? (
-              "Saving\u2026"
-            ) : isEditing ? (
-              <>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                Update Log
-              </>
-            ) : (
-              <>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                Add Log
-              </>
-            )}
-          </button>
-
+        <div style={{ display: "flex", flexDirection: isEditing ? "column" : "row", alignItems: isEditing ? "stretch" : "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
           <div style={{
             display: "flex",
             alignItems: "center",
-            justifyContent: "flex-end",
+            justifyContent: isEditing ? "flex-start" : "flex-end",
             gap: "1rem",
-            marginLeft: "auto",
+            marginLeft: isEditing ? 0 : "auto",
             fontSize: "0.82rem",
             color: "var(--text-muted)",
             flexWrap: "wrap",
@@ -1043,6 +1027,22 @@ export default function LogForm({
               Available Offset: <strong style={{ color: "var(--text)" }}>{formatMinutes(effectiveAvailable)}</strong>
             </span>
           </div>
+
+          <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem", alignSelf: isEditing ? "flex-end" : "auto" }}>
+            {loading ? (
+              "Saving…"
+            ) : isEditing ? (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                Update Log
+              </>
+            ) : (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                Add Log
+              </>
+            )}
+          </button>
         </div>
       </form>
     </div>

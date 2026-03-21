@@ -336,12 +336,35 @@ export interface SessionInfo {
   role?: "admin" | "trainee";
   traineeId?: string | null;
   expiresAt?: number | null;
+  hasPendingEmailChange?: boolean;
+  requiresPendingEmailVerification?: boolean;
+  pendingEmail?: string | null;
+  pendingEmailExpiresAt?: string | null;
+  pendingEmailStatus?: "verified" | "pending" | "expired";
+  pendingEmailVerifyAttempts?: number;
+  pendingEmailAttemptsRemaining?: number;
+  pendingEmailAdminResendRequired?: boolean;
   currentUser?: {
     id?: string | null;
     displayName: string;
     email?: string | null;
     isSuper?: boolean;
   };
+}
+
+export interface LoginResponse {
+  message: string;
+  role: "admin" | "trainee";
+  traineeId?: string | null;
+  mustChangePassword?: boolean;
+  hasPendingEmailChange?: boolean;
+  requiresPendingEmailVerification?: boolean;
+  pendingEmail?: string | null;
+  pendingEmailExpiresAt?: string | null;
+  pendingEmailStatus?: "verified" | "pending" | "expired";
+  pendingEmailVerifyAttempts?: number;
+  pendingEmailAttemptsRemaining?: number;
+  pendingEmailAdminResendRequired?: boolean;
 }
 
 export interface LoginSecurityDetails {
@@ -406,7 +429,7 @@ export async function login(fullName: string, password: string) {
     });
   }
 
-  return res.json() as Promise<{ message: string; role: "admin" | "trainee"; traineeId?: string | null; mustChangePassword?: boolean }>;
+  return res.json() as Promise<LoginResponse>;
 }
 
 export async function requestForgotPasswordCode(fullName: string) {
@@ -489,6 +512,29 @@ export function resendTempPassword(traineeId: string) {
   });
 }
 
+export async function sendPendingEmailVerificationCode(traineeId: string) {
+  const res = await fetch(`/api/trainees/${traineeId}/pending-email/request-code`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+
+  return res.json() as Promise<{ message: string; expiresInHours: number }>;
+}
+
+export function verifyPendingEmailChange(traineeId: string, code: string) {
+  return request<{ message: string; trainee: import("@/types").UserProfile }>(`/api/trainees/${traineeId}/verify-pending-email`, {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+}
+
 // ── Bulk Export / Import (full database) ─────────────────────
 
 export function downloadAllCSV() {
@@ -510,6 +556,79 @@ export async function importAllCSV(file: File) {
   }
 
   return res.json() as Promise<{ trainees: number; supervisors: number; logs: number; skipped: number }>;
+}
+
+export interface BackupImportSummary {
+  imported: number;
+  skipped: number;
+  failed: number;
+}
+
+export interface BackupImportResult {
+  message: string;
+  dryRun: boolean;
+  summary: BackupImportSummary;
+  byTable: Record<string, BackupImportSummary>;
+  failures: Array<{ table: string; reason: string; row: number }>;
+}
+
+export async function verifyBackupSuperPassword(superPasswordHash: string) {
+  return request<{ message: string }>("/api/backup/verify-super", {
+    method: "POST",
+    body: JSON.stringify({ password: superPasswordHash }),
+  });
+}
+
+export async function downloadSystemBackup(superPasswordHash: string) {
+  const res = await fetch(`${BASE}/api/backup/export`, {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      "x-super-password": superPasswordHash,
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get("content-disposition");
+  const filenameMatch = disposition?.match(/filename="?([^\"]+)"?/);
+  const fallback = `${new Date().toISOString().slice(0, 10)}_backup_ojt-tracker.zip`;
+  const filename = filenameMatch?.[1] ?? fallback;
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function importSystemBackup(file: File, superPasswordHash: string, dryRun = false) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("dryRun", dryRun ? "true" : "false");
+
+  const res = await fetch(`${BASE}/api/backup/import`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "x-super-password": superPasswordHash,
+    },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+
+  return res.json() as Promise<BackupImportResult>;
 }
 
 // ── Settings endpoints ────────────────────────────────────────

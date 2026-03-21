@@ -125,3 +125,35 @@ export async function sendTemporaryPassword(to: string, tempPassword: string, di
     html,
   });
 }
+
+/**
+ * Send a 6-digit verification code for activating an updated account email.
+ * This code is valid for 24 hours.
+ */
+export async function sendPendingEmailUpdateCode(to: string, code: string, displayName: string): Promise<void> {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
+      <h2 style="color: #1e293b; margin-bottom: 8px;">OJT Progress Tracker</h2>
+      <p style="color: #475569; font-size: 14px;">Hi <strong>${displayName}</strong>,</p>
+      <p style="color: #475569; font-size: 14px;">
+        Your admin updated your account email. Enter the verification code below to activate your new email address.
+        This code expires in <strong>24 hours</strong>.
+      </p>
+      <div style="text-align: center; margin: 24px 0;">
+        <span style="display: inline-block; font-size: 32px; font-weight: 700; letter-spacing: 8px; padding: 12px 24px; background: #f1f5f9; border-radius: 8px; color: #0f172a;">
+          ${code}
+        </span>
+      </div>
+      <p style="color: #94a3b8; font-size: 12px;">
+        If this request was unexpected, contact your administrator.
+      </p>
+    </div>
+  `;
+
+  await transporter.sendMail({
+    from: `"OJT Progress Tracker" <${process.env.SMTP_EMAIL}>`,
+    to,
+    subject: "Verify Your Updated Email — OJT Progress Tracker",
+    html,
+  });
+}

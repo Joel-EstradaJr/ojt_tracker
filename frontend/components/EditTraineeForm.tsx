@@ -5,7 +5,7 @@
 // ============================================================
 
 import { useState, useEffect, useCallback } from "react";
-import { updateTrainee, fetchSupervisors, createSupervisor, updateSupervisor, deleteSupervisor, sendEmailVerification, verifyEmailCode, resendTempPassword } from "@/lib/api";
+import { updateTrainee, fetchSupervisors, createSupervisor, updateSupervisor, deleteSupervisor, resendTempPassword, sendPendingEmailVerificationCode } from "@/lib/api";
 import { useActionGuard } from "@/lib/useActionGuard";
 import { Trainee, Supervisor, SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
@@ -107,13 +107,12 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
   const [newSupervisors, setNewSupervisors] = useState<SupervisorInput[]>([]);
 
   const originalEmail = trainee.email;
-  const [emailVerified, setEmailVerified] = useState(false);
-  const [verificationToken, setVerificationToken] = useState("");
-  const [emailCode, setEmailCode] = useState("");
-  const [emailCodeSent, setEmailCodeSent] = useState(false);
-  const [emailSending, setEmailSending] = useState(false);
-  const [emailMsg, setEmailMsg] = useState("");
   const emailChanged = email !== originalEmail;
+  const emailStatusLabel = trainee.emailVerificationStatus === "pending"
+    ? "Pending Email Verification"
+    : trainee.emailVerificationStatus === "expired"
+      ? "Verification Expired"
+      : "Verified";
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -122,10 +121,13 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
   const [pendingChanges, setPendingChanges] = useState<FieldChange[]>([]);
   const [showConfirm, setShowConfirm] = useState(false);
   const [saveResult, setSaveResult] = useState<"success" | "cancelled" | null>(null);
+  const [saveResultMessage, setSaveResultMessage] = useState<string | null>(null);
 
   // Resend temp password
   const [resendLoading, setResendLoading] = useState(false);
   const [resendMsg, setResendMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [pendingCodeLoading, setPendingCodeLoading] = useState(false);
+  const pendingEmailExists = Boolean(trainee.pendingEmail && !trainee.mustChangePassword);
 
   const loadSupervisors = useCallback(async () => {
     try {
@@ -155,27 +157,6 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
 
   const handleEmailChange = (val: string) => {
     setEmail(val);
-    if (emailVerified || emailCodeSent) { setEmailVerified(false); setVerificationToken(""); setEmailCode(""); setEmailCodeSent(false); setEmailMsg(""); }
-  };
-  const handleSendVerification = async () => {
-    await runGuarded("edit-email-send", async () => {
-      setError(""); setEmailMsg("");
-      if (!email || !isValidEmail(email)) { setError("Please enter a valid email address first."); return; }
-      setEmailSending(true);
-      try { await sendEmailVerification(email); setEmailCodeSent(true); setEmailMsg("Verification code sent! Check your inbox."); }
-      catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to send verification code."); }
-      finally { setEmailSending(false); }
-    });
-  };
-  const handleVerifyEmailCode = async () => {
-    await runGuarded("edit-email-verify", async () => {
-      setError(""); setEmailMsg("");
-      if (emailCode.length !== 6) { setError("Please enter the 6-digit verification code."); return; }
-      setEmailSending(true);
-      try { const res = await verifyEmailCode(email, emailCode); setVerificationToken(res.verificationToken); setEmailVerified(true); setEmailMsg("Email verified!"); }
-      catch (err: unknown) { setError(err instanceof Error ? err.message : "Invalid or expired code."); }
-      finally { setEmailSending(false); }
-    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -185,7 +166,6 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
     const fnErr = validateName("First name", firstName, true); if (fnErr) { setError(fnErr); return; }
     const mnErr = validateName("Middle name", middleName, false); if (mnErr) { setError(mnErr); return; }
     if (!isValidEmail(email)) { setError("Please enter a valid email address (e.g. name@example.com)."); return; }
-    if (emailChanged && !emailVerified) { setError("Please verify the new email address before saving."); return; }
     if (!phoneCharsOnly(contactNumber)) { setError("Contact number must contain only digits, +, -, (, ), and spaces."); return; }
     if (!isValidPhone(contactNumber)) { setError("Contact number must have at least 7 digits."); return; }
     if (isTraineeRole) {
@@ -288,13 +268,33 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
           companyName,
           requiredHours: Number(requiredHours),
           workSchedule: Object.keys(workSchedule).length > 0 ? workSchedule : undefined,
-          ...(emailChanged ? { verificationToken } : {}),
         });
+
+        let postSaveNotice: string | null = null;
+        if (emailChanged) {
+          if (trainee.mustChangePassword) {
+            try {
+              const tempRes = await resendTempPassword(trainee.id);
+              postSaveNotice = `Email updated and temporary password resent. ${tempRes.message}`;
+            } catch {
+              postSaveNotice = "Email updated, but failed to resend temporary password automatically. Please click Resend Temp Password.";
+            }
+          } else {
+            try {
+              const verifyRes = await sendPendingEmailVerificationCode(trainee.id);
+              postSaveNotice = `Email update is pending verification. ${verifyRes.message}`;
+            } catch {
+              postSaveNotice = "Email update is pending, but failed to send verification code. Use Resend Verification Code.";
+            }
+          }
+        }
+
         if (isTraineeRole) {
           for (const id of deletedIds) { await deleteSupervisor(id); }
           for (const sup of existingSupervisors) { if (deletedIds.has(sup.id)) continue; await updateSupervisor(sup.id, editedSupervisors[sup.id]); }
           for (const s of newSupervisors) { await createSupervisor(trainee.id, s); }
         }
+        setSaveResultMessage(postSaveNotice);
         setSaveResult("success");
       } catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to update trainee."); }
       finally { setLoading(false); }
@@ -312,6 +312,21 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
         setResendMsg({ type: "error", text: err instanceof Error ? err.message : "Failed to resend." });
       } finally {
         setResendLoading(false);
+      }
+    });
+  };
+
+  const handleResendPendingEmailCode = async () => {
+    await runGuarded("edit-resend-pending-email-code", async () => {
+      setPendingCodeLoading(true);
+      setResendMsg(null);
+      try {
+        const res = await sendPendingEmailVerificationCode(trainee.id);
+        setResendMsg({ type: "success", text: res.message });
+      } catch (err: unknown) {
+        setResendMsg({ type: "error", text: err instanceof Error ? err.message : "Failed to resend verification code." });
+      } finally {
+        setPendingCodeLoading(false);
       }
     });
   };
@@ -398,7 +413,9 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
               <div>
                 <h2 style={{ fontSize: "1.15rem", color: saveResult === "success" ? "var(--success-text)" : "var(--text-muted)" }}>{saveResult === "success" ? "Changes Saved" : "Edit Cancelled"}</h2>
                 <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                  {saveResult === "success" ? `All changes to ${trainee.displayName} saved.` : "No changes were saved. You can continue editing."}
+                  {saveResult === "success"
+                    ? (saveResultMessage || `All changes to ${trainee.displayName} saved.`)
+                    : "No changes were saved. You can continue editing."}
                 </p>
               </div>
             </div>
@@ -466,23 +483,39 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
               <div className="form-group">
-                <label>Email * {emailChanged && emailVerified && <span style={{ color: "var(--success-text)", fontSize: "0.8rem" }}>{"\u2713"} Verified</span>}</label>
-                <div style={{ display: "flex", gap: "0.35rem" }}>
-                  <input type="email" value={email} onChange={(e) => handleEmailChange(e.target.value)} style={{ flex: 1, ...(emailChanged && emailVerified ? { borderColor: "var(--success)" } : {}) }} disabled={emailChanged && emailVerified} />
-                  {emailChanged && !emailVerified && (
-                    <button type="button" className="btn btn-outline" style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }} onClick={handleSendVerification} disabled={emailSending}>{emailSending ? "Sending\u2026" : emailCodeSent ? "Resend" : "Verify"}</button>
-                  )}
-                  {emailChanged && emailVerified && (
-                    <button type="button" className="btn btn-outline" style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }} onClick={() => handleEmailChange(email)}>Change</button>
-                  )}
-                </div>
-                {emailChanged && emailCodeSent && !emailVerified && (
-                  <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.35rem" }}>
-                    <input type="text" inputMode="numeric" maxLength={6} value={emailCode} onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ""))} placeholder="6-digit code" style={{ flex: 1, letterSpacing: "0.3em", textAlign: "center", fontSize: "1rem" }} />
-                    <button type="button" className="btn btn-primary" style={{ fontSize: "0.78rem", padding: "0.3rem 0.6rem", whiteSpace: "nowrap" }} onClick={handleVerifyEmailCode} disabled={emailSending}>{emailSending ? "Verifying\u2026" : "Confirm"}</button>
+                <label>Email *</label>
+                <input type="email" value={email} onChange={(e) => handleEmailChange(e.target.value)} />
+                <span style={{ fontSize: "0.76rem", marginTop: "0.25rem", color: "var(--text-muted)", display: "block" }}>
+                  Current status: {emailStatusLabel}
+                </span>
+                {pendingEmailExists && (
+                  <div style={{ marginTop: "0.35rem", padding: "0.45rem 0.55rem", borderRadius: "var(--radius-xs)", border: "1px solid var(--warning)", background: "var(--warning-light)" }}>
+                    <div style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}>
+                      Pending email: <strong>{trainee.pendingEmail}</strong>
+                    </div>
+                    {trainee.pendingEmailExpiresAt && (
+                      <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", marginTop: "0.15rem" }}>
+                        Expires: {new Date(trainee.pendingEmailExpiresAt).toLocaleString()}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      style={{ marginTop: "0.45rem", fontSize: "0.76rem", padding: "0.28rem 0.55rem" }}
+                      onClick={handleResendPendingEmailCode}
+                      disabled={pendingCodeLoading}
+                    >
+                      {pendingCodeLoading ? "Sending…" : "Resend Verification Code"}
+                    </button>
                   </div>
                 )}
-                {emailMsg && <span style={{ fontSize: "0.78rem", marginTop: "0.25rem", color: emailVerified ? "var(--success-text)" : "var(--primary)" }}>{emailMsg}</span>}
+                {emailChanged && (
+                  <span style={{ fontSize: "0.78rem", marginTop: "0.25rem", color: "var(--text-muted)" }}>
+                    {trainee.mustChangePassword
+                      ? "This account is not activated yet, so this email correction will apply immediately."
+                      : "This change will stay pending until the trainee verifies the code sent to the new email (24-hour expiry)."}
+                  </span>
+                )}
               </div>
               <div className="form-group"><label>Contact Number *</label><input value={contactNumber} onChange={(e) => setContactNumber(sanitizeInput(e.target.value))} /></div>
             </div>

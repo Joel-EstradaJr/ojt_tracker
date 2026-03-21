@@ -11,6 +11,10 @@ export interface UserProfile {
   middleName?: string | null;
   suffix?: string | null;
   email: string;
+  pendingEmail?: string | null;
+  pendingEmailRequestedAt?: string | null;
+  pendingEmailExpiresAt?: string | null;
+  emailVerificationStatus?: "verified" | "pending" | "expired";
   contactNumber: string;
   school: string;
   companyName: string;

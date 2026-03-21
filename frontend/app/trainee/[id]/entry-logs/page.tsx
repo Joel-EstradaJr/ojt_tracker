@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { deleteLog, downloadExport, patchLogAction } from "@/lib/api";
+import { deleteLog, patchLogAction } from "@/lib/api";
 import ImportCSV from "@/components/ImportCSV";
+import ExportFormatButton from "@/components/ExportFormatButton";
 import LogForm from "@/components/LogForm";
 import DatePicker from "@/components/DatePicker";
 import TimePicker from "@/components/TimePicker";
@@ -16,6 +17,7 @@ import { useTraineePageData } from "../components/useTraineePageData";
 import { formatMinutes } from "@/lib/duration";
 import { useActionGuard } from "@/lib/useActionGuard";
 import { formatDisplayDate } from "@/lib/date";
+import { exportElementToPdf, exportRowsAsCSV, exportRowsAsExcel } from "@/lib/export-utils";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -42,10 +44,10 @@ export default function TraineeEntryLogsPage() {
   const [offsetLog, setOffsetLog] = useState<LogEntry | null>(null);
   const [offsetMinutes, setOffsetMinutes] = useState("");
   const [offsetLoading, setOffsetLoading] = useState(false);
-  const [exportLoading, setExportLoading] = useState<"csv" | "excel" | null>(null);
-  const [showExportPicker, setShowExportPicker] = useState(false);
+  const [exportLoading, setExportLoading] = useState<"csv" | "excel" | "pdf" | null>(null);
   const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [filterError, setFilterError] = useState("");
+  const exportRootRef = useRef<HTMLDivElement>(null);
 
   const [query, setQuery] = useState("");
   const [sortField, setSortField] = useState<"date" | "timeIn" | "timeOut" | "lunchStart" | "lunchEnd" | "hoursWorked" | "overtime" | "offsetUsed" | "accomplishment">("date");
@@ -525,11 +527,47 @@ export default function TraineeEntryLogsPage() {
     });
   };
 
-  const handleExport = async (format: "csv" | "excel") => {
+  const handleExport = async (format: "csv" | "excel" | "pdf") => {
     await runGuarded(`trainee-export-${format}`, async () => {
       setExportLoading(format);
       try {
-        await downloadExport(id, format);
+        if (format === "pdf") {
+          if (!exportRootRef.current) throw new Error("Could not export page preview.");
+          await exportElementToPdf({
+            element: exportRootRef.current,
+            fileNameBase: `entry_logs_${id}`,
+            orientation: "landscape",
+          });
+        } else {
+          const timeFmt = (iso: string) =>
+            new Date(iso).toLocaleTimeString("en-PH", {
+              timeZone: "Asia/Manila",
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+
+          const rows = filtered.map((log) => {
+            const lunchStartIsPlaceholder = new Date(log.lunchStart).getTime() === new Date(log.timeIn).getTime();
+            const lunchEndIsPlaceholder = new Date(log.lunchEnd).getTime() === new Date(log.timeIn).getTime();
+            return {
+              "Date": formatDisplayDate(log.date),
+              "Time In": timeFmt(log.timeIn),
+              "Lunch Start": lunchStartIsPlaceholder ? "-" : timeFmt(log.lunchStart),
+              "Lunch End": lunchEndIsPlaceholder ? "-" : timeFmt(log.lunchEnd),
+              "Time Out": log.timeOut ? timeFmt(log.timeOut) : "-",
+              "Hours Worked": log.timeOut ? formatMinutes(log.hoursWorked) : "-",
+              "Overtime": log.timeOut ? formatMinutes(log.overtime) : "-",
+              "Offset Used": log.offsetUsed > 0 ? formatMinutes(log.offsetUsed) : "-",
+              "Accomplishment": log.accomplishment || "",
+            };
+          });
+
+          if (format === "csv") {
+            exportRowsAsCSV(`entry_logs_${id}`, rows, ["Date", "Time In", "Lunch Start", "Lunch End", "Time Out", "Hours Worked", "Overtime", "Offset Used", "Accomplishment"]);
+          } else {
+            await exportRowsAsExcel(`entry_logs_${id}`, rows, "Entry Logs");
+          }
+        }
       } finally {
         setExportLoading(null);
       }
@@ -575,7 +613,7 @@ export default function TraineeEntryLogsPage() {
   );
 
   return (
-    <div className="container">
+    <div className="container" ref={exportRootRef}>
       {viewerRole === "admin" && (
         <div style={{ marginBottom: "0.75rem" }}>
           <button className="btn btn-outline" onClick={() => router.push("/admin/trainee-management")} style={{ gap: "0.35rem" }}>
@@ -595,11 +633,12 @@ export default function TraineeEntryLogsPage() {
         )}
         toolbar={(
           <>
-            <button className="btn btn-outline" onClick={() => setShowExportPicker(true)} disabled={exportLoading !== null} style={{ gap: "0.35rem" }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-              <span>{exportLoading ? `Exporting ${exportLoading.toUpperCase()}...` : "Export"}</span>
-              <span style={{ fontSize: "0.7rem", opacity: 0.8 }}>▾</span>
-            </button>
+            <ExportFormatButton
+              loadingFormat={exportLoading}
+              title="Export Records"
+              description="Choose the export format for your own records."
+              onSelect={handleExport}
+            />
             <ImportCSV traineeId={id} onImported={loadData} />
           </>
         )}
@@ -649,38 +688,6 @@ export default function TraineeEntryLogsPage() {
           </div>
         )}
       </div>
-
-      {showExportPicker && (
-        <div className="modal-overlay" onClick={() => exportLoading === null && setShowExportPicker(false)}>
-          <div className="modal-content" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Export Records</h2>
-            <p style={{ fontSize: "0.84rem", color: "var(--text-muted)", marginBottom: "0.9rem" }}>
-              Choose the export format for your own records.
-            </p>
-            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.9rem" }}>
-              <button
-                className="btn btn-outline"
-                style={{ flex: 1 }}
-                onClick={() => { handleExport("csv"); setShowExportPicker(false); }}
-                disabled={exportLoading !== null}
-              >
-                CSV
-              </button>
-              <button
-                className="btn btn-outline"
-                style={{ flex: 1 }}
-                onClick={() => { handleExport("excel"); setShowExportPicker(false); }}
-                disabled={exportLoading !== null}
-              >
-                EXCEL
-              </button>
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="btn btn-outline" onClick={() => setShowExportPicker(false)} disabled={exportLoading !== null}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <LogForm
         traineeId={id}

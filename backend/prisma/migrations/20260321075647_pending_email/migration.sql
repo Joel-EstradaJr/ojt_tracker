@@ -7,10 +7,16 @@ CREATE TYPE "UserRole" AS ENUM ('ADMIN', 'TRAINEE');
 -- CreateEnum
 CREATE TYPE "OvertimeType" AS ENUM ('EARNED', 'USED', 'ADJUSTED');
 
+-- CreateEnum
+CREATE TYPE "EmailVerificationPurpose" AS ENUM ('GENERAL', 'EMAIL_UPDATE');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "email" TEXT NOT NULL,
+    "pendingEmail" TEXT,
+    "pendingEmailRequestedAt" TIMESTAMP(3),
+    "pendingEmailExpiresAt" TIMESTAMP(3),
     "role" "UserRole" NOT NULL DEFAULT 'TRAINEE',
     "passwordHash" TEXT NOT NULL,
     "mustChangePassword" BOOLEAN NOT NULL DEFAULT false,
@@ -23,7 +29,7 @@ CREATE TABLE "User" (
 );
 
 -- CreateTable
-CREATE TABLE "Trainee" (
+CREATE TABLE "UserProfile" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "lastName" TEXT NOT NULL,
@@ -37,7 +43,7 @@ CREATE TABLE "Trainee" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "Trainee_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "UserProfile_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -136,6 +142,8 @@ CREATE TABLE "PasswordResetCode" (
 CREATE TABLE "EmailVerificationCode" (
     "id" TEXT NOT NULL,
     "email" TEXT NOT NULL,
+    "purpose" "EmailVerificationPurpose" NOT NULL DEFAULT 'GENERAL',
+    "userId" TEXT,
     "code" TEXT NOT NULL,
     "expiresAt" TIMESTAMP(3) NOT NULL,
     "used" BOOLEAN NOT NULL DEFAULT false,
@@ -183,10 +191,10 @@ CREATE TABLE "SystemSettings" (
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Trainee_userId_key" ON "Trainee"("userId");
+CREATE UNIQUE INDEX "UserProfile_userId_key" ON "UserProfile"("userId");
 
 -- CreateIndex
-CREATE INDEX "Trainee_companyId_idx" ON "Trainee"("companyId");
+CREATE INDEX "UserProfile_companyId_idx" ON "UserProfile"("companyId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Company_name_key" ON "Company"("name");
@@ -240,6 +248,12 @@ CREATE INDEX "PasswordResetCode_userId_idx" ON "PasswordResetCode"("userId");
 CREATE INDEX "EmailVerificationCode_email_idx" ON "EmailVerificationCode"("email");
 
 -- CreateIndex
+CREATE INDEX "EmailVerificationCode_email_purpose_idx" ON "EmailVerificationCode"("email", "purpose");
+
+-- CreateIndex
+CREATE INDEX "EmailVerificationCode_userId_purpose_idx" ON "EmailVerificationCode"("userId", "purpose");
+
+-- CreateIndex
 CREATE INDEX "PasswordHistory_userId_idx" ON "PasswordHistory"("userId");
 
 -- CreateIndex
@@ -258,31 +272,34 @@ CREATE INDEX "AuditLog_performedById_idx" ON "AuditLog"("performedById");
 CREATE INDEX "AuditLog_createdAt_idx" ON "AuditLog"("createdAt");
 
 -- AddForeignKey
-ALTER TABLE "Trainee" ADD CONSTRAINT "Trainee_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "UserProfile" ADD CONSTRAINT "UserProfile_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Trainee" ADD CONSTRAINT "Trainee_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "UserProfile" ADD CONSTRAINT "UserProfile_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "WorkScheduleEntry" ADD CONSTRAINT "WorkScheduleEntry_traineeId_fkey" FOREIGN KEY ("traineeId") REFERENCES "Trainee"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "WorkScheduleEntry" ADD CONSTRAINT "WorkScheduleEntry_traineeId_fkey" FOREIGN KEY ("traineeId") REFERENCES "UserProfile"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Supervisor" ADD CONSTRAINT "Supervisor_traineeId_fkey" FOREIGN KEY ("traineeId") REFERENCES "Trainee"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Supervisor" ADD CONSTRAINT "Supervisor_traineeId_fkey" FOREIGN KEY ("traineeId") REFERENCES "UserProfile"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "LogEntry" ADD CONSTRAINT "LogEntry_traineeId_fkey" FOREIGN KEY ("traineeId") REFERENCES "Trainee"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "LogEntry" ADD CONSTRAINT "LogEntry_traineeId_fkey" FOREIGN KEY ("traineeId") REFERENCES "UserProfile"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "AccomplishmentScript" ADD CONSTRAINT "AccomplishmentScript_traineeId_fkey" FOREIGN KEY ("traineeId") REFERENCES "Trainee"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "AccomplishmentScript" ADD CONSTRAINT "AccomplishmentScript_traineeId_fkey" FOREIGN KEY ("traineeId") REFERENCES "UserProfile"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "OvertimeLedger" ADD CONSTRAINT "OvertimeLedger_traineeId_fkey" FOREIGN KEY ("traineeId") REFERENCES "Trainee"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "OvertimeLedger" ADD CONSTRAINT "OvertimeLedger_traineeId_fkey" FOREIGN KEY ("traineeId") REFERENCES "UserProfile"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "OvertimeLedger" ADD CONSTRAINT "OvertimeLedger_sourceLogId_fkey" FOREIGN KEY ("sourceLogId") REFERENCES "LogEntry"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PasswordResetCode" ADD CONSTRAINT "PasswordResetCode_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "EmailVerificationCode" ADD CONSTRAINT "EmailVerificationCode_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PasswordHistory" ADD CONSTRAINT "PasswordHistory_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

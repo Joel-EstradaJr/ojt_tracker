@@ -31,6 +31,11 @@ enum OvertimeType {
   ADJUSTED // lets admins manually fix balances later
 }
 
+enum EmailVerificationPurpose {
+  GENERAL
+  EMAIL_UPDATE
+}
+
 // ── User ──────────────────────────────────────────────────────
 // Owns authentication state for BOTH admins and trainees.
 // Separating auth from profile lets admins exist without a
@@ -38,6 +43,11 @@ enum OvertimeType {
 model User {
   id                  String    @id @default(uuid())
   email               String    @unique
+  pendingEmail        String?
+  pendingEmailRequestedAt DateTime?
+  pendingEmailExpiresAt DateTime?
+  pendingEmailVerifyAttempts Int @default(0)
+  pendingEmailAdminResendRequired Boolean @default(false)
   role                UserRole  @default(TRAINEE)
   passwordHash        String
   mustChangePassword  Boolean   @default(false)
@@ -49,6 +59,7 @@ model User {
   // Relations
   trainee            UserProfile?
   resetCodes         PasswordResetCode[]
+  emailVerificationCodes EmailVerificationCode[]
   passwordHistory    PasswordHistory[]
   auditLogsPerformed AuditLog[]
 }
@@ -221,12 +232,18 @@ model PasswordResetCode {
 model EmailVerificationCode {
   id        String   @id @default(uuid())
   email     String
+  purpose   EmailVerificationPurpose @default(GENERAL)
+  userId    String?
   code      String
   expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
 
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([email])
+  @@index([email, purpose])
+  @@index([userId, purpose])
 }
 
 // ── PasswordHistory ───────────────────────────────────────────

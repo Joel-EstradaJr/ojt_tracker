@@ -80,6 +80,11 @@ export function useTraineePageData() {
             return;
           }
 
+          if (session.requiresPendingEmailVerification) {
+            router.replace("/login");
+            return;
+          }
+
           if (session.traineeId !== id) {
             router.replace(`/trainee/${session.traineeId}/dashboard`);
             return;
@@ -100,6 +105,17 @@ export function useTraineePageData() {
       if (expiryTimer) clearTimeout(expiryTimer);
     };
   }, [id, loadData, router, scheduleAutoLock]);
+
+  useEffect(() => {
+    const onBackupImportComplete = () => {
+      void loadData();
+    };
+
+    window.addEventListener("backup-import-complete", onBackupImportComplete);
+    return () => {
+      window.removeEventListener("backup-import-complete", onBackupImportComplete);
+    };
+  }, [loadData]);
 
   const handleLogout = useCallback(async () => {
     try {

@@ -5,7 +5,7 @@ import jwt from "jsonwebtoken";
 import { UserRole } from "@prisma/client";
 import prisma from "../utils/prisma";
 import { sendResetCode } from "../utils/email";
-import { AuthPayload, clearSessionCookie, setSessionCookie } from "../middleware/auth";
+import { AuthPayload, clearSessionCookie, requireAdmin, requireAuth, setSessionCookie } from "../middleware/auth";
 
 const router = Router();
 const ACCOUNT_LOCK_THRESHOLD = 15;
@@ -52,6 +52,44 @@ function roleToPayloadRole(role: UserRole): "admin" | "trainee" {
   return role === UserRole.ADMIN ? "admin" : "trainee";
 }
 
+function getPendingEmailVerificationState(user: {
+  pendingEmail?: string | null;
+  pendingEmailExpiresAt?: Date | null;
+  pendingEmailVerifyAttempts?: number;
+  pendingEmailAdminResendRequired?: boolean;
+}) {
+  const pendingEmail = user.pendingEmail ?? null;
+  const pendingEmailExpiresAt = user.pendingEmailExpiresAt ?? null;
+  const pendingEmailVerifyAttempts = user.pendingEmailVerifyAttempts ?? 0;
+  const pendingEmailAdminResendRequired = Boolean(user.pendingEmailAdminResendRequired);
+
+  if (!pendingEmail) {
+    return {
+      hasPendingEmailChange: false,
+      requiresPendingEmailVerification: false,
+      pendingEmail,
+      pendingEmailExpiresAt,
+      pendingEmailVerifyAttempts: 0,
+      pendingEmailAttemptsRemaining: 3,
+      pendingEmailAdminResendRequired: false,
+      pendingEmailStatus: "verified" as const,
+    };
+  }
+
+  const isPendingWindow = !!pendingEmailExpiresAt && pendingEmailExpiresAt.getTime() > Date.now();
+  const isPending = isPendingWindow && !pendingEmailAdminResendRequired;
+  return {
+    hasPendingEmailChange: true,
+    requiresPendingEmailVerification: isPending,
+    pendingEmail,
+    pendingEmailExpiresAt,
+    pendingEmailVerifyAttempts,
+    pendingEmailAttemptsRemaining: Math.max(0, 3 - pendingEmailVerifyAttempts),
+    pendingEmailAdminResendRequired,
+    pendingEmailStatus: (isPendingWindow ? "pending" : "expired") as "pending" | "expired",
+  };
+}
+
 async function findTraineeByFullName(fullName: string) {
   const normalizedLookupName = normalizeName(fullName);
   const trainees = await prisma.userProfile.findMany({
@@ -60,6 +98,10 @@ async function findTraineeByFullName(fullName: string) {
         select: {
           id: true,
           email: true,
+          pendingEmail: true,
+          pendingEmailExpiresAt: true,
+          pendingEmailVerifyAttempts: true,
+          pendingEmailAdminResendRequired: true,
           role: true,
           passwordHash: true,
           mustChangePassword: true,
@@ -200,6 +242,7 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     const role = roleToPayloadRole(user.role);
+    const pendingState = getPendingEmailVerificationState(user);
 
     if (user.mustChangePassword) {
       return res.json({
@@ -207,11 +250,12 @@ router.post("/login", async (req: Request, res: Response) => {
         mustChangePassword: true,
         role,
         traineeId: trainee.id,
+        ...pendingState,
       });
     }
 
     setSessionCookie(res, { role, traineeId: trainee.id });
-    return res.json({ message: "Logged in.", role, traineeId: trainee.id });
+    return res.json({ message: "Logged in.", role, traineeId: trainee.id, ...pendingState });
   } catch (err) {
     console.error("login error:", err);
     return res.status(500).json({ error: "Internal server error." });
@@ -396,7 +440,19 @@ router.get("/me", async (req: Request, res: Response) => {
     if (payload.traineeId) {
       const trainee = await prisma.userProfile.findUnique({
         where: { id: payload.traineeId },
-        include: { user: { select: { id: true, role: true, email: true } } },
+        include: {
+          user: {
+            select: {
+              id: true,
+              role: true,
+              email: true,
+              pendingEmail: true,
+              pendingEmailExpiresAt: true,
+              pendingEmailVerifyAttempts: true,
+              pendingEmailAdminResendRequired: true,
+            },
+          },
+        },
       });
 
       if (!trainee?.user || roleToPayloadRole(trainee.user.role) !== payload.role) {
@@ -409,6 +465,7 @@ router.get("/me", async (req: Request, res: Response) => {
         role: payload.role,
         traineeId: trainee.id,
         expiresAt: raw.exp ? raw.exp * 1000 : null,
+        ...getPendingEmailVerificationState(trainee.user),
         currentUser: {
           id: trainee.id,
           displayName: buildFullName(trainee),
@@ -440,7 +497,7 @@ router.get("/me", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/verify-super", (req: Request, res: Response) => {
+router.post("/verify-super", requireAuth, requireAdmin, (req: Request, res: Response) => {
   const { password } = req.body;
   if (!password) return res.status(400).json({ error: "Password is required." });
 
