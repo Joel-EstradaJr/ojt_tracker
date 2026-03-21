@@ -6,7 +6,7 @@
 // • Trainee: sequential button flow (Time In → Lunch Start → Lunch End → Time Out)
 // ============================================================
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   createLog,
   updateLog,
@@ -38,6 +38,8 @@ interface Props {
   viewerRole?: "admin" | "trainee" | null;
   /** All logs for today detection */
   logs?: LogEntry[];
+  /** Work schedule by day index (0=Sun ... 6=Sat) */
+  workSchedule?: Record<string, { start: string; end: string }>;
 }
 
 /** Extract HH:mm from an ISO date string in local TZ */
@@ -92,11 +94,31 @@ const ACTION_ICONS: Record<ActionStep, string> = {
   done: "✅",
 };
 
-const STANDARD_MINUTES = 8 * 60;
+const DEFAULT_REQUIRED_MINUTES = 8 * 60;
+const DEFAULT_LUNCH_MINUTES = 60;
+
+function hhmmToMinutes(value: string): number {
+  const [h, m] = value.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
+  return (h * 60) + m;
+}
+
+function getRequiredMinutesForDate(
+  dateValue: string,
+  schedule?: Record<string, { start: string; end: string }>,
+): number {
+  if (!dateValue) return DEFAULT_REQUIRED_MINUTES;
+  const dayOfWeek = new Date(`${dateValue}T00:00:00`).getDay();
+  const daySchedule = schedule?.[String(dayOfWeek)];
+  if (!daySchedule) return DEFAULT_REQUIRED_MINUTES;
+
+  const scheduledMinutes = hhmmToMinutes(daySchedule.end) - hhmmToMinutes(daySchedule.start);
+  return Math.max(0, scheduledMinutes - DEFAULT_LUNCH_MINUTES);
+}
 
 export default function LogForm({
   traineeId, traineeDisplayName, onCreated, editingLog, onCancelEdit,
-  availableOffset: parentOffset, viewerRole, logs,
+  availableOffset: parentOffset, viewerRole, logs, workSchedule,
 }: Props) {
   const { runGuarded } = useActionGuard();
   const today = new Date().toISOString().slice(0, 10);
@@ -186,32 +208,79 @@ export default function LogForm({
     }
   }, [showAccomplishmentModal]);
 
-  // Compute preview hours (admin form)
-  const previewHours = (() => {
-    if (!timeIn || !timeOut || !date) return null;
-    try {
-      const tIn = new Date(`${date}T${timeIn}:00`).getTime();
-      const tOut = new Date(`${date}T${timeOut}:00`).getTime();
-      const hasLunchWindow = !noLunch && Boolean(lunchStart) && Boolean(lunchEnd);
-      const lS = hasLunchWindow ? new Date(`${date}T${lunchStart}:00`).getTime() : tIn;
-      const lE = hasLunchWindow ? new Date(`${date}T${lunchEnd}:00`).getTime() : tIn;
-      const lunchDeduction = hasLunchWindow ? Math.max(0, (lE - lS) / 60000) : 0;
-      const mins = (tOut - tIn) / 60000 - lunchDeduction;
-      if (mins < 0) return null;
-      const hw = Math.floor(mins);
-      const ot = Math.max(0, hw - STANDARD_MINUTES);
-      return { hoursWorked: hw, overtime: ot };
-    } catch { return null; }
-  })();
+  const isEditing = !!editingLog;
+  const effectiveAvailable = isEditing && editingLog
+    ? Math.max(0, Math.floor(availableOffset + editingLog.offsetUsed))
+    : availableOffset;
 
-  const offsetBlockedByOvertime = Boolean(previewHours && previewHours.overtime > 0);
+  const realtime = useMemo(() => {
+    const requiredMinutes = getRequiredMinutesForDate(date, workSchedule);
+
+    if (!timeIn || !timeOut || !date) {
+      return {
+        requiredMinutes,
+        actualLunchMinutes: noLunch ? 0 : DEFAULT_LUNCH_MINUTES,
+        workedMinutes: 0,
+        overtimeMinutes: 0,
+        missingMinutes: requiredMinutes,
+        maxOffsetMinutes: Math.max(0, Math.min(requiredMinutes, effectiveAvailable)),
+      };
+    }
+
+    const tIn = new Date(`${date}T${timeIn}:00`).getTime();
+    const tOut = new Date(`${date}T${timeOut}:00`).getTime();
+    if (Number.isNaN(tIn) || Number.isNaN(tOut) || tOut <= tIn) {
+      return {
+        requiredMinutes,
+        actualLunchMinutes: 0,
+        workedMinutes: 0,
+        overtimeMinutes: 0,
+        missingMinutes: requiredMinutes,
+        maxOffsetMinutes: Math.max(0, Math.min(requiredMinutes, effectiveAvailable)),
+      };
+    }
+
+    let actualLunchMinutes = DEFAULT_LUNCH_MINUTES;
+    if (noLunch) {
+      actualLunchMinutes = 0;
+    } else if (lunchStart && lunchEnd) {
+      const lS = new Date(`${date}T${lunchStart}:00`).getTime();
+      const lE = new Date(`${date}T${lunchEnd}:00`).getTime();
+      if (!Number.isNaN(lS) && !Number.isNaN(lE)) {
+        actualLunchMinutes = Math.max(0, Math.round((lE - lS) / 60000));
+      }
+    }
+
+    const workedMinutes = Math.max(0, Math.floor((tOut - tIn) / 60000) - actualLunchMinutes);
+    const overtimeMinutes = Math.max(0, workedMinutes - requiredMinutes);
+    const missingMinutes = Math.max(0, requiredMinutes - workedMinutes);
+    const maxOffsetMinutes = Math.max(0, Math.min(missingMinutes, effectiveAvailable));
+
+    return {
+      requiredMinutes,
+      actualLunchMinutes,
+      workedMinutes,
+      overtimeMinutes,
+      missingMinutes,
+      maxOffsetMinutes,
+    };
+  }, [date, workSchedule, timeIn, timeOut, noLunch, lunchStart, lunchEnd, effectiveAvailable]);
+
+  const offsetBlockedByOvertime = realtime.overtimeMinutes > 0;
 
   useEffect(() => {
     if (offsetBlockedByOvertime && applyOffset) {
       setApplyOffset(false);
       setOffsetAmount("");
+      return;
     }
-  }, [offsetBlockedByOvertime, applyOffset]);
+
+    if (!applyOffset) return;
+    const parsed = Math.max(0, Math.floor(Number(offsetAmount) || 0));
+    if (parsed > realtime.maxOffsetMinutes) {
+      setOffsetAmount(String(realtime.maxOffsetMinutes));
+    }
+  }, [offsetBlockedByOvertime, applyOffset, offsetAmount, realtime.maxOffsetMinutes]);
 
   // When editingLog changes, populate all fields (admin edit mode)
   useEffect(() => {
@@ -257,8 +326,12 @@ export default function LogForm({
         return;
       }
 
-      const offsetPayload = applyOffset
-        ? { applyOffset: true, offsetAmount: offsetAmount ? Math.floor(Number(offsetAmount)) : undefined }
+      const enteredOffsetMinutes = applyOffset
+        ? Math.max(0, Math.min(Math.floor(Number(offsetAmount) || 0), realtime.maxOffsetMinutes))
+        : 0;
+
+      const offsetPayload = applyOffset && enteredOffsetMinutes > 0
+        ? { applyOffset: true, offsetAmount: enteredOffsetMinutes }
         : {};
 
       setLoading(true);
@@ -414,12 +487,14 @@ export default function LogForm({
     }
   };
 
-  const isEditing = !!editingLog;
   const lockCoreFields = isEditing && !isAdmin;
-  const effectiveAvailable = isEditing && editingLog
-    ? Math.max(0, Math.floor(availableOffset + editingLog.offsetUsed))
-    : availableOffset;
-  const previewMetrics = previewHours ?? { hoursWorked: 0, overtime: 0 };
+  const enteredOffsetMinutes = applyOffset
+    ? Math.max(0, Math.min(Math.floor(Number(offsetAmount) || 0), realtime.maxOffsetMinutes))
+    : 0;
+  const previewMetrics = {
+    hoursWorked: Math.max(0, realtime.workedMinutes + enteredOffsetMinutes),
+    overtime: realtime.overtimeMinutes,
+  };
 
   // ════════════════════════════════════════════════════════════
   // TRAINEE BUTTON FLOW RENDER
@@ -810,85 +885,6 @@ export default function LogForm({
           </div>
         )}
 
-        <div style={{
-          background: "var(--bg-subtle)",
-          borderRadius: "var(--radius-sm)",
-          padding: "0.75rem 0.85rem",
-          margin: "0.65rem 0 0.85rem",
-          border: "1px solid var(--border)",
-          display: "grid",
-          gap: "0.7rem",
-        }}>
-          <div style={{
-            display: "flex",
-            gap: "1.25rem",
-            fontSize: "0.82rem",
-            color: "var(--text-muted)",
-            padding: "0.5rem 0.7rem",
-            background: "var(--primary-lighter)",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--primary-light)",
-            flexWrap: "wrap",
-          }}>
-            <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-              Hours: <strong style={{ color: "var(--text)" }}>{formatMinutes(previewMetrics.hoursWorked)}</strong>
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={previewMetrics.overtime > 0 ? "var(--primary)" : "var(--text-faint)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg>
-              Overtime: <strong style={{ color: previewMetrics.overtime > 0 ? "var(--primary)" : "var(--text)" }}>{formatMinutes(previewMetrics.overtime)}</strong>
-            </span>
-          </div>
-
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: "0.75rem 0.9rem",
-            alignItems: "end",
-          }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", minWidth: "220px" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "0.45rem", fontSize: "0.9rem", cursor: "pointer", fontWeight: 600, color: "var(--text-secondary)" }}>
-                <input
-                  type="checkbox"
-                  checked={applyOffset}
-                  onChange={(e) => {
-                    setApplyOffset(e.target.checked);
-                    if (!e.target.checked) setOffsetAmount("");
-                  }}
-                  disabled={effectiveAvailable <= 0 || offsetBlockedByOvertime}
-                  style={{ width: "1rem", height: "1rem", accentColor: "var(--primary)" }}
-                />
-                Apply Offset
-              </label>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", flexWrap: "wrap" }}>
-                <span className="badge badge-info" style={{ fontSize: "0.74rem" }}>
-                  Available: {formatMinutes(effectiveAvailable)}
-                </span>
-                {offsetBlockedByOvertime && (
-                  <span className="badge badge-warning" style={{ fontSize: "0.74rem" }}>
-                    Disabled when overtime &gt; 0
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Minutes to apply</label>
-              <input
-                type="number"
-                step="1"
-                min="0"
-                max={effectiveAvailable}
-                value={offsetAmount}
-                onChange={(e) => setOffsetAmount(e.target.value)}
-                placeholder={`max ${effectiveAvailable}`}
-                disabled={!applyOffset || effectiveAvailable <= 0 || offsetBlockedByOvertime}
-              />
-            </div>
-          </div>
-        </div>
-
         <div className="form-group">
           <label>Accomplishment</label>
           <textarea
@@ -897,6 +893,63 @@ export default function LogForm({
             onChange={(e) => setAccomplishment(sanitizeInput(e.target.value))}
             placeholder="What did you accomplish today? (optional)"
           />
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-start", marginTop: "-0.1rem", marginBottom: "0.85rem", minHeight: "44px" }}>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            gap: "0.6rem",
+            flexWrap: "wrap",
+          }}>
+            {offsetBlockedByOvertime ? (
+              <span style={{ fontSize: "0.82rem", color: "var(--warning-text)", lineHeight: 1.35 }}>
+                Offset disabled. Required hours of {formatMinutes(realtime.requiredMinutes)} is met.
+              </span>
+            ) : (
+              <>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.45rem", fontSize: "0.9rem", cursor: "pointer", fontWeight: 600, color: "var(--text-secondary)" }}>
+                  <input
+                    type="checkbox"
+                    checked={applyOffset}
+                    onChange={(e) => {
+                      setApplyOffset(e.target.checked);
+                      if (!e.target.checked) setOffsetAmount("");
+                    }}
+                    disabled={effectiveAvailable <= 0 || realtime.maxOffsetMinutes <= 0}
+                    style={{ width: "1rem", height: "1rem", accentColor: "var(--primary)" }}
+                  />
+                  Apply Offset
+                </label>
+
+                <div style={{ width: "145px" }}>
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    max={realtime.maxOffsetMinutes}
+                    value={offsetAmount}
+                    onChange={(e) => setOffsetAmount(e.target.value)}
+                    placeholder={`maximum of ${realtime.maxOffsetMinutes}`}
+                    disabled={!applyOffset || effectiveAvailable <= 0 || realtime.maxOffsetMinutes <= 0}
+                    style={{
+                      width: "100%",
+                      padding: "0.38rem 0.55rem",
+                      fontSize: "0.82rem",
+                      border: "1.5px solid var(--border)",
+                      borderRadius: "var(--radius-sm)",
+                      background: "var(--surface)",
+                      color: "var(--text)",
+                      outline: "none",
+                      opacity: applyOffset ? 1 : 0.55,
+                      transition: "opacity 0.15s ease",
+                    }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {error && (
@@ -911,21 +964,47 @@ export default function LogForm({
           </div>
         )}
 
-        <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
-          {loading ? (
-            "Saving\u2026"
-          ) : isEditing ? (
-            <>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-              Update Log
-            </>
-          ) : (
-            <>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-              Add Log
-            </>
-          )}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
+          <button type="submit" className="btn btn-primary" disabled={loading} style={{ gap: "0.35rem" }}>
+            {loading ? (
+              "Saving\u2026"
+            ) : isEditing ? (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                Update Log
+              </>
+            ) : (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                Add Log
+              </>
+            )}
+          </button>
+
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            gap: "1rem",
+            marginLeft: "auto",
+            fontSize: "0.82rem",
+            color: "var(--text-muted)",
+            flexWrap: "wrap",
+          }}>
+            <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+              Hours: <strong style={{ color: "var(--text)" }}>{formatMinutes(previewMetrics.hoursWorked)}</strong>
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={previewMetrics.overtime > 0 ? "var(--primary)" : "var(--text-faint)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg>
+              Overtime: <strong style={{ color: previewMetrics.overtime > 0 ? "var(--primary)" : "var(--text)" }}>{formatMinutes(previewMetrics.overtime)}</strong>
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14.5a3.5 3.5 0 0 1 0 7H6" /></svg>
+              Available Offset: <strong style={{ color: "var(--text)" }}>{formatMinutes(effectiveAvailable)}</strong>
+            </span>
+          </div>
+        </div>
       </form>
     </div>
   );

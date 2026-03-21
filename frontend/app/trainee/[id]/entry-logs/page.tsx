@@ -588,6 +588,7 @@ export default function TraineeEntryLogsPage() {
         traineeDisplayName={trainee.displayName}
         onCreated={loadData}
         availableOffset={availableOffset}
+        workSchedule={trainee.workSchedule}
         viewerRole={viewerRole}
         logs={logs}
       />
@@ -601,6 +602,7 @@ export default function TraineeEntryLogsPage() {
             editingLog={editingLog}
             onCancelEdit={() => setEditingLog(null)}
             availableOffset={availableOffset}
+            workSchedule={trainee.workSchedule}
             viewerRole={viewerRole}
             logs={logs}
           />
