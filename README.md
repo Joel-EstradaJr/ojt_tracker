@@ -189,14 +189,11 @@ date,timeIn,timeOut,accomplishments
 
 ### Backend (Render)
 
-Two options:
-
-- **Blueprint (recommended):** create a new Render Web Service from this repo and let Render detect [render.yaml](render.yaml).
-- **Manual:** create a Web Service with **Root Directory** = `backend`.
+Create a new Render Web Service with **Root Directory** = `backend`.
 
 Render commands (backend service):
 - Build: `npm ci --include=dev && npm run build`
-- Start: `npx prisma migrate deploy && npm start`
+- Start: `npm start` (runs `prisma migrate deploy` automatically)
 - Health check: `/health`
 
 Backend environment variables on Render:
