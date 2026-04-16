@@ -29,6 +29,8 @@
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^8.0.1",
     "pdfkit": "^0.15.0",
+    "prisma": "^5.22.0",
+    "typescript": "^5.3.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -41,8 +43,6 @@
     "@types/node": "^20.11.5",
     "@types/nodemailer": "^7.0.11",
     "@types/pdfkit": "^0.17.5",
-    "prisma": "^5.22.0",
-    "ts-node-dev": "^2.0.0",
-    "typescript": "^5.3.3"
+    "ts-node-dev": "^2.0.0"
   }
 }
