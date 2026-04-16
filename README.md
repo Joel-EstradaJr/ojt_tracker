@@ -20,6 +20,7 @@ A full-stack web application for tracking On-the-Job Training (OJT) hours, accom
 - **Export** logs to CSV, Excel (.xlsx), and PDF
 - **Import** logs from a CSV file
 - **Cascade delete** – removing a trainee also removes their logs
+- **Optional face recognition**: face login + optional face verification before attendance actions (requires the `face-service`)
 
 ---
 
@@ -202,6 +203,8 @@ Backend environment variables on Render:
 - `JWT_SECRET`, `JWT_EXPIRY`, `SUPER_NAME`, `SUPER_PASSWORD`
 - `SMTP_EMAIL`, `SMTP_PASSWORD` (used for admin-triggered emails)
 - `EMAIL_INTERNAL_KEY` (must match Vercel)
+- `FACE_SERVICE_URL` = URL of the Python face-service (optional)
+- `FACE_MATCH_THRESHOLD` = cosine similarity threshold (optional, defaults to `0.35`)
 
 ### Frontend (Vercel)
 
@@ -215,6 +218,42 @@ Frontend environment variables on Vercel:
 Notes:
 - The frontend uses Next.js rewrites to proxy `/api/*` to the backend, while some `/api/...` endpoints are implemented as Vercel API routes (email-related flows).
 - After changing env vars on Vercel/Render, redeploy/restart for them to take effect.
+
+### Face Recognition Service (Optional)
+
+This repo includes a separate service at `face-service/` (FastAPI + InsightFace) used for generating face embeddings.
+
+- If trainee self-signup requires face enrollment, the backend must have `FACE_SERVICE_URL` configured and reachable.
+- The frontend checks availability via `GET /api/face/config` and will block face capture/signup if the service is down.
+
+#### Run locally (Docker)
+
+```bash
+docker build -t ojt-face-service ./face-service
+docker run -p 8000:8000 ojt-face-service
+```
+
+#### Run locally (Python, no Docker)
+
+Requires **Python 3.11 or 3.12 (64-bit)**. (Python 3.14 will typically fail because dependencies like NumPy/onnxruntime don’t have wheels yet and will try to compile.)
+
+```bash
+cd face-service
+
+# create venv using a supported Python version
+py -3.12 -m venv .venv
+.\.venv\Scripts\python -m pip install -U pip
+.\.venv\Scripts\python -m pip install -r requirements.txt
+
+# start the service
+.\.venv\Scripts\python -m uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+Then set `FACE_SERVICE_URL=http://localhost:8000` in `backend/.env` (or your backend environment).
+
+Quick check:
+- open `http://localhost:8000/health` (should return `{ "status": "ok" }`)
+- call `GET http://localhost:4000/api/face/config` (should show `faceServiceReachable: true`)
 
 ---
 

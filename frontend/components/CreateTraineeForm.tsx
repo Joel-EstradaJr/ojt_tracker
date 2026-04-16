@@ -4,14 +4,15 @@
 // CreateTraineeForm -- modal form to add a new OJT trainee
 // ============================================================
 
-import { useState } from "react";
-import { createTrainee, sendEmailVerification, verifyEmailCode } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { createTrainee, fetchFaceConfig, sendEmailVerification, verifyEmailCode } from "@/lib/api";
 import { useActionGuard } from "@/lib/useActionGuard";
 import { SupervisorInput } from "@/types";
 import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValidPhone, phoneCharsOnly } from "@/lib/sanitize";
 import { DEFAULT_WORK_SCHEDULE, WorkSchedule } from "@/lib/ph-holidays";
 import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 import TimePicker from "@/components/TimePicker";
+import FaceCaptureDialog from "@/components/FaceCaptureDialog";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -67,6 +68,37 @@ export default function CreateTraineeForm({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [supervisors, setSupervisors] = useState<SupervisorInput[]>([]);
 
+  const [faceDialogOpen, setFaceDialogOpen] = useState(false);
+  const [faceImageBase64, setFaceImageBase64] = useState("");
+  const faceRequired = !isAdminCreating && isTraineeRole;
+
+  const [faceServiceConfigured, setFaceServiceConfigured] = useState<boolean>(true);
+  const [faceServiceReachable, setFaceServiceReachable] = useState<boolean>(true);
+  const [faceServiceChecking, setFaceServiceChecking] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!faceRequired) return;
+
+    let cancelled = false;
+    (async () => {
+      setFaceServiceChecking(true);
+      try {
+        const cfg = await fetchFaceConfig();
+        if (cancelled) return;
+        setFaceServiceConfigured(Boolean(cfg.faceServiceConfigured));
+        setFaceServiceReachable(Boolean(cfg.faceServiceReachable));
+      } catch {
+        if (cancelled) return;
+        setFaceServiceConfigured(false);
+        setFaceServiceReachable(false);
+      } finally {
+        if (!cancelled) setFaceServiceChecking(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [faceRequired]);
+
   const toggleDay = (day: number) => {
     setWorkSchedule((prev) => {
       const copy = { ...prev };
@@ -117,7 +149,16 @@ export default function CreateTraineeForm({
       setError(""); setEmailMsg("");
       if (!email || !isValidEmail(email)) { setError("Please enter a valid email address first."); return; }
       setEmailSending(true);
-      try { await sendEmailVerification(email); setEmailCodeSent(true); setEmailMsg("Verification code sent! Check your inbox."); }
+      try {
+        const res = await sendEmailVerification(email);
+        setEmailCodeSent(true);
+        if (res.devCode) {
+          setEmailMsg(`Dev mode: verification code is ${res.devCode}`);
+          setEmailCode(res.devCode);
+        } else {
+          setEmailMsg("Verification code sent! Check your inbox.");
+        }
+      }
       catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to send verification code."); }
       finally { setEmailSending(false); }
     });
@@ -154,6 +195,11 @@ export default function CreateTraineeForm({
       const mnErr = validateName("Middle name", middleName, false); if (mnErr) { setError(mnErr); return; }
       if (!isValidEmail(email)) { setError("Please enter a valid email address (e.g. name@example.com)."); return; }
       if (!isAdminCreating && !emailVerified) { setError("Please verify your email address before creating."); return; }
+      if (faceRequired && (!faceServiceConfigured || !faceServiceReachable)) {
+        setError("Face recognition is unavailable right now. Please try again later or contact an admin.");
+        return;
+      }
+      if (faceRequired && !faceImageBase64) { setError("Please register your face before creating your account."); return; }
       if (!phoneCharsOnly(contactNumber)) { setError("Contact number must contain only digits, +, -, (, ), and spaces."); return; }
       if (!isValidPhone(contactNumber)) { setError("Contact number must have at least 7 digits."); return; }
       if (isTraineeRole) {
@@ -199,6 +245,7 @@ export default function CreateTraineeForm({
           requiredHours: isTraineeRole ? Number(requiredHours) : 1,
           workSchedule: isTraineeRole && Object.keys(workSchedule).length > 0 ? workSchedule : undefined,
           ...(isAdminCreating ? {} : { password, verificationToken }),
+          ...(faceRequired ? { faceImageBase64 } : {}),
           supervisors: isTraineeRole && supervisors.length > 0 ? supervisors : undefined,
         });
         onCreated();
@@ -350,6 +397,58 @@ export default function CreateTraineeForm({
             </div>
           </div>
         )}
+
+        {faceRequired && (
+          <div style={{ marginTop: "0.75rem", border: "1px solid var(--border)", borderRadius: 8, padding: "1rem" }}>
+            <label style={{ fontWeight: 600, fontSize: "0.85rem", display: "block", marginBottom: "0.35rem" }}>
+              FACE REGISTRATION *
+            </label>
+            <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: "0.6rem" }}>
+              Required to create a trainee account.
+            </p>
+
+            <div style={{ fontSize: "0.78rem", marginBottom: "0.6rem", color: faceServiceConfigured && faceServiceReachable ? "var(--success-text)" : "var(--danger)" }}>
+              {faceServiceChecking
+                ? "Checking face service…"
+                : (faceServiceConfigured && faceServiceReachable)
+                  ? "Face service is available."
+                  : "Face service is unavailable. Start the face-service or contact an admin."}
+            </div>
+
+            {faceImageBase64 ? (
+              <img
+                src={faceImageBase64}
+                alt="Registered face"
+                style={{ width: "100%", maxWidth: 260, borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", marginBottom: "0.6rem" }}
+              />
+            ) : (
+              <div style={{ padding: "0.6rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.6rem" }}>
+                No face registered yet.
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => setFaceDialogOpen(true)}
+              disabled={loading || faceServiceChecking || !faceServiceConfigured || !faceServiceReachable}
+            >
+              {faceImageBase64 ? "Retake Face Photo" : "Capture Face Photo"}
+            </button>
+          </div>
+        )}
+
+        <FaceCaptureDialog
+          open={faceDialogOpen}
+          title="Register Your Face"
+          confirmLabel="Use Photo"
+          busy={loading}
+          onCancel={() => setFaceDialogOpen(false)}
+          onConfirm={(img) => {
+            setFaceImageBase64(img);
+            setFaceDialogOpen(false);
+          }}
+        />
 
         {/* Supervisors section */}
         {isTraineeRole && (

@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import { UserRole } from "@prisma/client";
 import prisma from "../utils/prisma";
 import { sendResetCode } from "../utils/email";
+import { getFaceServiceUrl, verifyFaceMatch } from "../utils/face";
 import { AuthPayload, clearSessionCookie, requireAdmin, requireAuth, setSessionCookie } from "../middleware/auth";
 
 const router = Router();
@@ -107,6 +108,10 @@ async function findTraineeByFullName(fullName: string) {
           mustChangePassword: true,
           failedLoginAttempts: true,
           lockedUntil: true,
+          faceEnabled: true,
+          faceAttendanceEnabled: true,
+          faceEmbedding: true,
+          faceEnrolledAt: true,
         },
       },
     },
@@ -258,6 +263,72 @@ router.post("/login", async (req: Request, res: Response) => {
     return res.json({ message: "Logged in.", role, traineeId: trainee.id, ...pendingState });
   } catch (err) {
     console.error("login error:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+router.post("/face-login", async (req: Request, res: Response) => {
+  const { identifier, imageBase64 } = req.body as { identifier?: string; imageBase64?: string };
+
+  const loginIdentifier = typeof identifier === "string" ? identifier.trim() : "";
+  if (!loginIdentifier) return res.status(400).json({ error: "Identifier is required." });
+  if (!imageBase64 || typeof imageBase64 !== "string") return res.status(400).json({ error: "imageBase64 is required." });
+
+  if (!getFaceServiceUrl()) {
+    return res.status(503).json({ error: "Face recognition service is not configured." });
+  }
+
+  const normalizedEmail = loginIdentifier.toLowerCase();
+  const isEmailIdentifier = normalizedEmail.includes("@");
+
+  try {
+    let trainee: any = isEmailIdentifier
+      ? await prisma.userProfile.findFirst({
+        where: { user: { email: normalizedEmail } },
+        include: { user: true },
+      })
+      : null;
+
+    if (!trainee) {
+      trainee = await findTraineeByFullName(loginIdentifier);
+    }
+
+    if (!trainee?.user) {
+      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+    }
+
+    const user = trainee.user;
+
+    // Prevent lockout bypass via face login.
+    if (user.failedLoginAttempts >= ACCOUNT_LOCK_THRESHOLD) {
+      return res.status(423).json({ error: GENERIC_LOGIN_ERROR, accountLocked: true, lockoutUserId: user.id });
+    }
+
+    if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((user.lockedUntil.getTime() - Date.now()) / 1000));
+      return res.status(429).json({ error: GENERIC_LOGIN_ERROR, cooldown: true, retryAfterSeconds, lockoutUserId: user.id });
+    }
+
+    if (user.mustChangePassword) {
+      return res.status(403).json({ error: "Face login is disabled until the temporary password is changed." });
+    }
+
+    if (!user.faceEnabled || !user.faceEmbedding) {
+      return res.status(403).json({ error: "Face login is not enabled for this account." });
+    }
+
+    const { match } = await verifyFaceMatch(imageBase64, user.faceEmbedding);
+    if (!match) {
+      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+    }
+
+    const role = roleToPayloadRole(user.role);
+    const pendingState = getPendingEmailVerificationState(user);
+
+    setSessionCookie(res, { role, traineeId: trainee.id });
+    return res.json({ message: "Logged in.", role, traineeId: trainee.id, ...pendingState });
+  } catch (err) {
+    console.error("face-login error:", err);
     return res.status(500).json({ error: "Internal server error." });
   }
 });
@@ -450,6 +521,10 @@ router.get("/me", async (req: Request, res: Response) => {
               pendingEmailExpiresAt: true,
               pendingEmailVerifyAttempts: true,
               pendingEmailAdminResendRequired: true,
+              faceEnabled: true,
+              faceAttendanceEnabled: true,
+              faceEmbedding: true,
+              faceEnrolledAt: true,
             },
           },
         },
@@ -471,6 +546,9 @@ router.get("/me", async (req: Request, res: Response) => {
           displayName: buildFullName(trainee),
           email: trainee.user.email,
           isSuper: false,
+          faceEnabled: Boolean(trainee.user.faceEnabled) && !!trainee.user.faceEmbedding,
+          faceAttendanceEnabled: Boolean(trainee.user.faceAttendanceEnabled),
+          faceEnrolledAt: trainee.user.faceEnrolledAt ?? null,
         },
       });
     }

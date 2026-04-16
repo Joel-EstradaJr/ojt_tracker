@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import CreateTraineeForm from "@/components/CreateTraineeForm";
 import RightSidebarDrawer from "@/components/RightSidebarDrawer";
+import FaceCaptureDialog from "@/components/FaceCaptureDialog";
 import { ThemeToggle } from "@/components/ThemeProvider";
 import {
+  faceLogin,
   getSession,
   isLoginError,
   login,
@@ -38,6 +40,9 @@ export default function LoginPage() {
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const [showFaceLogin, setShowFaceLogin] = useState(false);
+  const [faceLoginLoading, setFaceLoginLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const [showSignUp, setShowSignUp] = useState(false);
   const [error, setError] = useState("");
@@ -266,6 +271,72 @@ export default function LoginPage() {
       setError(GENERIC_LOGIN_ERROR);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const startFaceLogin = () => {
+    if (isLoginRestricted) return;
+
+    setError("");
+    setSignupSuccess("");
+    setForgotMessage("");
+
+    const normalizedFullName = fullName.trim().toUpperCase();
+    if (!normalizedFullName) {
+      setError("Full Name is required.");
+      return;
+    }
+
+    if (normalizedFullName.split(/\s+/).length < 2) {
+      setError("Full Name must include at least first name and last name.");
+      return;
+    }
+
+    setShowFaceLogin(true);
+  };
+
+  const handleFaceLogin = async (imageDataUrl: string) => {
+    if (isLoginRestricted) return;
+
+    setError("");
+    setFaceLoginLoading(true);
+
+    const normalizedFullName = fullName.trim().toUpperCase();
+
+    try {
+      const result = await faceLogin(normalizedFullName, imageDataUrl);
+      setActiveLockout(null);
+      setPermanentLock(null);
+
+      if (result.role === "admin") {
+        router.replace("/admin/trainee-management");
+        return;
+      }
+
+      if (result.traineeId) {
+        if (result.requiresPendingEmailVerification) {
+          setPendingTraineeId(result.traineeId);
+          setPendingEmail(result.pendingEmail ?? null);
+          setPendingEmailExpiresAt(result.pendingEmailExpiresAt ?? null);
+          setPendingAttemptsRemaining(typeof result.pendingEmailAttemptsRemaining === "number" ? result.pendingEmailAttemptsRemaining : 3);
+          setPendingAdminResendRequired(Boolean(result.pendingEmailAdminResendRequired));
+          setPendingCode("");
+          setPendingVerifyError("");
+          setShowPendingEmailVerify(true);
+          return;
+        }
+        router.replace(`/trainee/${result.traineeId}`);
+        return;
+      }
+
+      router.replace("/login");
+    } catch (err: unknown) {
+      setActiveLockout(null);
+      setPermanentLock(null);
+      setError(err instanceof Error ? err.message : GENERIC_LOGIN_ERROR);
+    } finally {
+      setFaceLoginLoading(false);
+      setShowFaceLogin(false);
     }
   };
 
@@ -610,6 +681,16 @@ export default function LoginPage() {
                     </button>
                   </div>
 
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    disabled={isLoginRestricted || loading || faceLoginLoading}
+                    onClick={startFaceLogin}
+                    style={{ width: "100%", marginTop: "0.6rem" }}
+                  >
+                    {faceLoginLoading ? "Verifying face..." : "Login with Face"}
+                  </button>
+
                   <p className="auth-switch-text">
                     Don&apos;t have an account yet?{" "}
                     <button
@@ -915,6 +996,15 @@ export default function LoginPage() {
           </div>
         </RightSidebarDrawer>
       )}
+
+      <FaceCaptureDialog
+        open={showFaceLogin}
+        title="Face Login"
+        confirmLabel="Verify & Login"
+        busy={faceLoginLoading}
+        onCancel={() => setShowFaceLogin(false)}
+        onConfirm={handleFaceLogin}
+      />
 
       <style jsx>{`
         .auth-shell {

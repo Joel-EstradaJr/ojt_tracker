@@ -15,11 +15,16 @@ import {
   fetchAccomplishmentScripts,
   createAccomplishmentScript,
   updateAccomplishmentScript,
+  disableFace,
+  enrollFace,
+  getFaceStatus,
+  setFaceAttendanceMode,
 } from "@/lib/api";
 import { AccomplishmentScript, LogEntry } from "@/types";
 import DatePicker from "@/components/DatePicker";
 import TimePicker from "@/components/TimePicker";
 import RightSidebarDrawer from "@/components/RightSidebarDrawer";
+import FaceCaptureDialog from "@/components/FaceCaptureDialog";
 import { sanitizeInput } from "@/lib/sanitize";
 import { formatMinutes } from "@/lib/duration";
 import { useActionGuard } from "@/lib/useActionGuard";
@@ -169,6 +174,16 @@ export default function LogForm({
   const [scriptTitle, setScriptTitle] = useState("");
   const [scriptContent, setScriptContent] = useState("");
 
+  // ── Face verification (optional) ────────────────────────────
+  const [faceStatusLoading, setFaceStatusLoading] = useState(false);
+  const [faceServiceConfigured, setFaceServiceConfigured] = useState(false);
+  const [faceEnabled, setFaceEnabled] = useState(false);
+  const [faceAttendanceEnabled, setFaceAttendanceEnabled] = useState(false);
+  const [faceBusy, setFaceBusy] = useState(false);
+  const [showFaceEnroll, setShowFaceEnroll] = useState(false);
+  const [showFaceVerify, setShowFaceVerify] = useState(false);
+  const [pendingFaceImage, setPendingFaceImage] = useState<string | null>(null);
+
   // Find today's log from passed logs
   useEffect(() => {
     if (logs) {
@@ -192,6 +207,25 @@ export default function LogForm({
       setAvailableOffset(res.availableOffset);
     } catch { /* silent */ }
   }, [traineeId]);
+
+  const refreshFaceStatus = useCallback(async () => {
+    if (viewerRole !== "trainee") return;
+    setFaceStatusLoading(true);
+    try {
+      const status = await getFaceStatus();
+      setFaceServiceConfigured(Boolean(status.faceServiceConfigured));
+      setFaceEnabled(Boolean(status.faceEnabled));
+      setFaceAttendanceEnabled(Boolean(status.faceAttendanceEnabled));
+    } catch {
+      // ignore
+    } finally {
+      setFaceStatusLoading(false);
+    }
+  }, [viewerRole]);
+
+  useEffect(() => {
+    refreshFaceStatus();
+  }, [refreshFaceStatus]);
 
   const loadScripts = useCallback(async () => {
     setScriptsLoading(true);
@@ -399,10 +433,63 @@ export default function LogForm({
     });
   };
 
+  const handleEnrollFace = async (imageDataUrl: string) => {
+    await runGuarded("face-enroll", async () => {
+      setFaceBusy(true);
+      setError("");
+      try {
+        await enrollFace(imageDataUrl);
+        await refreshFaceStatus();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Face enrollment failed.");
+      } finally {
+        setFaceBusy(false);
+        setShowFaceEnroll(false);
+      }
+    });
+  };
+
+  const handleDisableFaceAuth = async () => {
+    await runGuarded("face-disable", async () => {
+      setFaceBusy(true);
+      setError("");
+      try {
+        await disableFace();
+        await refreshFaceStatus();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to disable face authentication.");
+      } finally {
+        setFaceBusy(false);
+      }
+    });
+  };
+
+  const handleSetAttendanceMode = async (enabled: boolean) => {
+    await runGuarded("face-attendance-mode", async () => {
+      setFaceBusy(true);
+      setError("");
+      try {
+        const res = await setFaceAttendanceMode(enabled);
+        setFaceAttendanceEnabled(Boolean(res.faceAttendanceEnabled));
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to update attendance mode.");
+      } finally {
+        setFaceBusy(false);
+      }
+    });
+  };
+
   // ── Trainee button handlers ────────────────────────────────
   const handleTraineeAction = (action: ActionStep) => {
     setCapturedTime(new Date());
     setPendingAction(action);
+    setPendingFaceImage(null);
+
+    if (faceAttendanceEnabled) {
+      setShowFaceVerify(true);
+      return;
+    }
+
     setShowConfirm(true);
   };
 
@@ -419,11 +506,13 @@ export default function LogForm({
             traineeId,
             date: new Date().toISOString(),
             timeIn: capturedTime.toISOString(),
+            faceImageBase64: pendingFaceImage ?? undefined,
           });
         } else if (todayLog) {
           const updated = await patchLogAction(todayLog.id, {
             action: pendingAction as "lunchStart" | "lunchEnd" | "timeOut",
             timestamp: capturedTime.toISOString(),
+            faceImageBase64: pendingFaceImage ?? undefined,
           });
           if (pendingAction === "timeOut") {
             setAccomplishmentTargetLogId(updated.id);
@@ -438,6 +527,7 @@ export default function LogForm({
         setLoading(false);
         setPendingAction(null);
         setCapturedTime(null);
+        setPendingFaceImage(null);
       }
     });
   };
@@ -583,6 +673,66 @@ export default function LogForm({
           </div>
         )}
 
+        {/* Face verification controls */}
+        <div style={{
+          margin: "0 0 0.75rem",
+          padding: "0.6rem 0.75rem",
+          background: "var(--bg-subtle)",
+          borderRadius: "var(--radius-sm)",
+          border: "1px solid var(--border)",
+          fontSize: "0.82rem",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
+            <strong>Face Verification (Optional)</strong>
+            <span style={{ color: "var(--text-muted)" }}>
+              {faceStatusLoading ? "Loading…" : !faceServiceConfigured ? "Unavailable" : faceEnabled ? "Enrolled" : "Not enrolled"}
+            </span>
+          </div>
+
+          {faceServiceConfigured ? (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <input
+                    type="checkbox"
+                    checked={faceAttendanceEnabled}
+                    disabled={faceBusy || !faceEnabled}
+                    onChange={(e) => handleSetAttendanceMode(e.target.checked)}
+                  />
+                  Require face for attendance
+                </label>
+
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  {!faceEnabled ? (
+                    <button type="button" className="btn btn-outline" onClick={() => setShowFaceEnroll(true)} disabled={faceBusy}>
+                      Enroll
+                    </button>
+                  ) : (
+                    <button type="button" className="btn btn-outline" onClick={handleDisableFaceAuth} disabled={faceBusy}>
+                      Disable
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {!faceEnabled && (
+                <p style={{ margin: "0.45rem 0 0", color: "var(--text-muted)" }}>
+                  Enroll your face to enable face login and attendance verification.
+                </p>
+              )}
+              {faceAttendanceEnabled && !faceEnabled && (
+                <p style={{ margin: "0.35rem 0 0", color: "var(--danger)" }}>
+                  Enroll first before enabling attendance verification.
+                </p>
+              )}
+            </>
+          ) : (
+            <p style={{ margin: "0.45rem 0 0", color: "var(--text-muted)" }}>
+              This deployment has no face recognition service configured.
+            </p>
+          )}
+        </div>
+
         {/* Next action button */}
         {!allDone && (
           <button
@@ -618,6 +768,33 @@ export default function LogForm({
           </div>
         )}
 
+        <FaceCaptureDialog
+          open={showFaceEnroll}
+          title="Enroll Face"
+          confirmLabel="Enroll"
+          busy={faceBusy}
+          onCancel={() => setShowFaceEnroll(false)}
+          onConfirm={handleEnrollFace}
+        />
+
+        <FaceCaptureDialog
+          open={showFaceVerify}
+          title="Face Verification"
+          confirmLabel="Use This Photo"
+          busy={faceBusy || loading}
+          onCancel={() => {
+            setShowFaceVerify(false);
+            setPendingAction(null);
+            setCapturedTime(null);
+            setPendingFaceImage(null);
+          }}
+          onConfirm={(imageDataUrl) => {
+            setPendingFaceImage(imageDataUrl);
+            setShowFaceVerify(false);
+            setShowConfirm(true);
+          }}
+        />
+
         {/* Confirmation Modal */}
         {showConfirm && pendingAction && capturedTime && (
           <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
@@ -647,7 +824,7 @@ export default function LogForm({
                 </div>
               </div>
               <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
-                <button type="button" className="btn btn-outline" onClick={() => { setShowConfirm(false); setPendingAction(null); setCapturedTime(null); }} style={{ padding: "0.5rem 1rem" }}>
+                <button type="button" className="btn btn-outline" onClick={() => { setShowConfirm(false); setPendingAction(null); setCapturedTime(null); setPendingFaceImage(null); }} style={{ padding: "0.5rem 1rem" }}>
                   Cancel
                 </button>
                 <button type="button" className="btn btn-primary" onClick={confirmTraineeAction} disabled={loading} style={{ padding: "0.5rem 1rem" }}>

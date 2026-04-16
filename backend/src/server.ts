@@ -16,6 +16,7 @@ import emailRoutes from "./routes/email.routes";
 import settingsRoutes from "./routes/settings.routes";
 import scriptRoutes from "./routes/script.routes";
 import backupRoutes from "./routes/backup.routes";
+import faceRoutes from "./routes/face.routes";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -31,7 +32,8 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+// Base64 images for face recognition can be large; raise the JSON body limit.
+app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 
 // ── Routes ───────────────────────────────────────────────────
@@ -45,6 +47,7 @@ app.use("/api/email", emailRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/scripts", scriptRoutes);
 app.use("/api/backup", backupRoutes);
+app.use("/api/face", faceRoutes);
 
 // ── Health check ─────────────────────────────────────────────
 app.get("/health", (_req, res) => {

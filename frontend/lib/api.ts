@@ -49,6 +49,7 @@ export async function createTrainee(data: {
   password?: string;
   supervisors?: import("@/types").SupervisorInput[];
   verificationToken?: string;
+  faceImageBase64?: string;
 }) {
   const payload: Record<string, unknown> = { ...data };
   if (data.password) {
@@ -134,6 +135,12 @@ export async function deleteTrainee(
   });
 }
 
+// ── Face endpoints (public config) ──────────────────────────
+
+export function fetchFaceConfig() {
+  return request<{ faceServiceConfigured: boolean; faceServiceReachable: boolean; matchThreshold: number }>("/api/face/config");
+}
+
 // ── Email verification endpoints ─────────────────────────────
 // These use fetch() directly (no BASE prefix) so they always hit
 // the Vercel API routes, which handle email sending via SMTP.
@@ -150,7 +157,7 @@ export async function sendEmailVerification(email: string) {
     const body = await res.json().catch(() => ({}));
     throw new Error((body as Record<string, string>).error || res.statusText);
   }
-  return res.json() as Promise<{ message: string }>;
+  return res.json() as Promise<{ message: string; devCode?: string }>;
 }
 
 export async function verifyEmailCode(email: string, code: string) {
@@ -213,6 +220,7 @@ export function createLog(data: {
   accomplishment?: string;
   applyOffset?: boolean;
   offsetAmount?: number;
+  faceImageBase64?: string;
 }) {
   return request<import("@/types").LogEntry>("/api/logs", {
     method: "POST",
@@ -225,6 +233,7 @@ export function patchLogAction(logId: string, data: {
   timestamp?: string;
   accomplishment?: string;
   offsetMinutes?: number;
+  faceImageBase64?: string;
 }) {
   return request<import("@/types").LogEntry>(`/api/logs/${logId}/action`, {
     method: "PATCH",
@@ -355,6 +364,9 @@ export interface SessionInfo {
     displayName: string;
     email?: string | null;
     isSuper?: boolean;
+    faceEnabled?: boolean;
+    faceAttendanceEnabled?: boolean;
+    faceEnrolledAt?: string | null;
   };
 }
 
@@ -438,7 +450,62 @@ export async function login(fullName: string, password: string) {
   return res.json() as Promise<LoginResponse>;
 }
 
-export async function requestForgotPasswordCode(fullName: string) {
+export async function faceLogin(identifier: string, imageBase64: string) {
+  const res = await fetch(`${BASE}/api/auth/face-login`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ identifier, imageBase64 }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+
+  return res.json() as Promise<LoginResponse>;
+}
+
+export type FaceStatus = {
+  faceEnabled: boolean;
+  faceAttendanceEnabled: boolean;
+  faceEnrolledAt: string | null;
+  faceServiceConfigured: boolean;
+  matchThreshold: number;
+};
+
+export function getFaceStatus() {
+  return request<FaceStatus>("/api/face/status");
+}
+
+export function enrollFace(imageBase64: string) {
+  return request<{ message: string }>("/api/face/enroll", {
+    method: "POST",
+    body: JSON.stringify({ imageBase64 }),
+  });
+}
+
+export function disableFace() {
+  return request<{ message: string }>("/api/face/disable", {
+    method: "POST",
+  });
+}
+
+export function setFaceAttendanceMode(enabled: boolean) {
+  return request<{ message: string; faceAttendanceEnabled: boolean }>("/api/face/attendance-mode", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export function verifyFace(imageBase64: string) {
+  return request<{ match: boolean; similarity: number; threshold: number }>("/api/face/verify", {
+    method: "POST",
+    body: JSON.stringify({ imageBase64 }),
+  });
+}
+
+export async function requestForgotPasswordCode(fullName: string) { 
   const res = await fetch("/api/auth/forgot-password/request-code", {
     method: "POST",
     credentials: "include",

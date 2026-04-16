@@ -14,8 +14,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 
+export const runtime = "nodejs";
+
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:4000";
 const INTERNAL_KEY = process.env.EMAIL_INTERNAL_KEY || "";
+
+function uniquePorts(ports: number[]) {
+  const out: number[] = [];
+  const seen = new Set<number>();
+  for (const p of ports) {
+    if (!Number.isFinite(p)) continue;
+    if (seen.has(p)) continue;
+    seen.add(p);
+    out.push(p);
+  }
+  return out;
+}
 
 export async function POST(req: NextRequest) {
     try {
@@ -43,21 +57,15 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const { code } = (await backendRes.json()) as { code: string };
+        const backendBody = (await backendRes.json().catch(() => ({}))) as Record<string, unknown>;
+        const code = typeof backendBody.code === "string" ? backendBody.code : "";
 
-        // 2. Send the email from Vercel via Gmail SMTP
-        const transporter = nodemailer.createTransport({
-            host: "smtp.gmail.com",
-            port: 587,
-            secure: false,
-            auth: {
-                user: process.env.SMTP_EMAIL,
-                pass: process.env.SMTP_PASSWORD,
-            },
-            connectionTimeout: 10_000,
-            greetingTimeout: 10_000,
-            socketTimeout: 30_000,
-        });
+        // If the backend already sent the email (no internal key flow), just return its message.
+        if (!code) {
+          return NextResponse.json({
+            message: typeof backendBody.message === "string" ? backendBody.message : "Verification code sent.",
+          });
+        }
 
         const html = `
       <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
@@ -77,12 +85,64 @@ export async function POST(req: NextRequest) {
       </div>
     `;
 
-        await transporter.sendMail({
-            from: `"OJT Progress Tracker" <${process.env.SMTP_EMAIL}>`,
-            to: email,
-            subject: "Email Verification Code — OJT Progress Tracker",
-            html,
-        });
+        const isDev = process.env.NODE_ENV !== "production";
+
+        // 2. Send the email from Vercel via SMTP
+        const smtpUser = process.env.SMTP_EMAIL?.trim() || "";
+        // App passwords sometimes get copied with whitespace — strip spaces/newlines.
+        const smtpPass = (process.env.SMTP_PASSWORD || "").trim().replace(/\s+/g, "");
+
+        if (!smtpUser || !smtpPass) {
+          if (isDev) {
+            return NextResponse.json({ message: "Verification code generated (dev).", devCode: code });
+          }
+          return NextResponse.json({ error: "SMTP is not configured." }, { status: 500 });
+        }
+
+        const smtpHost = process.env.SMTP_HOST?.trim() || "smtp.gmail.com";
+        const preferredPort = Number(process.env.SMTP_PORT);
+        const portsToTry = uniquePorts([
+          Number.isFinite(preferredPort) && preferredPort > 0 ? preferredPort : 465,
+          587,
+        ]);
+
+        let emailSent = false;
+        let lastErr: unknown = null;
+
+        for (const port of portsToTry) {
+          try {
+            const transporter = nodemailer.createTransport({
+              host: smtpHost,
+              port,
+              secure: port === 465,
+              auth: { user: smtpUser, pass: smtpPass },
+              connectionTimeout: 20_000,
+              greetingTimeout: 20_000,
+              socketTimeout: 60_000,
+            });
+
+            await transporter.sendMail({
+              from: `"OJT Progress Tracker" <${smtpUser}>`,
+              to: email,
+              subject: "Email Verification Code — OJT Progress Tracker",
+              html,
+            });
+
+            emailSent = true;
+            break;
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+
+        if (!emailSent) {
+          console.error("send-verification SMTP error:", lastErr);
+          if (isDev) {
+            // Unblock local development (some networks block outbound SMTP).
+            return NextResponse.json({ message: "Verification code generated (dev).", devCode: code });
+          }
+          return NextResponse.json({ error: "Failed to send verification code." }, { status: 500 });
+        }
 
         return NextResponse.json({ message: "Verification code sent." });
     } catch (err) {

@@ -7,6 +7,7 @@ import { sendPendingEmailUpdateCode, sendResetCode, sendTemporaryPassword } from
 import { isEmailVerified } from "./email.controller";
 import { setSessionCookie } from "../middleware/auth";
 import { createAuditLog } from "../utils/audit";
+import { fetchFaceEmbedding, getFaceServiceUrl, normalizeImageBase64 } from "../utils/face";
 
 const SALT_ROUNDS = 10;
 const INITIAL_PASSWORD_REQUIRED_ERROR = "Forgot Password is disabled for this account until the temporary password is changed.";
@@ -147,11 +148,14 @@ export const createTrainee = async (req: Request, res: Response) => {
       email, contactNumber, school, companyName,
       requiredHours, workSchedule,
       password, supervisors, verificationToken,
+      faceImageBase64,
     } = req.body;
 
     const resolvedRole: "admin" | "trainee" = auth?.role === "admin"
       ? (role === "admin" ? "admin" : "trainee")
       : "trainee";
+
+    const isTraineeRole = resolvedRole === "trainee";
 
     if (!auth?.role && role === "admin") {
       return res.status(403).json({ error: "Only admins can create admin users." });
@@ -174,6 +178,38 @@ export const createTrainee = async (req: Request, res: Response) => {
       return res.status(409).json({ error: "A trainee with this name already exists." });
     }
 
+    // Trainee self-signup requires face enrollment.
+    let signupFaceEmbedding: number[] | null = null;
+    if (!isAdminCreating && isTraineeRole) {
+      if (!getFaceServiceUrl()) {
+        return res.status(503).json({ error: "Face recognition service is not configured." });
+      }
+
+      if (!faceImageBase64 || typeof faceImageBase64 !== "string") {
+        return res.status(400).json({ error: "Face registration is required." });
+      }
+
+      const normalized = normalizeImageBase64(faceImageBase64);
+      if (!normalized || normalized.length < 32) {
+        return res.status(400).json({ error: "Invalid face image." });
+      }
+
+      if (normalized.length > 2_000_000) {
+        return res.status(400).json({ error: "Face image is too large." });
+      }
+
+      if (!/^[A-Za-z0-9+/=]+$/.test(normalized)) {
+        return res.status(400).json({ error: "Invalid face image encoding." });
+      }
+
+      try {
+        signupFaceEmbedding = await fetchFaceEmbedding(faceImageBase64);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Face enrollment failed.";
+        return res.status(400).json({ error: msg });
+      }
+    }
+
     let actualPassword: string;
     let mustChangePassword = false;
     let tempPasswordPlaintext: string | undefined;
@@ -188,7 +224,6 @@ export const createTrainee = async (req: Request, res: Response) => {
     }
 
     const passwordHash = await bcrypt.hash(actualPassword, SALT_ROUNDS);
-    const isTraineeRole = resolvedRole === "trainee";
     const company = await upsertCompany(isTraineeRole ? String(companyName) : ADMIN_DEFAULT_COMPANY);
 
     const created = await prisma.$transaction(async (tx) => {
@@ -198,6 +233,14 @@ export const createTrainee = async (req: Request, res: Response) => {
           role: toUserRole(resolvedRole),
           passwordHash,
           mustChangePassword,
+          ...(signupFaceEmbedding
+            ? {
+              faceEnabled: true,
+              faceAttendanceEnabled: false,
+              faceEmbedding: signupFaceEmbedding,
+              faceEnrolledAt: new Date(),
+            }
+            : {}),
         },
       });
 

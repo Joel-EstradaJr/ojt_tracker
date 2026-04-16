@@ -1,6 +1,7 @@
 ﻿import { Request, Response } from "express";
 import { differenceInMinutes } from "date-fns";
 import prisma from "../utils/prisma";
+import { getFaceServiceUrl, verifyFaceMatch } from "../utils/face";
 
 const DEFAULT_STANDARD_MINUTES = 8 * 60;
 const STANDARD_LUNCH_MINUTES = 60;
@@ -134,7 +135,19 @@ export const createLog = async (req: Request, res: Response) => {
     const {
       traineeId, date, timeIn, timeOut, lunchStart, lunchEnd,
       accomplishment, applyOffset, offsetAmount,
-    } = req.body;
+      faceImageBase64,
+    } = req.body as {
+      traineeId: string;
+      date: string;
+      timeIn: string;
+      timeOut?: string;
+      lunchStart?: string;
+      lunchEnd?: string;
+      accomplishment?: string;
+      applyOffset?: boolean;
+      offsetAmount?: number;
+      faceImageBase64?: string;
+    };
 
     if (auth?.role === "trainee" && auth.traineeId !== traineeId) {
       return res.status(403).json({ error: "Access denied." });
@@ -145,6 +158,50 @@ export const createLog = async (req: Request, res: Response) => {
 
     const duplicate = await prisma.logEntry.findUnique({ where: { traineeId_date: { traineeId, date: logDate } } });
     if (duplicate) return res.status(409).json({ error: "A log entry already exists for this date." });
+
+    let faceVerified = false;
+    let workSchedule: ScheduleEntry[] | null | undefined;
+
+    if (auth?.role === "trainee") {
+      const trainee = await prisma.userProfile.findUnique({
+        where: { id: traineeId },
+        select: {
+          workSchedule: true,
+          user: {
+            select: {
+              faceAttendanceEnabled: true,
+              faceEnabled: true,
+              faceEmbedding: true,
+            },
+          },
+        },
+      });
+
+      if (!trainee?.user) return res.status(404).json({ error: "Trainee not found." });
+      workSchedule = trainee.workSchedule;
+
+      if (trainee.user.faceAttendanceEnabled) {
+        if (!getFaceServiceUrl()) {
+          return res.status(503).json({ error: "Face recognition service is not configured." });
+        }
+        if (!faceImageBase64 || typeof faceImageBase64 !== "string") {
+          return res.status(403).json({ error: "Face verification required." });
+        }
+        if (!trainee.user.faceEnabled || !trainee.user.faceEmbedding) {
+          return res.status(403).json({ error: "Face verification is enabled but face is not enrolled." });
+        }
+
+        const { match } = await verifyFaceMatch(faceImageBase64, trainee.user.faceEmbedding);
+        if (!match) return res.status(401).json({ error: "Face mismatch." });
+        faceVerified = true;
+      }
+    } else {
+      const trainee = await prisma.userProfile.findUnique({
+        where: { id: traineeId },
+        select: { workSchedule: true },
+      });
+      workSchedule = trainee?.workSchedule;
+    }
 
     if (!timeOut) {
       const log = await prisma.logEntry.create({
@@ -158,6 +215,7 @@ export const createLog = async (req: Request, res: Response) => {
           overtime: 0,
           offsetUsed: 0,
           accomplishment: accomplishment || null,
+          faceVerified,
         },
       });
       return res.status(201).json(log);
@@ -167,12 +225,7 @@ export const createLog = async (req: Request, res: Response) => {
     const lStart = lunchStart ? new Date(lunchStart) : inDate;
     const lEnd = lunchEnd ? new Date(lunchEnd) : inDate;
 
-    const trainee = await prisma.userProfile.findUnique({
-      where: { id: traineeId },
-      select: { workSchedule: true },
-    });
-
-    const standardMinutes = getStandardMinutesForDay(trainee?.workSchedule, logDate.getDay());
+    const standardMinutes = getStandardMinutesForDay(workSchedule, logDate.getDay());
 
     let hoursWorked = calcWorkedMinutes(inDate, outDate, lStart, lEnd);
     const overtime = Math.max(0, hoursWorked - standardMinutes);
@@ -197,6 +250,7 @@ export const createLog = async (req: Request, res: Response) => {
         overtime,
         offsetUsed,
         accomplishment: accomplishment || null,
+        faceVerified,
       },
     });
 
@@ -354,7 +408,13 @@ export const patchLogAction = async (req: Request, res: Response) => {
   try {
     const auth = (req as Request & { auth?: { role: "admin" | "trainee"; traineeId?: string } }).auth;
     const { id } = req.params;
-    const { action, timestamp, accomplishment, offsetMinutes } = req.body;
+    const { action, timestamp, accomplishment, offsetMinutes, faceImageBase64 } = req.body as {
+      action: "lunchStart" | "lunchEnd" | "timeOut" | "accomplishment" | "offset";
+      timestamp?: string;
+      accomplishment?: string;
+      offsetMinutes?: number;
+      faceImageBase64?: string;
+    };
 
     const log = await prisma.logEntry.findUnique({ where: { id } });
     if (!log) return res.status(404).json({ error: "Log entry not found." });
@@ -362,8 +422,49 @@ export const patchLogAction = async (req: Request, res: Response) => {
       return res.status(403).json({ error: "Access denied." });
     }
 
+    let faceVerifiedThisAction = false;
+    const isAttendanceAction = action === "lunchStart" || action === "lunchEnd" || action === "timeOut";
+
+    if (auth?.role === "trainee" && isAttendanceAction) {
+      const trainee = await prisma.userProfile.findUnique({
+        where: { id: log.traineeId },
+        select: {
+          user: {
+            select: {
+              faceAttendanceEnabled: true,
+              faceEnabled: true,
+              faceEmbedding: true,
+            },
+          },
+        },
+      });
+
+      if (!trainee?.user) return res.status(404).json({ error: "Trainee not found." });
+
+      if (trainee.user.faceAttendanceEnabled) {
+        if (!getFaceServiceUrl()) {
+          return res.status(503).json({ error: "Face recognition service is not configured." });
+        }
+        if (!faceImageBase64 || typeof faceImageBase64 !== "string") {
+          return res.status(403).json({ error: "Face verification required." });
+        }
+        if (!trainee.user.faceEnabled || !trainee.user.faceEmbedding) {
+          return res.status(403).json({ error: "Face verification is enabled but face is not enrolled." });
+        }
+
+        const { match } = await verifyFaceMatch(faceImageBase64, trainee.user.faceEmbedding);
+        if (!match) return res.status(401).json({ error: "Face mismatch." });
+
+        faceVerifiedThisAction = true;
+      }
+    }
+
     const ts = timestamp ? new Date(timestamp) : new Date();
     const data: Record<string, unknown> = {};
+
+    if (faceVerifiedThisAction) {
+      data.faceVerified = true;
+    }
 
     switch (action) {
       case "lunchStart":

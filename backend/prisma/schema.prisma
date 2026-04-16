@@ -53,6 +53,13 @@ model User {
   mustChangePassword  Boolean   @default(false)
   failedLoginAttempts Int       @default(0)
   lockedUntil         DateTime?
+
+  // Face recognition (optional)
+  faceEnabled         Boolean   @default(false)
+  faceAttendanceEnabled Boolean @default(false)
+  faceEmbedding       Json?
+  faceEnrolledAt      DateTime?
+
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -162,6 +169,7 @@ model LogEntry {
   overtime       Float     @default(0) // excess beyond scheduled hours
   offsetUsed     Float     @default(0) // OT bank hours applied this day
   accomplishment String?
+  faceVerified   Boolean   @default(false)
   createdAt      DateTime  @default(now())
 
   trainee UserProfile @relation(fields: [traineeId], references: [id], onDelete: Cascade)
