@@ -17,6 +17,11 @@ const NAME_RE = new RegExp(
   `[${LETTER}.]$`                           // ends with a letter or period (e.g. "Jr.")
 );
 // Single-char names (just a letter) are handled by minLength
+export const scriptCreateSchema = z.object({
+  title: z.string().trim().min(2, "Script title must be at least 2 characters.").max(80),
+  content: z.string().trim().min(2, "Script content must be at least 2 characters.").max(2000),
+});
+
 const NAME_SINGLE_RE = new RegExp(`^[${LETTER}]$`);
 
 // No consecutive punctuation / special characters
@@ -221,6 +226,7 @@ export const supervisorInputSchema = z
 
 /** Full trainee creation payload. */
 export const createTraineeSchema = z.object({
+  role: z.enum(["admin", "trainee"]).optional(),
   lastName: nameField("Last name", true),
   firstName: nameField("First name", true),
   middleName: nameField("Middle name", false).optional().default(""),
@@ -233,11 +239,13 @@ export const createTraineeSchema = z.object({
     .number({ message: "Required hours must be a number." })
     .int("Required hours must be a whole number.")
     .min(1, "Required hours must be at least 1."),
+  workSchedule: z.record(z.string(), z.object({ start: z.string(), end: z.string() })).optional(),
   password: z
     .string()
-    .min(1, "Password is required."),
+    .min(1, "Password is required.")
+    .optional(),
   supervisors: z.array(supervisorInputSchema).optional(),
-  verificationToken: z.string().min(1, "Email verification is required."),
+  verificationToken: z.string().min(1, "Email verification is required.").optional(),
 });
 
 /** Trainee update payload (password not required). */
@@ -254,8 +262,11 @@ export const updateTraineeSchema = z.object({
     .number({ message: "Required hours must be a number." })
     .int("Required hours must be a whole number.")
     .min(1, "Required hours must be at least 1."),
+  workSchedule: z.record(z.string(), z.object({ start: z.string(), end: z.string() })).optional(),
   verificationToken: z.string().optional(),
 });
+
+export const scriptUpdateSchema = scriptCreateSchema;
 
 // ── Supervisor Schema ────────────────────────────────────────
 
@@ -285,10 +296,10 @@ export const createLogSchema = z.object({
   traineeId: z.string().uuid("Invalid trainee ID."),
   date: z.string().min(1, "Date is required."),
   timeIn: z.string().min(1, "Time In is required."),
-  timeOut: z.string().min(1, "Time Out is required."),
-  lunchStart: z.string().min(1, "Lunch Start is required."),
-  lunchEnd: z.string().min(1, "Lunch End is required."),
-  accomplishment: textField("Accomplishment"),
+  timeOut: z.string().optional(),
+  lunchStart: z.string().optional(),
+  lunchEnd: z.string().optional(),
+  accomplishment: z.string().optional(),
   applyOffset: z.boolean().optional(),
   offsetAmount: z.number().optional(),
 });

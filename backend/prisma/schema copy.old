@@ -1,0 +1,179 @@
+// OLD SCHEMA
+// Prisma Schema — OJT Progress Tracker
+// Provider: PostgreSQL
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+// ── Trainee ──────────────────────────────────────────────────
+// Represents an OJT trainee with structured name fields,
+// contact info, school, company, and a hashed password.
+model Trainee {
+  id            String   @id @default(uuid())
+  role          String   @default("trainee") // "admin" | "trainee"
+  lastName      String
+  firstName     String
+  middleName    String?  // optional
+  suffix        String?  // optional (e.g. Jr., III)
+  email         String   @unique
+  contactNumber String
+  school        String
+  companyName   String   // company/institution where trainee renders OJT
+  requiredHours Int      // total hours the trainee must complete
+  // Per-day work schedule: JSON mapping day numbers (0-6) to {start, end}
+  // Default: Mon-Fri 8:00-17:00
+  workSchedule  Json     @default("{\"1\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"2\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"3\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"4\":{\"start\":\"08:00\",\"end\":\"17:00\"},\"5\":{\"start\":\"08:00\",\"end\":\"17:00\"}}")
+  passwordHash  String   // bcrypt hash of the trainee-specific password
+  mustChangePassword Boolean @default(false) // true when admin creates user with temp password
+  failedLoginAttempts Int      @default(0)
+  lockedUntil         DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  logs        LogEntry[]
+  supervisors Supervisor[]
+  resetCodes  PasswordResetCode[]
+  passwordHistory PasswordHistory[]
+  auditLogsPerformed AuditLog[]
+}
+
+// ── Supervisor ───────────────────────────────────────────────
+// Each trainee can have multiple supervisors.
+// At least one of contactNumber or email must be provided
+// (enforced at application level).
+model Supervisor {
+  id            String  @id @default(uuid())
+  traineeId     String
+  lastName      String
+  firstName     String
+  middleName    String? // optional
+  suffix        String? // optional
+  contactNumber String? // at least one of contactNumber/email required
+  email         String? // at least one of contactNumber/email required
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relation back to trainee (cascade delete)
+  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+
+  @@unique([traineeId, firstName, lastName, middleName, suffix], name: "unique_supervisor_per_trainee")
+  @@index([traineeId])
+}
+
+// ── LogEntry ─────────────────────────────────────────────────
+// A single day's time-log record for a trainee.
+// Now includes lunch break fields for accurate hour calculation,
+// overtime tracking, and offset (applying previous overtime).
+model LogEntry {
+  id             String   @id @default(uuid())
+  traineeId      String
+  date           DateTime // calendar date of the log
+  timeIn         DateTime // clock-in timestamp
+  lunchStart     DateTime // lunch break start (default 12:00 PM)
+  lunchEnd       DateTime // lunch break end   (default 1:00 PM)
+  timeOut        DateTime? // clock-out timestamp (null until user clocks out)
+  hoursWorked    Float    @default(0) // (timeOut - timeIn) - lunch
+  overtime       Float    @default(0) // calculated from schedule + toggles
+  offsetUsed     Float    @default(0) // hours deducted from accumulated OT bank
+  accomplishment String?  // optional freeform text
+
+  createdAt DateTime @default(now())
+
+  // Relation back to the owning trainee (cascade delete)
+  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+
+  @@unique([traineeId, date]) // one log per trainee per date
+  @@index([traineeId])
+}
+
+// ── PasswordResetCode ────────────────────────────────────────
+// Stores a 6-digit verification code sent via email for
+// the forgot-password flow. Expires after 10 minutes.
+model PasswordResetCode {
+  id        String   @id @default(uuid())
+  traineeId String
+  code      String   // 6-digit code
+  expiresAt DateTime // code expiration timestamp
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+
+  @@index([traineeId])
+}
+
+// ── EmailVerificationCode ────────────────────────────────────
+// Stores a 6-digit code sent to an email address to verify
+// ownership before creating or editing a trainee record.
+model EmailVerificationCode {
+  id        String   @id @default(uuid())
+  email     String   // target email to verify
+  code      String   // 6-digit code
+  expiresAt DateTime // code expiration timestamp
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
+
+// ── PasswordHistory ──────────────────────────────────────────
+// Stores previous password hashes to prevent password reuse.
+model PasswordHistory {
+  id           String   @id @default(uuid())
+  traineeId    String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  trainee Trainee @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+
+  @@index([traineeId])
+}
+
+// ── AuditLog ────────────────────────────────────────────────
+// Generic audit trail table designed for CREATE/UPDATE/DELETE
+// events across entities, including field-level JSON snapshots.
+model AuditLog {
+  id            String      @id @default(uuid())
+  actionType    AuditAction
+  entityName    String
+  recordId      String
+  performedById String?
+  oldValues     Json?
+  newValues     Json?
+  metadata      Json?
+  createdAt     DateTime    @default(now())
+
+  performedBy Trainee? @relation(fields: [performedById], references: [id], onDelete: SetNull)
+
+  @@index([actionType])
+  @@index([entityName])
+  @@index([recordId])
+  @@index([performedById])
+  @@index([createdAt])
+}
+
+// ── SystemSettings ───────────────────────────────────────────
+// Singleton record storing admin-controlled overtime toggles.
+model SystemSettings {
+  id                     String  @id @default("default")
+  countEarlyInAsOT       Boolean @default(false)
+  countLateOutAsOT       Boolean @default(false)
+  countEarlyLunchEndAsOT Boolean @default(false)
+}
+
+// END OF OLD SCHEMA

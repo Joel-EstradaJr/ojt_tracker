@@ -20,3 +20,22 @@ export const upload = multer({
     }
   },
 });
+
+export const uploadBackup = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB max for ZIP backups
+  fileFilter: (_req, file, cb) => {
+    const name = file.originalname.toLowerCase();
+    const isCsv = file.mimetype === "text/csv" || name.endsWith(".csv");
+    const isZip = file.mimetype === "application/zip"
+      || file.mimetype === "application/x-zip-compressed"
+      || name.endsWith(".zip");
+
+    if (isCsv || isZip) {
+      cb(null, true);
+      return;
+    }
+
+    cb(new Error("Only CSV and ZIP files are allowed."));
+  },
+});

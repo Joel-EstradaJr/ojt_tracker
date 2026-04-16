@@ -3,13 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev": "ts-node-dev --respawn --transpile-only --exit-child src/server.ts",
     "build": "prisma generate && tsc",
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "prisma:push": "prisma db push"
+    "prisma:push": "prisma db push",
+    "maintenance:sync-overtime-ledger": "npm run build && node dist/scripts/sync-overtime-ledger.js",
+    "maintenance:sync-overtime-ledger:dry": "npm run build && node dist/scripts/sync-overtime-ledger.js --dry-run",
+    "maintenance:validate-normalized": "npm run build && node dist/scripts/validate-normalized-data.js",
+    "maintenance:cutover": "npm run prisma:deploy && npm run maintenance:sync-overtime-ledger && npm run maintenance:validate-normalized"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -21,6 +25,7 @@
     "exceljs": "^4.4.0",
     "express": "^4.21.1",
     "jsonwebtoken": "^9.0.3",
+    "jszip": "^3.10.1",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^8.0.1",
     "pdfkit": "^0.15.0",

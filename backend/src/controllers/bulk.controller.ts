@@ -1,32 +1,47 @@
-// ============================================================
-// Bulk Export / Import Controller
-// Exports ALL trainees + supervisors + logs to a single CSV.
-// Imports that same CSV to recreate all data.
-// ============================================================
-
-import { Request, Response } from "express";
+﻿import { Request, Response } from "express";
 import { parse } from "csv-parse/sync";
 import { format } from "date-fns";
+import bcrypt from "bcrypt";
+import crypto from "crypto";
+import { UserRole } from "@prisma/client";
 import prisma from "../utils/prisma";
 
-// ── Helpers ──────────────────────────────────────────────────
-
-function titleCase(str: string): string {
-  return str.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+function csvVal(v: string): string {
+  return `"${v.replace(/"/g, '""')}"`;
 }
 
-// ── EXPORT ALL ───────────────────────────────────────────────
-// Produces a CSV with every trainee, supervisor, and log entry.
-// Row types are distinguished by a "RowType" column:
-//   TRAINEE, SUPERVISOR, LOG
-//
-// This makes it possible to reconstruct the full database from
-// a single CSV file.
+function parseTime(dateStr: string, timeVal: string): Date {
+  const val = timeVal.trim();
+  const match12 = val.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (match12) {
+    let h = parseInt(match12[1], 10);
+    const m = match12[2];
+    const ampm = match12[3].toUpperCase();
+    if (ampm === "PM" && h < 12) h += 12;
+    if (ampm === "AM" && h === 12) h = 0;
+    return new Date(`${dateStr}T${String(h).padStart(2, "0")}:${m}:00`);
+  }
+  if (val.length <= 5) return new Date(`${dateStr}T${val}:00`);
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? new Date(`${dateStr}T${val}`) : d;
+}
+
+function pick(row: Record<string, string>, keys: string[]): string {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return "";
+}
 
 export const exportAllCSV = async (_req: Request, res: Response) => {
   try {
-    const trainees = await prisma.trainee.findMany({
+    const trainees = await prisma.userProfile.findMany({
       include: {
+        user: true,
+        company: true,
         supervisors: true,
         logs: { orderBy: { date: "asc" } },
       },
@@ -34,59 +49,49 @@ export const exportAllCSV = async (_req: Request, res: Response) => {
     });
 
     const lines: string[] = [];
-
-    // Header
     lines.push([
       "RowType",
       "TraineeEmail",
       "LastName", "FirstName", "MiddleName", "Suffix",
       "ContactNumber", "School", "CompanyName", "RequiredHours", "PasswordHash",
-      // Supervisor-specific
       "SupervisorLastName", "SupervisorFirstName", "SupervisorMiddleName", "SupervisorSuffix",
       "SupervisorContact", "SupervisorEmail",
-      // Log-specific
       "Date", "TimeIn", "LunchStart", "LunchEnd", "TimeOut",
       "HoursWorked", "Overtime", "OffsetUsed", "Accomplishment",
     ].join(","));
 
     for (const t of trainees) {
-      // TRAINEE row
       lines.push([
         "TRAINEE",
-        csvVal(t.email),
+        csvVal(t.user.email),
         csvVal(t.lastName), csvVal(t.firstName), csvVal(t.middleName ?? ""), csvVal(t.suffix ?? ""),
-        csvVal(t.contactNumber), csvVal(t.school), csvVal(t.companyName), String(t.requiredHours), csvVal(t.passwordHash),
-        // blank supervisor fields
+        csvVal(t.contactNumber), csvVal(t.school), csvVal(t.company?.name ?? ""), String(t.requiredHours), csvVal(t.user.passwordHash),
         "", "", "", "", "", "",
-        // blank log fields
         "", "", "", "", "", "", "", "", "",
       ].join(","));
 
-      // SUPERVISOR rows
       for (const s of t.supervisors) {
         lines.push([
           "SUPERVISOR",
-          csvVal(t.email), // link to trainee
+          csvVal(t.user.email),
           "", "", "", "", "", "", "", "", "",
           csvVal(s.lastName), csvVal(s.firstName), csvVal(s.middleName ?? ""), csvVal(s.suffix ?? ""),
           csvVal(s.contactNumber ?? ""), csvVal(s.email ?? ""),
-          // blank log fields
           "", "", "", "", "", "", "", "", "",
         ].join(","));
       }
 
-      // LOG rows
       for (const l of t.logs) {
         lines.push([
           "LOG",
-          csvVal(t.email), // link to trainee
+          csvVal(t.user.email),
           "", "", "", "", "", "", "", "", "",
           "", "", "", "", "", "",
           format(l.date, "yyyy-MM-dd"),
           format(l.timeIn, "HH:mm"),
           format(l.lunchStart, "HH:mm"),
           format(l.lunchEnd, "HH:mm"),
-          format(l.timeOut, "HH:mm"),
+          l.timeOut ? format(l.timeOut, "HH:mm") : "N/A",
           String(l.hoursWorked),
           String(l.overtime),
           String(l.offsetUsed),
@@ -95,32 +100,19 @@ export const exportAllCSV = async (_req: Request, res: Response) => {
       }
     }
 
-    const csvContent = lines.join("\n");
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", "attachment; filename=ojt_tracker_full_backup.csv");
-    return res.send(csvContent);
+    return res.send(lines.join("\n"));
   } catch (err) {
     console.error("exportAllCSV error:", err);
     return res.status(500).json({ error: "Internal server error." });
   }
 };
 
-/** Wrap a value in quotes, escaping inner quotes */
-function csvVal(v: string): string {
-  return `"${v.replace(/"/g, '""')}"`;
-}
-
-// ── IMPORT ALL ───────────────────────────────────────────────
-// Reads the full-backup CSV and recreates trainees, supervisors,
-// and log entries. Skips duplicates (by email for trainees,
-// by traineeId+date for logs).
-
 export const importAllCSV = async (req: Request, res: Response) => {
   try {
     const file = req.file;
-    if (!file) {
-      return res.status(400).json({ error: "No file uploaded." });
-    }
+    if (!file) return res.status(400).json({ error: "No file uploaded." });
 
     const records: Array<Record<string, string>> = parse(file.buffer.toString(), {
       columns: true,
@@ -129,15 +121,14 @@ export const importAllCSV = async (req: Request, res: Response) => {
     });
 
     const stats = { trainees: 0, supervisors: 0, logs: 0, skipped: 0 };
-
-    // We'll need to map trainee emails to IDs (newly created or existing)
     const emailToId = new Map<string, string>();
 
-    // Pre-load existing trainees by email
-    const existingTrainees = await prisma.trainee.findMany({ select: { id: true, email: true } });
+    const existingTrainees = await prisma.userProfile.findMany({ include: { user: { select: { email: true } } } });
     for (const t of existingTrainees) {
-      emailToId.set(t.email.toLowerCase(), t.id);
+      emailToId.set(t.user.email.toLowerCase(), t.id);
     }
+
+    const fallbackHash = await bcrypt.hash(crypto.createHash("sha256").update("changeme").digest("hex"), 10);
 
     for (const row of records) {
       const rowType = (row.RowType || "").trim().toUpperCase();
@@ -146,24 +137,45 @@ export const importAllCSV = async (req: Request, res: Response) => {
       if (rowType === "TRAINEE") {
         if (emailToId.has(traineeEmail)) {
           stats.skipped++;
-          continue; // trainee already exists
+          continue;
         }
 
-        const trainee = await prisma.trainee.create({
-          data: {
-            lastName: (row.LastName || "").toUpperCase(),
-            firstName: (row.FirstName || "").toUpperCase(),
-            middleName: row.MiddleName ? row.MiddleName.toUpperCase() : null,
-            suffix: row.Suffix ? row.Suffix.toUpperCase() : null,
-            email: row.TraineeEmail || "",
-            contactNumber: row.ContactNumber || "",
-            school: (row.School || "").toUpperCase(),
-            companyName: (row.CompanyName || "").toUpperCase(),
-            requiredHours: parseInt(row.RequiredHours || "0", 10),
-            passwordHash: row.PasswordHash || "",
-          },
+        const company = await prisma.company.upsert({
+          where: { name: (row.CompanyName || "N/A").toUpperCase() },
+          update: {},
+          create: { name: (row.CompanyName || "N/A").toUpperCase() },
         });
-        emailToId.set(traineeEmail, trainee.id);
+
+        const created = await prisma.$transaction(async (tx) => {
+          const firstName = pick(row, ["FirstName", "First"]);
+          const middleName = pick(row, ["MiddleName", "Middl", "Middle"]);
+          const lastName = pick(row, ["LastName", "Last"]);
+          const suffix = pick(row, ["Suffix"]);
+
+          const user = await tx.user.create({
+            data: {
+              email: row.TraineeEmail || "",
+              role: UserRole.TRAINEE,
+              passwordHash: row.PasswordHash || fallbackHash,
+            },
+          });
+
+          return tx.userProfile.create({
+            data: {
+              userId: user.id,
+              lastName: lastName.toUpperCase(),
+              firstName: firstName.toUpperCase(),
+              middleName: middleName ? middleName.toUpperCase() : null,
+              suffix: suffix ? suffix.toUpperCase() : null,
+              contactNumber: row.ContactNumber || "",
+              school: (row.School || "").toUpperCase(),
+              companyId: company.id,
+              requiredHours: parseInt(row.RequiredHours || "0", 10),
+            },
+          });
+        });
+
+        emailToId.set(traineeEmail, created.id);
         stats.trainees++;
       } else if (rowType === "SUPERVISOR") {
         const traineeId = emailToId.get(traineeEmail);
@@ -172,13 +184,18 @@ export const importAllCSV = async (req: Request, res: Response) => {
           continue;
         }
 
+        const supervisorFirstName = pick(row, ["SupervisorFirstName", "SupervisorFirst"]);
+        const supervisorMiddleName = pick(row, ["SupervisorMiddleName", "SupervisorMiddl", "SupervisorMiddle"]);
+        const supervisorLastName = pick(row, ["SupervisorLastName", "SupervisorLast"]);
+        const supervisorSuffix = pick(row, ["SupervisorSuffix"]);
+
         await prisma.supervisor.create({
           data: {
             traineeId,
-            lastName: (row.SupervisorLastName || "").toUpperCase(),
-            firstName: (row.SupervisorFirstName || "").toUpperCase(),
-            middleName: row.SupervisorMiddleName ? row.SupervisorMiddleName.toUpperCase() : null,
-            suffix: row.SupervisorSuffix ? row.SupervisorSuffix.toUpperCase() : null,
+            lastName: supervisorLastName.toUpperCase(),
+            firstName: supervisorFirstName.toUpperCase(),
+            middleName: supervisorMiddleName ? supervisorMiddleName.toUpperCase() : null,
+            suffix: supervisorSuffix ? supervisorSuffix.toUpperCase() : null,
             contactNumber: row.SupervisorContact || null,
             email: row.SupervisorEmail || null,
           },
@@ -192,13 +209,18 @@ export const importAllCSV = async (req: Request, res: Response) => {
         }
 
         const dateStr = (row.Date || "").trim();
-        if (!dateStr) { stats.skipped++; continue; }
+        if (!dateStr) {
+          stats.skipped++;
+          continue;
+        }
 
-        // Check for duplicate log on this date
         const existing = await prisma.logEntry.findFirst({
           where: { traineeId, date: new Date(dateStr) },
         });
-        if (existing) { stats.skipped++; continue; }
+        if (existing) {
+          stats.skipped++;
+          continue;
+        }
 
         const timeIn = parseTime(dateStr, row.TimeIn || "08:00");
         const timeOut = parseTime(dateStr, row.TimeOut || "17:00");
@@ -208,7 +230,7 @@ export const importAllCSV = async (req: Request, res: Response) => {
         const overtime = parseFloat(row.Overtime || "0");
         const offsetUsed = parseFloat(row.OffsetUsed || "0");
 
-        await prisma.logEntry.create({
+        const log = await prisma.logEntry.create({
           data: {
             traineeId,
             date: new Date(dateStr),
@@ -222,6 +244,22 @@ export const importAllCSV = async (req: Request, res: Response) => {
             accomplishment: row.Accomplishment || "",
           },
         });
+
+        if (log.overtime > 0) {
+          await prisma.overtimeLedger.upsert({
+            where: { sourceLogId_type: { sourceLogId: log.id, type: "EARNED" } },
+            create: { traineeId, sourceLogId: log.id, type: "EARNED", hours: log.overtime },
+            update: { hours: log.overtime },
+          });
+        }
+        if (log.offsetUsed > 0) {
+          await prisma.overtimeLedger.upsert({
+            where: { sourceLogId_type: { sourceLogId: log.id, type: "USED" } },
+            create: { traineeId, sourceLogId: log.id, type: "USED", hours: log.offsetUsed },
+            update: { hours: log.offsetUsed },
+          });
+        }
+
         stats.logs++;
       } else {
         stats.skipped++;
@@ -235,20 +273,3 @@ export const importAllCSV = async (req: Request, res: Response) => {
   }
 };
 
-/** Parse HH:mm into a Date on the given dateStr */
-function parseTime(dateStr: string, timeVal: string): Date {
-  const val = timeVal.trim();
-  const match12 = val.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (match12) {
-    let h = parseInt(match12[1], 10);
-    const m = match12[2];
-    const ampm = match12[3].toUpperCase();
-    if (ampm === "PM" && h < 12) h += 12;
-    if (ampm === "AM" && h === 12) h = 0;
-    return new Date(`${dateStr}T${String(h).padStart(2, "0")}:${m}:00`);
-  }
-  // HH:mm or full ISO
-  if (val.length <= 5) return new Date(`${dateStr}T${val}:00`);
-  const d = new Date(val);
-  return isNaN(d.getTime()) ? new Date(`${dateStr}T${val}`) : d;
-}

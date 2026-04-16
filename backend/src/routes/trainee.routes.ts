@@ -13,20 +13,23 @@ import {
   verifyResetCode,
   resetPassword,
   deleteTrainee,
+  resendTempPassword,
+  requestPendingEmailVerificationCode,
+  verifyPendingEmailChange,
 } from "../controllers/trainee.controller";
 import { validateTrainee, validateTraineeUpdate, sanitizeBody } from "../middleware/validate";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireAdmin, attachAuthIfPresent } from "../middleware/auth";
 
 const router = Router();
 
 // POST /trainees          — create a new trainee
-router.post("/", sanitizeBody, validateTrainee, createTrainee);
+router.post("/", attachAuthIfPresent, sanitizeBody, validateTrainee, createTrainee);
 
 // PUT  /trainees/:id      — update trainee info (auth required)
 router.put("/:id", requireAuth, sanitizeBody, validateTraineeUpdate, updateTrainee);
 
 // GET  /trainees          — list all trainees (card view)
-router.get("/", getAllTrainees);
+router.get("/", requireAuth, requireAdmin, getAllTrainees);
 
 // GET  /trainees/:id      — get single trainee info (auth required)
 router.get("/:id", requireAuth, getTraineeById);
@@ -44,6 +47,15 @@ router.post("/:id/verify-reset-code", verifyResetCode);
 router.put("/:id/reset-password", resetPassword);
 
 // DELETE /trainees/:id    — delete trainee + cascading logs & supervisors
-router.delete("/:id", deleteTrainee);
+router.delete("/:id", requireAuth, requireAdmin, deleteTrainee);
+
+// POST /trainees/:id/resend-temp-password — resend temp password (admin only)
+router.post("/:id/resend-temp-password", requireAuth, requireAdmin, resendTempPassword);
+
+// POST /trainees/:id/pending-email/request-code — send/resend 24-hour email update code
+router.post("/:id/pending-email/request-code", requireAuth, requireAdmin, requestPendingEmailVerificationCode);
+
+// POST /trainees/:id/verify-pending-email — verify pending email change code
+router.post("/:id/verify-pending-email", requireAuth, verifyPendingEmailChange);
 
 export default router;

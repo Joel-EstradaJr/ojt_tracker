@@ -10,7 +10,7 @@ A full-stack web application for tracking On-the-Job Training (OJT) hours, accom
 | Backend   | Node.js + Express (TypeScript)      |
 | Database  | PostgreSQL                          |
 | ORM       | Prisma                              |
-| Deploy    | Railway (or any Node host)          |
+| Deploy    | Vercel (Frontend) + Render (Backend) + Supabase (DB) |
 
 ## Features
 
@@ -179,15 +179,45 @@ date,timeIn,timeOut,accomplishments
 
 ---
 
-## Deployment (Railway)
+## Deployment (Vercel + Render + Supabase)
 
-1. Push the repo to GitHub.
-2. Create a **Railway** project and link the repo.
-3. Add a **PostgreSQL** plugin; Railway sets `DATABASE_URL` automatically.
-4. Set environment variables (`PORT`, `FRONTEND_URL`).
-5. Configure build & start commands for each service:
-   - **Backend**: build `npm run build`, start `npm start`
-   - **Frontend**: build `npm run build`, start `npm start`
+### Database (Supabase)
+
+1. Create a Supabase project.
+2. Get the Postgres connection string from **Project Settings → Database**.
+3. Use that connection string as the backend `DATABASE_URL` (Supabase typically requires SSL, so include `?sslmode=require` if it’s not already present).
+
+### Backend (Render)
+
+Two options:
+
+- **Blueprint (recommended):** create a new Render Web Service from this repo and let Render detect [render.yaml](render.yaml).
+- **Manual:** create a Web Service with **Root Directory** = `backend`.
+
+Render commands (backend service):
+- Build: `npm ci --include=dev && npm run build`
+- Start: `npx prisma migrate deploy && npm start`
+- Health check: `/health`
+
+Backend environment variables on Render:
+- `DATABASE_URL` = Supabase connection string
+- `FRONTEND_URL` = your Vercel frontend URL (e.g. `https://<project>.vercel.app`)
+- `JWT_SECRET`, `JWT_EXPIRY`, `SUPER_NAME`, `SUPER_PASSWORD`
+- `SMTP_EMAIL`, `SMTP_PASSWORD` (used for admin-triggered emails)
+- `EMAIL_INTERNAL_KEY` (must match Vercel)
+
+### Frontend (Vercel)
+
+Deploy the `frontend/` project to Vercel.
+
+Frontend environment variables on Vercel:
+- `BACKEND_URL` = your Render backend URL (e.g. `https://<service>.onrender.com`)
+- `SMTP_EMAIL`, `SMTP_PASSWORD` (used by Vercel API routes for verification emails)
+- `EMAIL_INTERNAL_KEY` (must match Render)
+
+Notes:
+- The frontend uses Next.js rewrites to proxy `/api/*` to the backend, while some `/api/...` endpoints are implemented as Vercel API routes (email-related flows).
+- After changing env vars on Vercel/Render, redeploy/restart for them to take effect.
 
 ---
 

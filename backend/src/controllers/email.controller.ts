@@ -5,7 +5,7 @@
 
 import { Request, Response } from "express";
 import crypto from "crypto";
-import { PrismaClient } from "@prisma/client";
+import { EmailVerificationPurpose, PrismaClient } from "@prisma/client";
 import { sendEmailVerificationCode } from "../utils/email";
 
 const prisma = new PrismaClient();
@@ -29,7 +29,11 @@ export async function sendVerification(req: Request, res: Response) {
 
     // Invalidate any previous unused codes for this email
     await prisma.emailVerificationCode.updateMany({
-      where: { email: email.toLowerCase(), used: false },
+      where: {
+        email: email.toLowerCase(),
+        purpose: EmailVerificationPurpose.GENERAL,
+        used: false,
+      },
       data: { used: true },
     });
 
@@ -37,6 +41,7 @@ export async function sendVerification(req: Request, res: Response) {
     await prisma.emailVerificationCode.create({
       data: {
         email: email.toLowerCase(),
+        purpose: EmailVerificationPurpose.GENERAL,
         code,
         expiresAt,
       },
@@ -76,6 +81,7 @@ export async function verifyCode(req: Request, res: Response) {
     const record = await prisma.emailVerificationCode.findFirst({
       where: {
         email: email.toLowerCase(),
+        purpose: EmailVerificationPurpose.GENERAL,
         code,
         used: false,
         expiresAt: { gt: new Date() },
@@ -112,6 +118,7 @@ export async function isEmailVerified(email: string, verificationToken: string):
     where: {
       id: verificationToken,
       email: email.toLowerCase(),
+      purpose: EmailVerificationPurpose.GENERAL,
       used: true,
       // Token must have been created within the last 30 minutes
       createdAt: { gt: new Date(Date.now() - 30 * 60 * 1000) },

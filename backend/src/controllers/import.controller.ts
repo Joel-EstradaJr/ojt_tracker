@@ -1,62 +1,36 @@
-// ============================================================
-// Import Controller
-// Parses an uploaded CSV file and inserts log entries into the
-// database for a given trainee.
-//
-// Accepts CSVs exported by this app OR manually created ones.
-// Supported column names (case-insensitive, with/without spaces):
-//   Date | date
-//   Time In | timeIn
-//   Lunch Start | lunchStart
-//   Lunch End | lunchEnd
-//   Time Out | timeOut
-//   Accomplishment | accomplishment
-//   (Overtime, Offset Used, Hours Worked are ignored on import
-//    — they are recalculated automatically)
-// ============================================================
-
-import { Request, Response } from "express";
+﻿import { Request, Response } from "express";
 import { parse } from "csv-parse/sync";
 import { differenceInMinutes } from "date-fns";
 import prisma from "../utils/prisma";
 
-/** Normalise a CSV header to a lowercase, no-space key */
 function normaliseKey(header: string): string {
-  return header.trim().toLowerCase().replace(/[\s_]+/g, "");
+  return header.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-/** Map of normalised key → canonical field name */
 const KEY_MAP: Record<string, string> = {
   date: "date",
+  dates: "date",
   timein: "timeIn",
   lunchstart: "lunchStart",
   lunchend: "lunchEnd",
   timeout: "timeOut",
   accomplishment: "accomplishment",
+  remarks: "accomplishment",
   hoursworked: "_ignore",
   overtime: "_ignore",
   offsetused: "_ignore",
 };
 
-/** Parse a time value that might be "HH:mm", "HH:mm AM/PM", or a full ISO string */
 function parseTime(dateStr: string, timeVal: string): Date {
   if (!timeVal) return new Date(`${dateStr}T00:00:00`);
-
   const val = timeVal.trim();
 
-  // Already a full ISO / parseable datetime?
   const directParse = new Date(val);
-  if (!isNaN(directParse.getTime()) && val.length > 10) {
-    return directParse;
-  }
+  if (!isNaN(directParse.getTime()) && val.length > 10) return directParse;
 
-  // Handle "HH:mm" or "HH:mm:ss"
   const match24 = val.match(/^(\d{1,2}):(\d{2})(:\d{2})?$/);
-  if (match24) {
-    return new Date(`${dateStr}T${val.length === 5 ? val + ":00" : val}`);
-  }
+  if (match24) return new Date(`${dateStr}T${val.length === 5 ? val + ":00" : val}`);
 
-  // Handle "hh:mm AM/PM"
   const match12 = val.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (match12) {
     let h = parseInt(match12[1], 10);
@@ -67,49 +41,87 @@ function parseTime(dateStr: string, timeVal: string): Date {
     return new Date(`${dateStr}T${String(h).padStart(2, "0")}:${m}:00`);
   }
 
-  // Fallback
   return new Date(`${dateStr}T${val}`);
 }
 
-/** Parse a date value that might be "yyyy-MM-dd", "MM/dd/yyyy", or ISO */
+function isPlaceholder(value?: string): boolean {
+  if (!value) return true;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "" || normalized === "-" || normalized === "n/a" || normalized === "na" || normalized === "null";
+}
+
+function parseTimeOrNull(dateStr: string, timeVal?: string): Date | null {
+  if (isPlaceholder(timeVal)) return null;
+  const parsed = parseTime(dateStr, String(timeVal));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function parseDate(val: string): string {
   const v = val.trim();
-  // Already yyyy-MM-dd?
   if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
-  // Try MM/dd/yyyy or dd/MM/yyyy
+
+  // Supports frontend display format: "Friday | Mar 20, 2026"
+  const display = v.match(/^[A-Za-z]+\s*\|\s*([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})$/);
+  if (display) {
+    const [, month, day, year] = display;
+    const monthMap: Record<string, string> = {
+      jan: "01", january: "01",
+      feb: "02", february: "02",
+      mar: "03", march: "03",
+      apr: "04", april: "04",
+      may: "05",
+      jun: "06", june: "06",
+      jul: "07", july: "07",
+      aug: "08", august: "08",
+      sep: "09", sept: "09", september: "09",
+      oct: "10", october: "10",
+      nov: "11", november: "11",
+      dec: "12", december: "12",
+    };
+
+    const monthNum = monthMap[month.toLowerCase()];
+    if (monthNum) return `${year}-${monthNum}-${day.padStart(2, "0")}`;
+  }
+
   const slash = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (slash) {
-    const [, a, b, y] = slash;
-    // Assume MM/dd/yyyy (US / PH format)
-    return `${y}-${a.padStart(2, "0")}-${b.padStart(2, "0")}`;
+    const [, month, day, year] = slash;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
   }
-  // Fallback — let JS parse it
+
+  const slashShortYear = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  if (slashShortYear) {
+    const [, month, day, yy] = slashShortYear;
+    const yearNum = Number(yy);
+    const fullYear = yearNum >= 70 ? `19${yy}` : `20${yy}`;
+    return `${fullYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
   const d = new Date(v);
-  if (!isNaN(d.getTime())) {
-    return d.toISOString().slice(0, 10);
-  }
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   return v;
 }
 
-const STANDARD_HOURS = 8;
+function getStandardMinutesForDay(
+  schedule: Array<{ dayOfWeek: number; startTime: Date; endTime: Date }> | null | undefined,
+  dayOfWeek: number
+): number {
+  const entry = (schedule || []).find((s) => s.dayOfWeek === dayOfWeek);
+  if (!entry) return 8 * 60;
+  const totalMinutes = differenceInMinutes(entry.endTime, entry.startTime);
+  const workedMinutes = totalMinutes - 60;
+  return workedMinutes > 0 ? workedMinutes : 8 * 60;
+}
 
 export const importCSV = async (req: Request, res: Response) => {
   try {
     const { traineeId } = req.params;
-
-    // multer stores the uploaded file buffer on req.file
     const file = req.file;
-    if (!file) {
-      return res.status(400).json({ error: "No file uploaded." });
-    }
 
-    // Verify trainee exists
-    const trainee = await prisma.trainee.findUnique({ where: { id: traineeId } });
-    if (!trainee) {
-      return res.status(404).json({ error: "Trainee not found." });
-    }
+    if (!file) return res.status(400).json({ error: "No file uploaded." });
 
-    // Parse CSV content with raw headers
+    const trainee = await prisma.userProfile.findUnique({ where: { id: traineeId }, include: { workSchedule: true } });
+    if (!trainee) return res.status(404).json({ error: "Trainee not found." });
+
     const rawRecords: Array<Record<string, string>> = parse(file.buffer.toString(), {
       columns: true,
       skip_empty_lines: true,
@@ -120,13 +132,10 @@ export const importCSV = async (req: Request, res: Response) => {
     const skipped: string[] = [];
 
     for (const raw of rawRecords) {
-      // Map raw headers to canonical field names
       const row: Record<string, string> = {};
       for (const [rawKey, val] of Object.entries(raw)) {
         const canonical = KEY_MAP[normaliseKey(rawKey)];
-        if (canonical && canonical !== "_ignore") {
-          row[canonical] = val;
-        }
+        if (canonical && canonical !== "_ignore") row[canonical] = val;
       }
 
       if (!row.date || !row.timeIn || !row.timeOut) {
@@ -135,23 +144,42 @@ export const importCSV = async (req: Request, res: Response) => {
       }
 
       const dateStr = parseDate(row.date);
-      const inDate = parseTime(dateStr, row.timeIn);
-      const outDate = parseTime(dateStr, row.timeOut);
+      const logDate = new Date(`${dateStr}T00:00:00.000Z`);
+      if (Number.isNaN(logDate.getTime())) {
+        skipped.push(`Invalid date value '${row.date}'`);
+        continue;
+      }
 
-      // Default lunch to 12:00–13:00 on the same date if not provided
-      const lStart = row.lunchStart
-        ? parseTime(dateStr, row.lunchStart)
-        : new Date(`${dateStr}T12:00:00`);
-      const lEnd = row.lunchEnd
-        ? parseTime(dateStr, row.lunchEnd)
-        : new Date(`${dateStr}T13:00:00`);
+      const inDate = parseTimeOrNull(dateStr, row.timeIn);
+      const outDate = parseTimeOrNull(dateStr, row.timeOut);
+      if (!inDate || !outDate) {
+        skipped.push(`Invalid time values for ${dateStr}`);
+        continue;
+      }
 
-      // Validate ordering
+      const parsedLunchStart = parseTimeOrNull(dateStr, row.lunchStart);
+      const parsedLunchEnd = parseTimeOrNull(dateStr, row.lunchEnd);
+
+      let lStart: Date;
+      let lEnd: Date;
+
+      // Exported placeholder lunch ("-") means no-lunch marker.
+      if (!parsedLunchStart && !parsedLunchEnd) {
+        lStart = inDate;
+        lEnd = inDate;
+      } else if (parsedLunchStart && parsedLunchEnd) {
+        lStart = parsedLunchStart;
+        lEnd = parsedLunchEnd;
+      } else {
+        skipped.push(`Invalid lunch values for ${dateStr}`);
+        continue;
+      }
+
       if (outDate <= inDate) {
         skipped.push(`timeOut <= timeIn for ${dateStr}`);
         continue;
       }
-      // Skip invalid lunch unless no-lunch (lunchStart === lunchEnd)
+
       const hasLunch = lStart.getTime() !== lEnd.getTime();
       if (hasLunch && (lStart <= inDate || lEnd >= outDate || lEnd <= lStart)) {
         skipped.push(`Invalid lunch times for ${dateStr}`);
@@ -160,19 +188,20 @@ export const importCSV = async (req: Request, res: Response) => {
 
       const totalMinutes = differenceInMinutes(outDate, inDate);
       const lunchMinutes = hasLunch ? differenceInMinutes(lEnd, lStart) : 0;
-      const hoursWorked = parseFloat(((totalMinutes - lunchMinutes) / 60).toFixed(2));
-
-      if (hoursWorked < 0) {
-        skipped.push(`Negative hours for ${dateStr}`);
+      const hoursWorked = Math.max(0, totalMinutes - lunchMinutes);
+      if (!Number.isFinite(hoursWorked)) {
+        skipped.push(`Computed hoursWorked is invalid for ${dateStr}`);
         continue;
       }
 
-      const overtime = parseFloat(Math.max(0, hoursWorked - STANDARD_HOURS).toFixed(2));
+      const standardMinutes = getStandardMinutesForDay(trainee.workSchedule, logDate.getDay());
+      const overtime = Math.max(0, hoursWorked - standardMinutes);
+      if (!Number.isFinite(overtime)) {
+        skipped.push(`Computed overtime is invalid for ${dateStr}`);
+        continue;
+      }
 
-      // Check for duplicate date
-      const existing = await prisma.logEntry.findFirst({
-        where: { traineeId, date: new Date(dateStr) },
-      });
+      const existing = await prisma.logEntry.findFirst({ where: { traineeId, date: logDate } });
       if (existing) {
         skipped.push(`Duplicate date ${dateStr} — already has a log entry`);
         continue;
@@ -181,7 +210,7 @@ export const importCSV = async (req: Request, res: Response) => {
       const log = await prisma.logEntry.create({
         data: {
           traineeId,
-          date: new Date(dateStr),
+          date: logDate,
           timeIn: inDate,
           lunchStart: lStart,
           lunchEnd: lEnd,
@@ -191,6 +220,14 @@ export const importCSV = async (req: Request, res: Response) => {
           accomplishment: row.accomplishment || "",
         },
       });
+
+      if (overtime > 0) {
+        await prisma.overtimeLedger.upsert({
+          where: { sourceLogId_type: { sourceLogId: log.id, type: "EARNED" } },
+          create: { traineeId, sourceLogId: log.id, type: "EARNED", hours: overtime },
+          update: { hours: overtime },
+        });
+      }
 
       created.push(log);
     }
@@ -206,3 +243,4 @@ export const importCSV = async (req: Request, res: Response) => {
     return res.status(500).json({ error: "Internal server error." });
   }
 };
+

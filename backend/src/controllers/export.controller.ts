@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // Export Controller
 // Exports a trainee's log entries to CSV, Excel, or PDF.
 // Updated for new schema: lunchStart, lunchEnd, hoursWorked, accomplishment
@@ -11,11 +11,11 @@ import PDFDocument from "pdfkit";
 import prisma from "../utils/prisma";
 import { calculateExpectedEndDate } from "../utils/ph-holidays";
 
-// ── Helper: fetch trainee + logs ─────────────────────────────
+// â”€â”€ Helper: fetch trainee + logs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function getTraineeWithLogs(traineeId: string) {
-  const trainee = await prisma.trainee.findUnique({
+  const trainee = await prisma.userProfile.findUnique({
     where: { id: traineeId },
-    include: { logs: { orderBy: { date: "asc" } } },
+    include: { company: true, logs: { orderBy: { date: "asc" } } },
   });
   return trainee;
 }
@@ -37,7 +37,16 @@ function displayName(t: { lastName: string; firstName: string; middleName?: stri
   return parts.join(" ");
 }
 
-// ── Export as CSV ────────────────────────────────────────────
+function formatMinutes(mins: number): string {
+  const total = Math.max(0, Math.floor(mins));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+// â”€â”€ Export as CSV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const exportCSV = async (req: Request, res: Response) => {
   try {
     const { traineeId } = req.params;
@@ -50,7 +59,7 @@ export const exportCSV = async (req: Request, res: Response) => {
     const rows = trainee.logs
       .map(
         (l) =>
-          `${format(l.date, "yyyy-MM-dd")},${format(l.timeIn, "HH:mm")},${format(l.lunchStart, "HH:mm")},${format(l.lunchEnd, "HH:mm")},${format(l.timeOut, "HH:mm")},${l.hoursWorked},${l.overtime},${l.offsetUsed},"${(l.accomplishment ?? "").replace(/"/g, '""')}"`
+          `${format(l.date, "yyyy-MM-dd")},${format(l.timeIn, "HH:mm")},${format(l.lunchStart, "HH:mm")},${format(l.lunchEnd, "HH:mm")},${l.timeOut ? format(l.timeOut, "HH:mm") : "N/A"},${formatMinutes(l.hoursWorked)},${formatMinutes(l.overtime)},${formatMinutes(l.offsetUsed)},"${(l.accomplishment ?? "").replace(/"/g, '""')}"`
       )
       .join("\n");
 
@@ -63,7 +72,7 @@ export const exportCSV = async (req: Request, res: Response) => {
   }
 };
 
-// ── Export as Excel (.xlsx) ──────────────────────────────────
+// â”€â”€ Export as Excel (.xlsx) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const exportExcel = async (req: Request, res: Response) => {
   try {
     const { traineeId } = req.params;
@@ -93,22 +102,23 @@ export const exportExcel = async (req: Request, res: Response) => {
         timeIn: format(l.timeIn, "HH:mm"),
         lunchStart: format(l.lunchStart, "HH:mm"),
         lunchEnd: format(l.lunchEnd, "HH:mm"),
-        timeOut: format(l.timeOut, "HH:mm"),
-        hoursWorked: l.hoursWorked,
-        overtime: l.overtime,
-        offsetUsed: l.offsetUsed,
+        timeOut: l.timeOut ? format(l.timeOut, "HH:mm") : "N/A",
+        hoursWorked: formatMinutes(l.hoursWorked),
+        overtime: formatMinutes(l.overtime),
+        offsetUsed: formatMinutes(l.offsetUsed),
         accomplishment: l.accomplishment ?? "",
       });
     });
 
     // Summary row
-    const totalHrs = trainee.logs.reduce((s, l) => s + l.hoursWorked, 0);
-    const remainHrs = Math.max(0, trainee.requiredHours - totalHrs);
-    const remainDays = Math.ceil(remainHrs / 8);
+    const totalMinutes = trainee.logs.reduce((s, l) => s + l.hoursWorked, 0);
+    const requiredMinutes = trainee.requiredHours * 60;
+    const remainMinutes = Math.max(0, requiredMinutes - totalMinutes);
+    const remainDays = Math.ceil(remainMinutes / (8 * 60));
     sheet.addRow({});
-    sheet.addRow({ date: "Total Hours", timeIn: totalHrs.toFixed(2) });
-    sheet.addRow({ date: "Remaining", timeIn: `${remainHrs.toFixed(1)} hrs (${remainDays} days)` });
-    if (remainHrs > 0) {
+    sheet.addRow({ date: "Total Hours", timeIn: formatMinutes(totalMinutes) });
+    sheet.addRow({ date: "Remaining", timeIn: `${formatMinutes(remainMinutes)} (${remainDays} days)` });
+    if (remainMinutes > 0) {
       const endDate = calculateExpectedEndDate(remainDays);
       sheet.addRow({ date: "Expected End Date", timeIn: format(endDate, "MMMM d, yyyy (EEEE)") });
     }
@@ -127,7 +137,7 @@ export const exportExcel = async (req: Request, res: Response) => {
   }
 };
 
-// ── Export as PDF ────────────────────────────────────────────
+// â”€â”€ Export as PDF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const exportPDF = async (req: Request, res: Response) => {
   try {
     const { traineeId } = req.params;
@@ -143,9 +153,9 @@ export const exportPDF = async (req: Request, res: Response) => {
     doc.pipe(res);
 
     // Title
-    doc.fontSize(18).text(`OJT Logs — ${name}`, { align: "center" });
+    doc.fontSize(18).text(`OJT Logs â€” ${name}`, { align: "center" });
     doc.moveDown(0.5);
-    doc.fontSize(11).text(`School: ${trainee.school}  |  Company: ${trainee.companyName}  |  Required Hours: ${trainee.requiredHours}`);
+    doc.fontSize(11).text(`School: ${trainee.school}  |  Company: ${trainee.company?.name ?? ""}  |  Required Hours: ${trainee.requiredHours}`);
     doc.moveDown(1);
 
     const totalHours = trainee.logs.reduce((s, l) => s + l.hoursWorked, 0);
@@ -154,17 +164,17 @@ export const exportPDF = async (req: Request, res: Response) => {
 
     trainee.logs.forEach((l) => {
       doc.text(
-        `${format(l.date, "yyyy-MM-dd")}  |  ${format(l.timeIn, "HH:mm")} – ${format(l.timeOut, "HH:mm")}  |  Lunch: ${format(l.lunchStart, "HH:mm")}–${format(l.lunchEnd, "HH:mm")}  |  ${l.hoursWorked} hrs  |  OT: ${l.overtime}  |  Offset: ${l.offsetUsed}  |  ${l.accomplishment ?? ""}`
+        `${format(l.date, "yyyy-MM-dd")}  |  ${format(l.timeIn, "HH:mm")} â€“ ${l.timeOut ? format(l.timeOut, "HH:mm") : "N/A"}  |  Lunch: ${format(l.lunchStart, "HH:mm")}â€“${format(l.lunchEnd, "HH:mm")}  |  ${formatMinutes(l.hoursWorked)}  |  OT: ${formatMinutes(l.overtime)}  |  Offset: ${formatMinutes(l.offsetUsed)}  |  ${l.accomplishment ?? ""}`
       );
     });
 
     doc.moveDown(1);
-    doc.fontSize(12).text(`Total Hours: ${totalHours.toFixed(2)} / ${trainee.requiredHours}  |  Total Overtime: ${totalOT.toFixed(2)}`);
+    doc.fontSize(12).text(`Total Hours: ${formatMinutes(totalHours)} / ${formatMinutes(trainee.requiredHours * 60)}  |  Total Overtime: ${formatMinutes(totalOT)}`);
 
-    const remainHrs = Math.max(0, trainee.requiredHours - totalHours);
-    const remainDays = Math.ceil(remainHrs / 8);
-    doc.text(`Remaining: ${remainHrs.toFixed(1)} hrs (${remainDays} day${remainDays !== 1 ? "s" : ""})`);
-    if (remainHrs > 0) {
+    const remainMins = Math.max(0, trainee.requiredHours * 60 - totalHours);
+    const remainDays = Math.ceil(remainMins / (8 * 60));
+    doc.text(`Remaining: ${formatMinutes(remainMins)} (${remainDays} day${remainDays !== 1 ? "s" : ""})`);
+    if (remainMins > 0) {
       const endDate = calculateExpectedEndDate(remainDays);
       doc.text(`Expected End Date: ${format(endDate, "MMMM d, yyyy (EEEE)")}`);
     } else {
@@ -177,3 +187,4 @@ export const exportPDF = async (req: Request, res: Response) => {
     return res.status(500).json({ error: "Internal server error." });
   }
 };
+

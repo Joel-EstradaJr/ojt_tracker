@@ -27,14 +27,15 @@ async function request<T>(url: string, opts?: RequestInit): Promise<T> {
 // ── Trainee endpoints ────────────────────────────────────────
 
 export function fetchTrainees() {
-  return request<import("@/types").Trainee[]>("/api/trainees");
+  return request<import("@/types").UserProfile[]>("/api/trainees");
 }
 
 export function fetchTrainee(id: string) {
-  return request<import("@/types").Trainee>(`/api/trainees/${id}`);
+  return request<import("@/types").UserProfile>(`/api/trainees/${id}`);
 }
 
 export async function createTrainee(data: {
+  role?: "admin" | "trainee";
   lastName: string;
   firstName: string;
   middleName?: string;
@@ -44,14 +45,18 @@ export async function createTrainee(data: {
   school: string;
   companyName: string;
   requiredHours: number;
-  password: string;
+  workSchedule?: Record<string, { start: string; end: string }>;
+  password?: string;
   supervisors?: import("@/types").SupervisorInput[];
-  verificationToken: string;
+  verificationToken?: string;
 }) {
-  const hashedPassword = await sha256(data.password);
-  return request<import("@/types").Trainee>("/api/trainees", {
+  const payload: Record<string, unknown> = { ...data };
+  if (data.password) {
+    payload.password = await sha256(data.password);
+  }
+  return request<import("@/types").UserProfile>("/api/trainees", {
     method: "POST",
-    body: JSON.stringify({ ...data, password: hashedPassword }),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -67,10 +72,11 @@ export function updateTrainee(
     school: string;
     companyName: string;
     requiredHours: number;
+    workSchedule?: Record<string, { start: string; end: string }>;
     verificationToken?: string;
   }
 ) {
-  return request<import("@/types").Trainee>(`/api/trainees/${id}`, {
+  return request<import("@/types").UserProfile>(`/api/trainees/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
   });
@@ -78,7 +84,7 @@ export function updateTrainee(
 
 export async function verifyPassword(id: string, password: string) {
   const hashed = await sha256(password);
-  return request<import("@/types").Trainee>(`/api/trainees/${id}/verify`, {
+  return request<import("@/types").UserProfile>(`/api/trainees/${id}/verify`, {
     method: "POST",
     body: JSON.stringify({ password: hashed }),
   });
@@ -114,9 +120,17 @@ export function verifyResetCode(id: string, code: string) {
   });
 }
 
-export function deleteTrainee(id: string) {
+export async function deleteTrainee(
+  id: string,
+  options?: { currentPassword?: string; typedConfirmation?: string }
+) {
+  const payload: { currentPassword?: string; typedConfirmation?: string } = {};
+  if (options?.typedConfirmation) payload.typedConfirmation = options.typedConfirmation;
+  if (options?.currentPassword) payload.currentPassword = await sha256(options.currentPassword);
+
   return request<{ message: string }>(`/api/trainees/${id}`, {
     method: "DELETE",
+    body: JSON.stringify(payload),
   });
 }
 
@@ -193,10 +207,10 @@ export function createLog(data: {
   traineeId: string;
   date: string;
   timeIn: string;
-  lunchStart: string;
-  lunchEnd: string;
-  timeOut: string;
-  accomplishment: string;
+  lunchStart?: string;
+  lunchEnd?: string;
+  timeOut?: string;
+  accomplishment?: string;
   applyOffset?: boolean;
   offsetAmount?: number;
 }) {
@@ -206,15 +220,27 @@ export function createLog(data: {
   });
 }
 
+export function patchLogAction(logId: string, data: {
+  action: "lunchStart" | "lunchEnd" | "timeOut" | "accomplishment" | "offset";
+  timestamp?: string;
+  accomplishment?: string;
+  offsetMinutes?: number;
+}) {
+  return request<import("@/types").LogEntry>(`/api/logs/${logId}/action`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
 export function updateLog(
   id: string,
   data: {
-    date: string;
-    timeIn: string;
-    lunchStart: string;
-    lunchEnd: string;
-    timeOut: string;
-    accomplishment: string;
+    date?: string;
+    timeIn?: string;
+    lunchStart?: string;
+    lunchEnd?: string;
+    timeOut?: string;
+    accomplishment?: string;
     applyOffset?: boolean;
     offsetAmount?: number;
   }
@@ -228,6 +254,32 @@ export function updateLog(
 export function deleteLog(id: string) {
   return request<{ message: string }>(`/api/logs/entry/${id}`, {
     method: "DELETE",
+  });
+}
+
+// ── Accomplishment scripts ───────────────────────────────────
+
+export function fetchAccomplishmentScripts(traineeId: string) {
+  return request<import("@/types").AccomplishmentScript[]>(`/api/scripts/${traineeId}`);
+}
+
+export function createAccomplishmentScript(
+  traineeId: string,
+  data: { title: string; content: string }
+) {
+  return request<import("@/types").AccomplishmentScript>(`/api/scripts/${traineeId}`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateAccomplishmentScript(
+  scriptId: string,
+  data: { title: string; content: string }
+) {
+  return request<import("@/types").AccomplishmentScript>(`/api/scripts/entry/${scriptId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
   });
 }
 
@@ -257,6 +309,12 @@ export async function downloadExport(traineeId: string, format: "csv" | "excel" 
 
 // ── Import CSV ───────────────────────────────────────────────
 
+export interface ImportCsvResult {
+  imported: number;
+  skipped: number;
+  skippedDetails?: string[];
+}
+
 export async function importCSV(traineeId: string, file: File) {
   const form = new FormData();
   form.append("file", file);
@@ -272,12 +330,155 @@ export async function importCSV(traineeId: string, file: File) {
     throw new Error((body as Record<string, string>).error || res.statusText);
   }
 
-  return res.json() as Promise<{ imported: number }>;
+  return res.json() as Promise<ImportCsvResult>;
 }
 
 // ── Bulk Export / Import (full database) ─────────────────────
 
 // ── Auth ──────────────────────────────────────────────────────
+
+export interface SessionInfo {
+  authenticated: boolean;
+  role?: "admin" | "trainee";
+  traineeId?: string | null;
+  expiresAt?: number | null;
+  hasPendingEmailChange?: boolean;
+  requiresPendingEmailVerification?: boolean;
+  pendingEmail?: string | null;
+  pendingEmailExpiresAt?: string | null;
+  pendingEmailStatus?: "verified" | "pending" | "expired";
+  pendingEmailVerifyAttempts?: number;
+  pendingEmailAttemptsRemaining?: number;
+  pendingEmailAdminResendRequired?: boolean;
+  currentUser?: {
+    id?: string | null;
+    displayName: string;
+    email?: string | null;
+    isSuper?: boolean;
+  };
+}
+
+export interface LoginResponse {
+  message: string;
+  role: "admin" | "trainee";
+  traineeId?: string | null;
+  mustChangePassword?: boolean;
+  hasPendingEmailChange?: boolean;
+  requiresPendingEmailVerification?: boolean;
+  pendingEmail?: string | null;
+  pendingEmailExpiresAt?: string | null;
+  pendingEmailStatus?: "verified" | "pending" | "expired";
+  pendingEmailVerifyAttempts?: number;
+  pendingEmailAttemptsRemaining?: number;
+  pendingEmailAdminResendRequired?: boolean;
+}
+
+export interface LoginSecurityDetails {
+  failedAttempts?: number;
+  attemptsRemainingBeforeLock?: number;
+  cooldown?: boolean;
+  retryAfterSeconds?: number;
+  accountLocked?: boolean;
+  lockoutUserId?: string;
+  lockoutEndsAt?: string;
+}
+
+export class LoginError extends Error {
+  details: LoginSecurityDetails;
+
+  constructor(message: string, details: LoginSecurityDetails = {}) {
+    super(message);
+    this.name = "LoginError";
+    this.details = details;
+  }
+}
+
+export function isLoginError(error: unknown): error is LoginError {
+  return error instanceof LoginError;
+}
+
+export async function login(fullName: string, password: string) {
+  const hashed = await sha256(password);
+
+  const res = await fetch(`${BASE}/api/auth/login`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fullName,
+      identifier: fullName,
+      password: hashed,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const payload = body as {
+      error?: string;
+      failedAttempts?: number;
+      attemptsRemainingBeforeLock?: number;
+      cooldown?: boolean;
+      retryAfterSeconds?: number;
+      accountLocked?: boolean;
+      lockoutUserId?: string;
+      lockoutEndsAt?: string;
+    };
+
+    throw new LoginError(payload.error || res.statusText, {
+      failedAttempts: payload.failedAttempts,
+      attemptsRemainingBeforeLock: payload.attemptsRemainingBeforeLock,
+      cooldown: payload.cooldown,
+      retryAfterSeconds: payload.retryAfterSeconds,
+      accountLocked: payload.accountLocked,
+      lockoutUserId: payload.lockoutUserId,
+      lockoutEndsAt: payload.lockoutEndsAt,
+    });
+  }
+
+  return res.json() as Promise<LoginResponse>;
+}
+
+export async function requestForgotPasswordCode(fullName: string) {
+  const res = await fetch("/api/auth/forgot-password/request-code", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fullName }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+
+  return res.json() as Promise<{ message: string; maskedEmail?: string }>;
+}
+
+export function verifyForgotPasswordCode(fullName: string, code: string) {
+  return request<{ message: string; resetToken: string }>("/api/auth/forgot-password/verify-code", {
+    method: "POST",
+    body: JSON.stringify({ fullName, code }),
+  });
+}
+
+export async function resetForgottenPassword(fullName: string, newPassword: string, confirmPassword: string, resetToken: string) {
+  const hashed = await sha256(newPassword);
+  const hashedConfirm = await sha256(confirmPassword);
+
+  return request<{ message: string }>("/api/auth/forgot-password/reset", {
+    method: "POST",
+    body: JSON.stringify({
+      fullName,
+      resetToken,
+      newPassword: hashed,
+      confirmPassword: hashedConfirm,
+    }),
+  });
+}
+
+export function getSession() {
+  return request<SessionInfo>("/api/auth/me");
+}
 
 export async function verifySuperPassword(password: string) {
   const hashed = await sha256(password);
@@ -293,6 +494,51 @@ export function checkSession(traineeId: string) {
 
 export function logout() {
   return request<{ message: string }>("/api/auth/logout", { method: "POST" });
+}
+
+export async function setInitialPassword(traineeId: string, currentPassword: string, newPassword: string, confirmPassword: string) {
+  const hashedCurrent = await sha256(currentPassword);
+  const hashedNew = await sha256(newPassword);
+  const hashedConfirm = await sha256(confirmPassword);
+
+  return request<{ message: string; role: "admin" | "trainee"; traineeId?: string | null }>("/api/auth/set-initial-password", {
+    method: "POST",
+    body: JSON.stringify({
+      traineeId,
+      currentPassword: hashedCurrent,
+      newPassword: hashedNew,
+      confirmPassword: hashedConfirm,
+    }),
+  });
+}
+
+export function resendTempPassword(traineeId: string) {
+  return request<{ message: string }>(`/api/trainees/${traineeId}/resend-temp-password`, {
+    method: "POST",
+  });
+}
+
+export async function sendPendingEmailVerificationCode(traineeId: string) {
+  const res = await fetch(`/api/trainees/${traineeId}/pending-email/request-code`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+
+  return res.json() as Promise<{ message: string; expiresInHours: number }>;
+}
+
+export function verifyPendingEmailChange(traineeId: string, code: string) {
+  return request<{ message: string; trainee: import("@/types").UserProfile }>(`/api/trainees/${traineeId}/verify-pending-email`, {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
 }
 
 // ── Bulk Export / Import (full database) ─────────────────────
@@ -316,4 +562,96 @@ export async function importAllCSV(file: File) {
   }
 
   return res.json() as Promise<{ trainees: number; supervisors: number; logs: number; skipped: number }>;
+}
+
+export interface BackupImportSummary {
+  imported: number;
+  skipped: number;
+  failed: number;
+}
+
+export interface BackupImportResult {
+  message: string;
+  dryRun: boolean;
+  summary: BackupImportSummary;
+  byTable: Record<string, BackupImportSummary>;
+  failures: Array<{ table: string; reason: string; row: number }>;
+}
+
+export async function verifyBackupSuperPassword(superPasswordHash: string) {
+  return request<{ message: string }>("/api/backup/verify-super", {
+    method: "POST",
+    body: JSON.stringify({ password: superPasswordHash }),
+  });
+}
+
+export async function downloadSystemBackup(superPasswordHash: string) {
+  const res = await fetch(`${BASE}/api/backup/export`, {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      "x-super-password": superPasswordHash,
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get("content-disposition");
+  const filenameMatch = disposition?.match(/filename="?([^\"]+)"?/);
+  const fallback = `${new Date().toISOString().slice(0, 10)}_backup_ojt-tracker.zip`;
+  const filename = filenameMatch?.[1] ?? fallback;
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function importSystemBackup(file: File, superPasswordHash: string, dryRun = false) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("dryRun", dryRun ? "true" : "false");
+
+  const res = await fetch(`${BASE}/api/backup/import`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "x-super-password": superPasswordHash,
+    },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as Record<string, string>).error || res.statusText);
+  }
+
+  return res.json() as Promise<BackupImportResult>;
+}
+
+// ── Settings endpoints ────────────────────────────────────────
+
+export interface SystemSettings {
+  countEarlyInAsOT: boolean;
+  countLateOutAsOT: boolean;
+  countEarlyLunchEndAsOT: boolean;
+}
+
+export function fetchSettings() {
+  return request<SystemSettings>("/api/settings");
+}
+
+export function updateSettings(data: Partial<SystemSettings>) {
+  return request<SystemSettings>("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
 }

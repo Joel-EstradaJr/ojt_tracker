@@ -2,14 +2,19 @@
 // Shared TypeScript types for the frontend
 // ============================================================
 
-/** Trainee as returned by the API (no passwordHash) */
-export interface Trainee {
+/** User profile as returned by the API (no passwordHash) */
+export interface UserProfile {
   id: string;
+  role: "admin" | "trainee";
   lastName: string;
   firstName: string;
   middleName?: string | null;
   suffix?: string | null;
   email: string;
+  pendingEmail?: string | null;
+  pendingEmailRequestedAt?: string | null;
+  pendingEmailExpiresAt?: string | null;
+  emailVerificationStatus?: "verified" | "pending" | "expired";
   contactNumber: string;
   school: string;
   companyName: string;
@@ -18,8 +23,14 @@ export interface Trainee {
   createdAt: string;
   updatedAt: string;
   totalHoursRendered: number;
+  mustChangePassword?: boolean;
+  lockedUntil?: string | null;
+  workSchedule?: Record<string, { start: string; end: string }>;
   supervisors?: Supervisor[];
 }
+
+// Backward-compatible alias while frontend components are migrated.
+export type Trainee = UserProfile;
 
 /** Supervisor belonging to a trainee */
 export interface Supervisor {
@@ -54,11 +65,11 @@ export interface LogEntry {
   timeIn: string;
   lunchStart: string;
   lunchEnd: string;
-  timeOut: string;
+  timeOut: string | null;
   hoursWorked: number;
   overtime: number;
   offsetUsed: number;
-  accomplishment: string;
+  accomplishment: string | null;
   createdAt: string;
 }
 
@@ -69,4 +80,13 @@ export interface LogsResponse {
   totalOvertime: number;
   totalOffsetUsed: number;
   availableOffset: number;
+}
+
+export interface AccomplishmentScript {
+  id: string;
+  traineeId: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
 }

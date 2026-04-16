@@ -10,6 +10,8 @@ import {
   supervisorSchema,
   createLogSchema,
   updateLogSchema,
+  scriptCreateSchema,
+  scriptUpdateSchema,
   sanitizeString,
   formatZodErrors,
 } from "../schemas/validation";
@@ -22,8 +24,11 @@ import {
  * before they reach the route handler. Runs on every mutating route.
  */
 export function sanitizeBody(req: Request, _res: Response, next: NextFunction) {
+  // Password fields must NEVER be sanitized — sanitizeString strips valid password chars (e.g. $)
+  const SKIP_FIELDS = new Set(["password", "confirmPassword", "newPassword"]);
   if (req.body && typeof req.body === "object") {
     for (const key of Object.keys(req.body)) {
+      if (SKIP_FIELDS.has(key)) continue;
       const v = req.body[key];
       if (typeof v === "string") {
         req.body[key] = sanitizeString(v);
@@ -61,6 +66,10 @@ export function validateTrainee(req: Request, res: Response, next: NextFunction)
 
 // ── Validate Trainee (update — no password) ──────────────────
 export function validateTraineeUpdate(req: Request, res: Response, next: NextFunction) {
+  if (Object.prototype.hasOwnProperty.call(req.body ?? {}, "role")) {
+    return res.status(400).json({ error: "Role is read-only once the user is created." });
+  }
+
   const result = updateTraineeSchema.safeParse(req.body);
   if (!result.success) {
     return res.status(400).json({ error: formatZodErrors(result.error) });
@@ -86,7 +95,6 @@ export function validateLogEntry(req: Request, res: Response, next: NextFunction
     return res.status(400).json({ error: formatZodErrors(result.error) });
   }
 
-  // Additional time-ordering validations that are hard to express in Zod
   const { date, timeIn, timeOut, lunchStart, lunchEnd } = result.data;
   const errors: string[] = [];
 
@@ -97,25 +105,29 @@ export function validateLogEntry(req: Request, res: Response, next: NextFunction
   todayDate.setHours(0, 0, 0, 0);
   if (entryDate > todayDate) errors.push("Date cannot be in the future.");
 
-  const tIn = new Date(timeIn).getTime();
-  const tOut = new Date(timeOut).getTime();
-  const lStart = new Date(lunchStart).getTime();
-  const lEnd = new Date(lunchEnd).getTime();
+  // Full validation only when all required fields are present (admin form)
+  if (timeOut) {
+    const tIn = new Date(timeIn).getTime();
+    const tOut = new Date(timeOut).getTime();
 
-  if (tOut <= tIn) errors.push("Time Out must be after Time In.");
+    if (tOut <= tIn) errors.push("Time Out must be after Time In.");
 
-  // Allow no-lunch case: lunchStart === lunchEnd
-  const hasLunch = lStart !== lEnd;
-  if (hasLunch) {
-    if (lStart <= tIn) errors.push("Lunch Start must be after Time In.");
-    if (lEnd >= tOut) errors.push("Lunch End must be before Time Out.");
-    if (lEnd <= lStart) errors.push("Lunch End must be after Lunch Start.");
+    if (lunchStart && lunchEnd) {
+      const lStart = new Date(lunchStart).getTime();
+      const lEnd = new Date(lunchEnd).getTime();
+      const hasLunch = lStart !== lEnd;
+      if (hasLunch) {
+        if (lStart <= tIn) errors.push("Lunch Start must be after Time In.");
+        if (lEnd >= tOut) errors.push("Lunch End must be before Time Out.");
+        if (lEnd <= lStart) errors.push("Lunch End must be after Lunch Start.");
+      }
+
+      const totalMinutes = (tOut - tIn) / 60000;
+      const lunchMinutes = hasLunch ? (lEnd - lStart) / 60000 : 0;
+      const worked = totalMinutes - lunchMinutes;
+      if (worked < 0) errors.push("Hours worked cannot be negative.");
+    }
   }
-
-  const totalMinutes = (tOut - tIn) / 60000;
-  const lunchMinutes = hasLunch ? (lEnd - lStart) / 60000 : 0;
-  const worked = totalMinutes - lunchMinutes;
-  if (worked < 0) errors.push("Hours worked cannot be negative.");
 
   if (errors.length) {
     return res.status(400).json({ error: errors.join(" ") });
@@ -166,6 +178,25 @@ export function validateLogUpdate(req: Request, res: Response, next: NextFunctio
     }
   }
 
+  req.body = result.data;
+  next();
+}
+
+// ── Validate Script (create/update) ─────────────────────────
+export function validateScriptCreate(req: Request, res: Response, next: NextFunction) {
+  const result = scriptCreateSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: formatZodErrors(result.error) });
+  }
+  req.body = result.data;
+  next();
+}
+
+export function validateScriptUpdate(req: Request, res: Response, next: NextFunction) {
+  const result = scriptUpdateSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: formatZodErrors(result.error) });
+  }
   req.body = result.data;
   next();
 }

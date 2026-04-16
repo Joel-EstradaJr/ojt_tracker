@@ -8,6 +8,8 @@
 
 import { Trainee } from "@/types";
 import { calculateExpectedEndDate } from "@/lib/ph-holidays";
+import { formatMinutes } from "@/lib/duration";
+import { formatDisplayDate } from "@/lib/date";
 
 interface Props {
   trainee: Trainee;
@@ -17,25 +19,25 @@ interface Props {
 }
 
 export default function TraineeCard({ trainee, onClick, onEdit, onDelete }: Props) {
+  const requiredMinutes = trainee.requiredHours * 60;
   const percent = Math.min(
     100,
-    Math.round((trainee.totalHoursRendered / trainee.requiredHours) * 100)
+    Math.round((trainee.totalHoursRendered / Math.max(1, requiredMinutes)) * 100)
   );
 
   const isComplete = percent >= 100;
 
-  // Calculate expected end date from remaining hours
-  const remainingHours = Math.max(0, trainee.requiredHours - trainee.totalHoursRendered);
-  const remainingDays = Math.ceil(remainingHours / 8);
-  const endDate = isComplete ? null : calculateExpectedEndDate(remainingDays);
+  // Calculate expected end date from remaining hours using trainee-specific schedule
+  const remainingMinutes = Math.max(0, requiredMinutes - trainee.totalHoursRendered);
+  const endDate = isComplete ? null : calculateExpectedEndDate(remainingMinutes / 60, undefined, trainee.workSchedule);
   const formattedEndDate = endDate
-    ? endDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    ? formatDisplayDate(endDate)
     : null;
 
   return (
-    <div className="card trainee-card" onClick={onClick}>
-      {/* Top section with name and badge */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.5rem" }}>
+    <div className="card trainee-card" onClick={onClick} style={{ display: "flex", flexDirection: "column", height: "345px", overflow: "hidden" }}>
+      {/* Top section with name and badge — fixed */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.5rem", flexShrink: 0 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h3 style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{trainee.displayName}</h3>
         </div>
@@ -46,8 +48,8 @@ export default function TraineeCard({ trainee, onClick, onEdit, onDelete }: Prop
         )}
       </div>
 
-      {/* Meta info */}
-      <div style={{ marginBottom: "1rem" }}>
+      {/* Meta info — scrollable if content is long */}
+      <div style={{ marginBottom: "0.75rem", flex: "1 1 auto", overflow: "auto", minHeight: 0 }}>
         <p className="meta" style={{ marginBottom: "0.15rem" }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5, flexShrink: 0 }}><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></svg>
           {trainee.school}
@@ -58,8 +60,8 @@ export default function TraineeCard({ trainee, onClick, onEdit, onDelete }: Prop
         </p>
       </div>
 
-      {/* Progress bar */}
-      <div className="progress-bar-track">
+      {/* Progress bar — fixed */}
+      <div className="progress-bar-track" style={{ flexShrink: 0 }}>
         <div
           className="progress-bar-fill"
           style={{
@@ -71,10 +73,10 @@ export default function TraineeCard({ trainee, onClick, onEdit, onDelete }: Prop
         />
       </div>
 
-      {/* Hours + Expected End Date — same row */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem", fontSize: "0.84rem", color: "var(--text-muted)" }}>
+      {/* Hours + Expected End Date — fixed */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem", fontSize: "0.84rem", color: "var(--text-muted)", flexShrink: 0 }}>
         <span>
-          <strong style={{ color: "var(--text)" }}>{trainee.totalHoursRendered.toFixed(1)}</strong> / {trainee.requiredHours} hrs
+          <strong style={{ color: "var(--text)" }}>{formatMinutes(trainee.totalHoursRendered)}</strong> / {formatMinutes(requiredMinutes)}
         </span>
         {formattedEndDate && (
           <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
@@ -87,8 +89,8 @@ export default function TraineeCard({ trainee, onClick, onEdit, onDelete }: Prop
         )}
       </div>
 
-      {/* Action buttons */}
-      <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.85rem", borderTop: "1px solid var(--border)", paddingTop: "0.85rem" }}>
+      {/* Action buttons — fixed at bottom */}
+      <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.85rem", borderTop: "1px solid var(--border)", paddingTop: "0.85rem", flexShrink: 0 }}>
         <button
           className="btn btn-outline"
           style={{ flex: 1, fontSize: "0.82rem", padding: "0.4rem 0" }}

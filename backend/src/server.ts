@@ -5,6 +5,7 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import { Server } from "http";
 import traineeRoutes from "./routes/trainee.routes";
 import logRoutes from "./routes/log.routes";
 import supervisorRoutes from "./routes/supervisor.routes";
@@ -12,6 +13,9 @@ import exportRoutes from "./routes/export.routes";
 import importRoutes from "./routes/import.routes";
 import authRoutes from "./routes/auth.routes";
 import emailRoutes from "./routes/email.routes";
+import settingsRoutes from "./routes/settings.routes";
+import scriptRoutes from "./routes/script.routes";
+import backupRoutes from "./routes/backup.routes";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -38,6 +42,9 @@ app.use("/api/export", exportRoutes);
 app.use("/api/import", importRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/email", emailRoutes);
+app.use("/api/settings", settingsRoutes);
+app.use("/api/scripts", scriptRoutes);
+app.use("/api/backup", backupRoutes);
 
 // ── Health check ─────────────────────────────────────────────
 app.get("/health", (_req, res) => {
@@ -45,8 +52,22 @@ app.get("/health", (_req, res) => {
 });
 
 // ── Start ────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`🚀 Backend running on http://localhost:${PORT}`);
+const server: Server = app.listen(PORT, () => {
+  console.log(`Backend running on http://localhost:${PORT}`);
 });
+
+function shutdown(signal: string) {
+  server.close((err?: Error) => {
+    if (err) {
+      console.error(`Error while closing server on ${signal}:`, err);
+      process.exit(1);
+    }
+    process.exit(0);
+  });
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGUSR2", () => shutdown("SIGUSR2"));
 
 export default app;
