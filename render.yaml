@@ -1,0 +1,17 @@
+# Render Blueprint
+# Backend: Render (Node/Express)
+# Database: Supabase (PostgreSQL)
+# Frontend remains on Vercel (configure BACKEND_URL in Vercel env)
+
+services:
+  - type: web
+    name: ojt-tracker-backend
+    env: node
+    rootDir: backend
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npx prisma migrate deploy && npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
