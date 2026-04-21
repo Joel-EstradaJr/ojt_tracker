@@ -7,7 +7,7 @@ import { sendPendingEmailUpdateCode, sendResetCode, sendTemporaryPassword } from
 import { isEmailVerified } from "./email.controller";
 import { setSessionCookie } from "../middleware/auth";
 import { createAuditLog } from "../utils/audit";
-import { fetchFaceEmbedding, getFaceServiceUrl, normalizeImageBase64 } from "../utils/face";
+import { fetchFaceEmbedding, getFaceEngine, normalizeImageBase64 } from "../utils/face";
 
 const SALT_ROUNDS = 10;
 const INITIAL_PASSWORD_REQUIRED_ERROR = "Forgot Password is disabled for this account until the temporary password is changed.";
@@ -181,9 +181,7 @@ export const createTrainee = async (req: Request, res: Response) => {
     // Trainee self-signup requires face enrollment.
     let signupFaceEmbedding: number[] | null = null;
     if (!isAdminCreating && isTraineeRole) {
-      if (!getFaceServiceUrl()) {
-        return res.status(503).json({ error: "Face recognition service is not configured." });
-      }
+      if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
 
       if (!faceImageBase64 || typeof faceImageBase64 !== "string") {
         return res.status(400).json({ error: "Face registration is required." });

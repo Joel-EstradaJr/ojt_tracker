@@ -1,7 +1,7 @@
 ﻿import { Request, Response } from "express";
 import { differenceInMinutes } from "date-fns";
 import prisma from "../utils/prisma";
-import { getFaceServiceUrl, verifyFaceMatch } from "../utils/face";
+import { getFaceEngine, verifyFaceMatch } from "../utils/face";
 
 const DEFAULT_STANDARD_MINUTES = 8 * 60;
 const STANDARD_LUNCH_MINUTES = 60;
@@ -181,9 +181,7 @@ export const createLog = async (req: Request, res: Response) => {
       workSchedule = trainee.workSchedule;
 
       if (trainee.user.faceAttendanceEnabled) {
-        if (!getFaceServiceUrl()) {
-          return res.status(503).json({ error: "Face recognition service is not configured." });
-        }
+        if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
         if (!faceImageBase64 || typeof faceImageBase64 !== "string") {
           return res.status(403).json({ error: "Face verification required." });
         }
@@ -442,9 +440,7 @@ export const patchLogAction = async (req: Request, res: Response) => {
       if (!trainee?.user) return res.status(404).json({ error: "Trainee not found." });
 
       if (trainee.user.faceAttendanceEnabled) {
-        if (!getFaceServiceUrl()) {
-          return res.status(503).json({ error: "Face recognition service is not configured." });
-        }
+        if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
         if (!faceImageBase64 || typeof faceImageBase64 !== "string") {
           return res.status(403).json({ error: "Face verification required." });
         }

@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import prisma from "../utils/prisma";
 import { requireAuth } from "../middleware/auth";
-import { fetchFaceEmbedding, getFaceMatchThreshold, getFaceServiceUrl, verifyFaceMatch } from "../utils/face";
+import { fetchFaceEmbedding, getFaceEngine, getFaceMatchThreshold, getFaceServiceUrl, verifyFaceMatch } from "../utils/face";
 
 async function checkFaceServiceReachable(url: string): Promise<boolean> {
   try {
@@ -20,13 +20,17 @@ const router = Router();
 
 // Public config endpoint so unauthenticated flows (signup/login UI) can show availability.
 router.get("/config", async (_req: Request, res: Response) => {
-  const url = getFaceServiceUrl();
-  if (!url) {
-    return res.json({ faceServiceConfigured: false, faceServiceReachable: false, matchThreshold: getFaceMatchThreshold() });
+  const engine = getFaceEngine();
+  if (engine === "off") {
+    return res.json({ faceServiceConfigured: false, faceServiceReachable: false, matchThreshold: getFaceMatchThreshold(), engine });
+  }
+  if (engine === "local") {
+    return res.json({ faceServiceConfigured: true, faceServiceReachable: true, matchThreshold: getFaceMatchThreshold(), engine });
   }
 
-  const reachable = await checkFaceServiceReachable(url);
-  return res.json({ faceServiceConfigured: true, faceServiceReachable: reachable, matchThreshold: getFaceMatchThreshold() });
+  const url = getFaceServiceUrl();
+  const reachable = url ? await checkFaceServiceReachable(url) : false;
+  return res.json({ faceServiceConfigured: true, faceServiceReachable: reachable, matchThreshold: getFaceMatchThreshold(), engine });
 });
 
 router.get("/status", requireAuth, async (req: Request, res: Response) => {
@@ -55,7 +59,7 @@ router.get("/status", requireAuth, async (req: Request, res: Response) => {
     faceEnabled: Boolean(trainee.user.faceEnabled) && !!trainee.user.faceEmbedding,
     faceAttendanceEnabled: Boolean(trainee.user.faceAttendanceEnabled),
     faceEnrolledAt: trainee.user.faceEnrolledAt,
-    faceServiceConfigured: Boolean(getFaceServiceUrl()),
+    faceServiceConfigured: getFaceEngine() !== "off",
     matchThreshold: getFaceMatchThreshold(),
   });
 });
@@ -66,9 +70,7 @@ router.post("/enroll", requireAuth, async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Trainee session required." });
   }
 
-  if (!getFaceServiceUrl()) {
-    return res.status(503).json({ error: "Face recognition service is not configured." });
-  }
+  if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
 
   const { imageBase64 } = req.body as { imageBase64?: string };
   if (!imageBase64 || typeof imageBase64 !== "string") {
@@ -161,9 +163,7 @@ router.post("/verify", requireAuth, async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Trainee session required." });
   }
 
-  if (!getFaceServiceUrl()) {
-    return res.status(503).json({ error: "Face recognition service is not configured." });
-  }
+  if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
 
   const { imageBase64 } = req.body as { imageBase64?: string };
   if (!imageBase64 || typeof imageBase64 !== "string") {

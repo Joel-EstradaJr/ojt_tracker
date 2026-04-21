@@ -5,7 +5,7 @@ import jwt from "jsonwebtoken";
 import { UserRole } from "@prisma/client";
 import prisma from "../utils/prisma";
 import { sendResetCode } from "../utils/email";
-import { getFaceServiceUrl, verifyFaceMatch } from "../utils/face";
+import { getFaceEngine, verifyFaceMatch } from "../utils/face";
 import { AuthPayload, clearSessionCookie, requireAdmin, requireAuth, setSessionCookie } from "../middleware/auth";
 
 const router = Router();
@@ -274,9 +274,7 @@ router.post("/face-login", async (req: Request, res: Response) => {
   if (!loginIdentifier) return res.status(400).json({ error: "Identifier is required." });
   if (!imageBase64 || typeof imageBase64 !== "string") return res.status(400).json({ error: "imageBase64 is required." });
 
-  if (!getFaceServiceUrl()) {
-    return res.status(503).json({ error: "Face recognition service is not configured." });
-  }
+  if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
 
   const normalizedEmail = loginIdentifier.toLowerCase();
   const isEmailIdentifier = normalizedEmail.includes("@");

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import Jimp from "jimp";
 
 function getEnvNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -12,9 +13,82 @@ export function getFaceServiceUrl(): string | null {
   return url ? url.replace(/\/$/, "") : null;
 }
 
+export type FaceEngine = "remote" | "local" | "off";
+
+export function getFaceEngine(): FaceEngine {
+  const forced = String(process.env.FACE_ENGINE || "").trim().toLowerCase();
+  if (forced === "off") return "off";
+  if (forced === "local") return "local";
+  if (forced === "remote") return getFaceServiceUrl() ? "remote" : "off";
+
+  // Default behavior: remote when URL is provided, otherwise off.
+  return getFaceServiceUrl() ? "remote" : "off";
+}
+
 export function getFaceMatchThreshold(): number {
-  // ArcFace cosine similarity is typically ~0.3–0.5 depending on model/data.
-  return getEnvNumber("FACE_MATCH_THRESHOLD", 0.35);
+  // OpenFace-aligned-image embedding (normalized pixels) tends to have higher cosine similarity.
+  return getEnvNumber("FACE_MATCH_THRESHOLD", 0.85);
+}
+
+function l2Normalize(vec: number[]): number[] {
+  let sumSq = 0;
+  for (const v of vec) sumSq += v * v;
+  const norm = Math.sqrt(sumSq);
+  if (!Number.isFinite(norm) || norm === 0) return vec;
+  for (let i = 0; i < vec.length; i++) vec[i] /= norm;
+  return vec;
+}
+
+async function computeLocalEmbedding(imageBase64: string): Promise<number[]> {
+  const size = getEnvNumber("FACE_LOCAL_SIZE", 64);
+  if (!Number.isFinite(size) || size < 8 || size > 256) {
+    throw new Error("Invalid FACE_LOCAL_SIZE.");
+  }
+
+  const normalized = normalizeImageBase64(imageBase64);
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(normalized, "base64");
+  } catch {
+    throw new Error("Invalid face image encoding.");
+  }
+
+  let img: Jimp;
+  try {
+    img = await Jimp.read(buf);
+  } catch {
+    throw new Error("Invalid face image.");
+  }
+
+  img.resize(size, size, Jimp.RESIZE_BILINEAR);
+  img.grayscale();
+
+  const data = img.bitmap.data; // RGBA
+  const out = new Array<number>(size * size);
+
+  // First pass: collect intensities and compute mean.
+  let mean = 0;
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const v = data[i] / 255; // after grayscale, R==G==B
+    out[p] = v;
+    mean += v;
+  }
+  mean /= out.length;
+
+  // Second pass: variance.
+  let varSum = 0;
+  for (let i = 0; i < out.length; i++) {
+    const d = out[i] - mean;
+    varSum += d * d;
+  }
+  const std = Math.sqrt(varSum / out.length) || 1;
+
+  // Standardize.
+  for (let i = 0; i < out.length; i++) {
+    out[i] = (out[i] - mean) / std;
+  }
+
+  return l2Normalize(out);
 }
 
 export function normalizeImageBase64(input: string): string {
@@ -51,10 +125,12 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 export async function fetchFaceEmbedding(imageBase64: string): Promise<number[]> {
+  const engine = getFaceEngine();
+  if (engine === "off") throw new Error("Face recognition service is not configured.");
+  if (engine === "local") return computeLocalEmbedding(imageBase64);
+
   const baseUrl = getFaceServiceUrl();
-  if (!baseUrl) {
-    throw new Error("Face recognition service is not configured.");
-  }
+  if (!baseUrl) throw new Error("Face recognition service is not configured.");
 
   let res: Response;
   try {

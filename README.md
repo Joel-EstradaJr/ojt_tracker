@@ -29,6 +29,7 @@ A full-stack web application for tracking On-the-Job Training (OJT) hours, accom
 - **Node.js** ≥ 18
 - **npm** ≥ 9 (or yarn / pnpm)
 - **PostgreSQL** running locally or a remote connection string
+- **Docker Desktop** (only if you want to run the optional face recognition `face-service`)
 
 ---
 
@@ -204,7 +205,7 @@ Backend environment variables on Render:
 - `SMTP_EMAIL`, `SMTP_PASSWORD` (used for admin-triggered emails)
 - `EMAIL_INTERNAL_KEY` (must match Vercel)
 - `FACE_SERVICE_URL` = URL of the Python face-service (optional)
-- `FACE_MATCH_THRESHOLD` = cosine similarity threshold (optional, defaults to `0.35`)
+- `FACE_MATCH_THRESHOLD` = cosine similarity threshold (optional, defaults to `0.85`)
 
 ### Frontend (Vercel)
 
@@ -221,9 +222,9 @@ Notes:
 
 ### Face Recognition Service (Optional)
 
-This repo includes a separate service at `face-service/` (FastAPI + InsightFace) used for generating face embeddings.
+This repo includes a separate service at `face-service/` (FastAPI + OpenFace) used for generating face embeddings.
 
-- If trainee self-signup requires face enrollment, the backend must have `FACE_SERVICE_URL` configured and reachable.
+- If trainee self-signup requires face enrollment, the backend must either have `FACE_SERVICE_URL` configured and reachable **or** use the local dev engine (`FACE_ENGINE=local`).
 - The frontend checks availability via `GET /api/face/config` and will block face capture/signup if the service is down.
 
 #### Run locally (Docker)
@@ -233,26 +234,19 @@ docker build -t ojt-face-service ./face-service
 docker run -p 8000:8000 ojt-face-service
 ```
 
-#### Run locally (Python, no Docker)
+Note: OpenFace is a compiled toolkit; in this repo the face-service is intended to run via Docker.
 
-Requires **Python 3.11 or 3.12 (64-bit)**. (Python 3.14 will typically fail because dependencies like NumPy/onnxruntime don’t have wheels yet and will try to compile.)
+#### No Docker workaround (dev)
 
-```bash
-cd face-service
+If you cannot run Docker on your machine, you can use a lightweight local embedding engine in the backend:
 
-# create venv using a supported Python version
-py -3.12 -m venv .venv
-.\.venv\Scripts\python -m pip install -U pip
-.\.venv\Scripts\python -m pip install -r requirements.txt
-
-# start the service
-.\.venv\Scripts\python -m uvicorn app:app --host 0.0.0.0 --port 8000
-```
+- Set `FACE_ENGINE=local` in `backend/.env`, or
+- Run `npm run dev` from the repo root (it will automatically use the local engine when Docker is unavailable).
 
 Then set `FACE_SERVICE_URL=http://localhost:8000` in `backend/.env` (or your backend environment).
 
 Quick check:
-- open `http://localhost:8000/health` (should return `{ "status": "ok" }`)
+- open `http://localhost:8000/health` (should return `{ "status": "ok", "engine": "openface" }`)
 - call `GET http://localhost:4000/api/face/config` (should show `faceServiceReachable: true`)
 
 ---

@@ -6,6 +6,15 @@ const isWin = process.platform === "win32";
 const comspec = process.env.ComSpec || "cmd.exe";
 const npmCmd = "npm";
 
+function dockerAvailable() {
+  try {
+    const r = spawnSync("docker", ["version"], { stdio: "ignore", windowsHide: true });
+    return typeof r.status === "number" && r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
 function npmCommand(npmArgs) {
   if (!isWin) return { cmd: npmCmd, args: npmArgs };
   // Avoid Node's shell=true warning by explicitly running through cmd.exe.
@@ -89,9 +98,16 @@ async function main() {
   const frontendPort = await pickPort(preferredFrontend);
   const backendPort = await pickPort(preferredBackend);
 
-  // Only reserve a face-service port if we intend to run it.
   const skipFace = String(process.env.FACE_SERVICE_SKIP || "").toLowerCase() === "1";
-  const facePort = skipFace ? null : await pickPort(preferredFace);
+  const requiredFace = String(process.env.FACE_SERVICE_REQUIRED || "").toLowerCase() === "1";
+
+  const hasDocker = dockerAvailable();
+  const wantFace = !skipFace;
+  const runDockerFace = wantFace && hasDocker;
+  const useLocalFace = wantFace && !hasDocker;
+
+  // Only reserve a face-service port if we intend to run the Docker face-service.
+  const facePort = runDockerFace ? await pickPort(preferredFace) : null;
 
   const frontendUrl = `http://localhost:${frontendPort}`;
   const backendUrl = `http://localhost:${backendPort}`;
@@ -101,6 +117,7 @@ async function main() {
   console.log(`[dev] Frontend: ${frontendUrl}`);
   console.log(`[dev] Backend:  ${backendUrl}`);
   if (facePort) console.log(`[dev] Face:     http://localhost:${facePort}`);
+  else if (useLocalFace) console.log(`[dev] Face:     local (no Docker)`);
 
   const fresh = process.argv.includes("--fresh");
   if (fresh) {
@@ -111,7 +128,7 @@ async function main() {
 
   const children = [];
 
-  if (!skipFace) {
+  if (runDockerFace) {
     const env = {
       ...baseEnv,
       FACE_SERVICE_PORT: String(facePort),
@@ -125,7 +142,8 @@ async function main() {
       ...baseEnv,
       PORT: String(backendPort),
       FRONTEND_URL: frontendUrl,
-      ...(facePort ? { FACE_SERVICE_URL: `http://localhost:${facePort}` } : {}),
+      ...(runDockerFace && facePort ? { FACE_SERVICE_URL: `http://localhost:${facePort}` } : {}),
+      ...(useLocalFace && !baseEnv.FACE_ENGINE ? { FACE_ENGINE: "local" } : {}),
     };
     children.push(spawnNpm("backend", ["run", "dev", "--prefix", "backend"], env));
   }
@@ -137,8 +155,6 @@ async function main() {
     };
     children.push(spawnNpm("frontend", ["run", "dev", "--prefix", "frontend", "--", "-p", String(frontendPort)], env));
   }
-
-  const requiredFace = String(process.env.FACE_SERVICE_REQUIRED || "").toLowerCase() === "1";
 
   function shutdownAll(exitCode) {
     for (const c of children) killTree(c);
