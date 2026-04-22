@@ -1,6 +1,7 @@
 const { spawn, spawnSync } = require("child_process");
 const net = require("net");
 const path = require("path");
+const fs = require("fs");
 
 const isWin = process.platform === "win32";
 const comspec = process.env.ComSpec || "cmd.exe";
@@ -12,6 +13,33 @@ function dockerAvailable() {
     return typeof r.status === "number" && r.status === 0;
   } catch {
     return false;
+  }
+}
+
+function parseDotEnvFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return {};
+    const text = fs.readFileSync(filePath, "utf8");
+    const out = {};
+
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq <= 0) continue;
+      const key = line.slice(0, eq).trim();
+      let val = line.slice(eq + 1).trim();
+
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+
+      out[key] = val;
+    }
+
+    return out;
+  } catch {
+    return {};
   }
 }
 
@@ -91,20 +119,36 @@ function killTree(child) {
 }
 
 async function main() {
-  const preferredFrontend = toInt(process.env.FRONTEND_PORT) ?? 3000;
-  const preferredBackend = toInt(process.env.BACKEND_PORT) ?? 4000;
-  const preferredFace = toInt(process.env.FACE_SERVICE_PORT) ?? 8000;
+  const backendEnvPath = path.join(__dirname, "..", "backend", ".env");
+  const backendEnvFromFile = parseDotEnvFile(backendEnvPath);
+  // Shell env overrides file env.
+  const baseEnv = { ...backendEnvFromFile, ...process.env };
+
+  const preferredFrontend = toInt(baseEnv.FRONTEND_PORT) ?? 3000;
+  const preferredBackend = toInt(baseEnv.BACKEND_PORT) ?? 4000;
+  const preferredFace = toInt(baseEnv.FACE_SERVICE_PORT) ?? 8000;
 
   const frontendPort = await pickPort(preferredFrontend);
   const backendPort = await pickPort(preferredBackend);
 
-  const skipFace = String(process.env.FACE_SERVICE_SKIP || "").toLowerCase() === "1";
-  const requiredFace = String(process.env.FACE_SERVICE_REQUIRED || "").toLowerCase() === "1";
+  const skipFace = String(baseEnv.FACE_SERVICE_SKIP || "").toLowerCase() === "1";
+  const requiredFace = String(baseEnv.FACE_SERVICE_REQUIRED || "").toLowerCase() === "1";
 
   const hasDocker = dockerAvailable();
   const wantFace = !skipFace;
-  const runDockerFace = wantFace && hasDocker;
-  const useLocalFace = wantFace && !hasDocker;
+
+  // If the user explicitly provided a remote face-service URL, never override it.
+  const externalFaceUrl = (baseEnv.FACE_SERVICE_URL || "").trim() || null;
+
+  // Respect explicit FACE_ENGINE if provided.
+  const explicitEngine = String(baseEnv.FACE_ENGINE || "").trim().toLowerCase();
+  const engineForcedOff = explicitEngine === "off";
+  const engineForcedLocal = explicitEngine === "local";
+  const engineForcedRemote = explicitEngine === "remote";
+
+  const useExternalRemote = wantFace && !!externalFaceUrl && !engineForcedOff && !engineForcedLocal;
+  const runDockerFace = wantFace && !useExternalRemote && !engineForcedOff && !engineForcedLocal && hasDocker;
+  const useLocalFace = wantFace && !useExternalRemote && !engineForcedOff && !runDockerFace;
 
   // Only reserve a face-service port if we intend to run the Docker face-service.
   const facePort = runDockerFace ? await pickPort(preferredFace) : null;
@@ -112,12 +156,12 @@ async function main() {
   const frontendUrl = `http://localhost:${frontendPort}`;
   const backendUrl = `http://localhost:${backendPort}`;
 
-  const baseEnv = { ...process.env };
-
   console.log(`[dev] Frontend: ${frontendUrl}`);
   console.log(`[dev] Backend:  ${backendUrl}`);
-  if (facePort) console.log(`[dev] Face:     http://localhost:${facePort}`);
+  if (useExternalRemote) console.log(`[dev] Face:     ${externalFaceUrl} (external)`);
+  else if (facePort) console.log(`[dev] Face:     http://localhost:${facePort}`);
   else if (useLocalFace) console.log(`[dev] Face:     local (no Docker)`);
+  else console.log(`[dev] Face:     disabled`);
 
   const fresh = process.argv.includes("--fresh");
   if (fresh) {

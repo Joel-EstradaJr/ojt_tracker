@@ -243,6 +243,8 @@ If you cannot run Docker on your machine, you can use a lightweight local embedd
 - Set `FACE_ENGINE=local` in `backend/.env`, or
 - Run `npm run dev` from the repo root (it will automatically use the local engine when Docker is unavailable).
 
+If you still want **OpenFace** without installing Docker locally, run the OpenFace face-service on another machine/server (Docker allowed there) and set `FACE_SERVICE_URL` to that URL before starting the root dev script.
+
 Then set `FACE_SERVICE_URL=http://localhost:8000` in `backend/.env` (or your backend environment).
 
 Quick check:

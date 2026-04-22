@@ -2,6 +2,13 @@
 // Express Server Entry Point
 // ============================================================
 
+import dotenv from "dotenv";
+import path from "path";
+
+// Load backend/.env for local dev and self-hosted runs. In hosted environments,
+// this file typically doesn't exist and dotenv will do nothing.
+dotenv.config({ path: path.join(__dirname, "..", ".env") });
+
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
