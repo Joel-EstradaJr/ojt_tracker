@@ -296,19 +296,21 @@ export async function searchCanonicalEntities(
   query: string
 ): Promise<Array<{ id: string; name: string; usageCount: number }>> {
   const normalized = normalizeEntityInput(query);
+  const prefix = collapseSpaces(query).trim();
+
+  if (!prefix) return [];
 
   if (type === "school") {
     const rows = await prisma.school.findMany({
       where: {
-        status: { not: CanonicalStatus.REJECTED },
+        status: CanonicalStatus.APPROVED,
         OR: [
-          { name: { contains: query, mode: "insensitive" } },
-          { normalizedName: { contains: normalized } },
-          { aliases: { some: { alias: { contains: query, mode: "insensitive" } } } },
+          { name: { startsWith: prefix, mode: "insensitive" } },
+          { normalizedName: { startsWith: normalized } },
+          { aliases: { some: { alias: { startsWith: prefix, mode: "insensitive" } } } },
         ],
       },
       orderBy: [{ usageCount: "desc" }, { name: "asc" }],
-      take: 10,
       select: { id: true, name: true, usageCount: true },
     });
 
@@ -317,15 +319,14 @@ export async function searchCanonicalEntities(
 
   const rows = await prisma.company.findMany({
     where: {
-      status: { not: CanonicalStatus.REJECTED },
+      status: CanonicalStatus.APPROVED,
       OR: [
-        { name: { contains: query, mode: "insensitive" } },
-        { normalizedName: { contains: normalized } },
-        { aliases: { some: { alias: { contains: query, mode: "insensitive" } } } },
+        { name: { startsWith: prefix, mode: "insensitive" } },
+        { normalizedName: { startsWith: normalized } },
+        { aliases: { some: { alias: { startsWith: prefix, mode: "insensitive" } } } },
       ],
     },
     orderBy: [{ usageCount: "desc" }, { name: "asc" }],
-    take: 10,
     select: { id: true, name: true, usageCount: true },
   });
 

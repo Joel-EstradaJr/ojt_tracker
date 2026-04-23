@@ -14,6 +14,7 @@ import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 import TimePicker from "@/components/TimePicker";
 import FaceCaptureDialog from "@/components/FaceCaptureDialog";
 import CanonicalAutocompleteInput from "@/components/CanonicalAutocompleteInput";
+import DatePicker from "@/components/DatePicker";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -63,6 +64,7 @@ export default function CreateTraineeForm({
   const [contactNumber, setContactNumber] = useState("");
   const [school, setSchool] = useState("");
   const [companyName, setCompanyName] = useState("");
+  const [startingDate, setStartingDate] = useState(new Date().toISOString().slice(0, 10));
   const [requiredHours, setRequiredHours] = useState("500");
   const [workSchedule, setWorkSchedule] = useState<WorkSchedule>({ ...DEFAULT_WORK_SCHEDULE });
   const [password, setPassword] = useState("");
@@ -201,6 +203,7 @@ export default function CreateTraineeForm({
       if (isTraineeRole) {
         const schErr = validateInstitution("School", school); if (schErr) { setError(schErr); return; }
         const coErr = validateInstitution("Company name", companyName); if (coErr) { setError(coErr); return; }
+        if (!startingDate) { setError("Starting date is required."); return; }
       }
 
       if (isTraineeRole) {
@@ -238,6 +241,7 @@ export default function CreateTraineeForm({
           contactNumber,
           school: isTraineeRole ? school : "N/A",
           companyName: isTraineeRole ? companyName : "N/A",
+          startingDate: isTraineeRole ? startingDate : new Date().toISOString().slice(0, 10),
           requiredHours: isTraineeRole ? Number(requiredHours) : 1,
           workSchedule: isTraineeRole && Object.keys(workSchedule).length > 0 ? workSchedule : undefined,
           ...(isAdminCreating ? {} : { password, verificationToken }),
@@ -342,17 +346,23 @@ export default function CreateTraineeForm({
               label="School"
               required
               value={school}
-              onChange={(next) => setSchool(sanitizeInput(next))}
+              onChange={(next) => setSchool(isAdminCreating ? sanitizeInput(next).toUpperCase() : sanitizeInput(next))}
               placeholder="School / university name"
+              forceUppercase={isAdminCreating}
             />
             <CanonicalAutocompleteInput
               entityType="company"
               label="Company / Institution Name"
               required
               value={companyName}
-              onChange={(next) => setCompanyName(sanitizeInput(next))}
+              onChange={(next) => setCompanyName(isAdminCreating ? sanitizeInput(next).toUpperCase() : sanitizeInput(next))}
               placeholder="Company / institution where OJT is rendered"
+              forceUppercase={isAdminCreating}
             />
+            <div className="form-group">
+              <label>Starting Date *</label>
+              <DatePicker value={startingDate} onChange={setStartingDate} />
+            </div>
             <div className="form-group">
               <label>Required Hours *</label>
               <input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} />

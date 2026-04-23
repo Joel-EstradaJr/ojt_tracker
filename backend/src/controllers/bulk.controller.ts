@@ -175,6 +175,7 @@ export const importAllCSV = async (req: Request, res: Response) => {
               contactNumber: row.ContactNumber || "",
               school: (row.School || "").toUpperCase(),
               companyId: company.id,
+              startingDate: new Date(),
               requiredHours: parseInt(row.RequiredHours || "0", 10),
             },
           });

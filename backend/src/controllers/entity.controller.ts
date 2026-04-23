@@ -36,25 +36,7 @@ export const searchEntities = async (req: Request, res: Response) => {
 
     const query = String(req.query.query || "").trim();
     if (!query) {
-      if (type === "school") {
-        const schools = await prisma.school.findMany({
-          where: { status: { not: CanonicalStatus.REJECTED } },
-          orderBy: [{ usageCount: "desc" }, { name: "asc" }],
-          take: 10,
-          select: { id: true, name: true, usageCount: true },
-        });
-
-        return res.json({ items: schools });
-      }
-
-      const companies = await prisma.company.findMany({
-        where: { status: { not: CanonicalStatus.REJECTED } },
-        orderBy: [{ usageCount: "desc" }, { name: "asc" }],
-        take: 10,
-        select: { id: true, name: true, usageCount: true },
-      });
-
-      return res.json({ items: companies });
+      return res.json({ items: [] });
     }
 
     const items = await searchCanonicalEntities(prisma, type, query);
@@ -114,6 +96,7 @@ export const adminListEntities = async (req: Request, res: Response) => {
           name: school.name,
           status: school.status,
           usageCount: school.usageCount,
+          createdAt: school.createdAt,
           traineeCount: school._count.trainees,
           aliases: school.aliases,
         })),
@@ -134,6 +117,7 @@ export const adminListEntities = async (req: Request, res: Response) => {
         name: company.name,
         status: company.status,
         usageCount: company.usageCount,
+        createdAt: company.createdAt,
         traineeCount: company._count.trainees,
         aliases: company.aliases,
       })),

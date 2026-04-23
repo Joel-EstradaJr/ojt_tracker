@@ -44,6 +44,7 @@ export async function createTrainee(data: {
   contactNumber: string;
   school: string;
   companyName: string;
+  startingDate: string;
   requiredHours: number;
   workSchedule?: Record<string, { start: string; end: string }>;
   password?: string;
@@ -72,6 +73,7 @@ export function updateTrainee(
     contactNumber: string;
     school: string;
     companyName: string;
+    startingDate: string;
     requiredHours: number;
     workSchedule?: Record<string, { start: string; end: string }>;
     verificationToken?: string;

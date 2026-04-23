@@ -197,10 +197,10 @@ export default function DatePicker({ value, onChange, max }: Props) {
 
   // Display text
   const displayText = value
-    ? formatDisplayDateFromDateOnly(value)
+    ? formatDisplayDateFromDateOnly(value).toUpperCase()
     : "Select date";
 
-  const monthLabel = formatDisplayDateFromDateOnly(`${viewYear}-${pad(viewMonth + 1)}-01`);
+  const monthLabel = formatDisplayDateFromDateOnly(`${viewYear}-${pad(viewMonth + 1)}-01`).toUpperCase();
   const yearGridStart = viewYear - 5;
   const yearGrid = Array.from({ length: 12 }, (_, i) => yearGridStart + i);
 

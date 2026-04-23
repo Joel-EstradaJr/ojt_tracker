@@ -11,6 +11,7 @@ type Props = {
   onChange: (value: string) => void;
   placeholder?: string;
   required?: boolean;
+  forceUppercase?: boolean;
 };
 
 export default function CanonicalAutocompleteInput({
@@ -20,6 +21,7 @@ export default function CanonicalAutocompleteInput({
   onChange,
   placeholder,
   required,
+  forceUppercase,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -31,6 +33,13 @@ export default function CanonicalAutocompleteInput({
   const trimmedValue = useMemo(() => value.trim(), [value]);
 
   useEffect(() => {
+    if (!trimmedValue) {
+      setItems([]);
+      setLoading(false);
+      setOpen(false);
+      return;
+    }
+
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
 
     debounceRef.current = window.setTimeout(async () => {
@@ -64,40 +73,44 @@ export default function CanonicalAutocompleteInput({
   }, []);
 
   const selectItem = (name: string) => {
-    onChange(name);
+    onChange(forceUppercase ? name.toUpperCase() : name);
     setOpen(false);
     setActiveIndex(-1);
   };
+
+  const displayValue = forceUppercase ? value.toUpperCase() : value;
+  const displayItems = forceUppercase ? items.map((item) => ({ ...item, name: item.name.toUpperCase() })) : items;
+  const shouldShowDropdown = open && trimmedValue.length > 0 && displayItems.length > 0;
 
   return (
     <div className="form-group" ref={rootRef} style={{ position: "relative" }}>
       <label>{label}{required ? " *" : ""}</label>
       <input
-        value={value}
+        value={displayValue}
         onChange={(event) => {
-          onChange(event.target.value);
-          setOpen(true);
+          const nextValue = forceUppercase ? event.target.value.toUpperCase() : event.target.value;
+          onChange(nextValue);
+          setOpen(nextValue.trim().length > 0);
           setActiveIndex(-1);
         }}
-        onFocus={() => setOpen(true)}
         placeholder={placeholder}
         autoComplete="off"
         onKeyDown={(event) => {
-          if (!open || items.length === 0) return;
+          if (!open || displayItems.length === 0) return;
 
           if (event.key === "ArrowDown") {
             event.preventDefault();
-            setActiveIndex((prev) => (prev + 1 >= items.length ? 0 : prev + 1));
+            setActiveIndex((prev) => (prev + 1 >= displayItems.length ? 0 : prev + 1));
           }
 
           if (event.key === "ArrowUp") {
             event.preventDefault();
-            setActiveIndex((prev) => (prev <= 0 ? items.length - 1 : prev - 1));
+            setActiveIndex((prev) => (prev <= 0 ? displayItems.length - 1 : prev - 1));
           }
 
           if (event.key === "Enter" && activeIndex >= 0) {
             event.preventDefault();
-            selectItem(items[activeIndex].name);
+            selectItem(displayItems[activeIndex].name);
           }
 
           if (event.key === "Escape") {
@@ -106,7 +119,7 @@ export default function CanonicalAutocompleteInput({
         }}
       />
 
-      {open && (
+      {shouldShowDropdown && (
         <div
           style={{
             position: "absolute",
@@ -117,7 +130,7 @@ export default function CanonicalAutocompleteInput({
             background: "var(--surface)",
             border: "1px solid var(--border)",
             borderRadius: "var(--radius-sm)",
-            maxHeight: "200px",
+            maxHeight: "12.5rem",
             overflowY: "auto",
             boxShadow: "0 10px 20px rgba(0, 0, 0, 0.08)",
           }}
@@ -128,13 +141,7 @@ export default function CanonicalAutocompleteInput({
             </div>
           )}
 
-          {!loading && items.length === 0 && (
-            <div style={{ padding: "0.6rem 0.7rem", color: "var(--text-muted)", fontSize: "0.82rem" }}>
-              No matches. Press enter to keep your own value.
-            </div>
-          )}
-
-          {!loading && items.map((item, index) => (
+          {!loading && displayItems.map((item, index) => (
             <button
               key={item.id}
               type="button"
@@ -148,6 +155,7 @@ export default function CanonicalAutocompleteInput({
                 border: "none",
                 background: activeIndex === index ? "var(--bg-subtle)" : "transparent",
                 padding: "0.6rem 0.7rem",
+                minHeight: "2.5rem",
                 cursor: "pointer",
               }}
             >

@@ -107,6 +107,7 @@ function transformTrainee(trainee: any) {
     contactNumber: trainee.contactNumber,
     school: trainee.schoolEntity?.name ?? trainee.school,
     companyName: trainee.company?.name ?? "",
+    startingDate: trainee.startingDate ? new Date(trainee.startingDate).toISOString().slice(0, 10) : "",
     requiredHours: trainee.requiredHours,
     workSchedule: mapSchedule(trainee.workSchedule || []),
     mustChangePassword: trainee.user.mustChangePassword,
@@ -140,7 +141,7 @@ export const createTrainee = async (req: Request, res: Response) => {
       role,
       lastName, firstName, middleName, suffix,
       email, contactNumber, school, companyName,
-      requiredHours, workSchedule,
+      startingDate, requiredHours, workSchedule,
       password, supervisors, verificationToken,
       faceImageBase64,
     } = req.body;
@@ -219,8 +220,8 @@ export const createTrainee = async (req: Request, res: Response) => {
     const resolvedEntities = await resolveCanonicalEntities(prisma, {
       schoolInput: isTraineeRole ? String(school) : ADMIN_DEFAULT_SCHOOL,
       companyInput: isTraineeRole ? String(companyName) : ADMIN_DEFAULT_COMPANY,
-      autoApprove: isAdminCreating,
     });
+    const resolvedStartingDate = isTraineeRole ? String(startingDate || new Date().toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10);
 
     const created = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
@@ -252,6 +253,7 @@ export const createTrainee = async (req: Request, res: Response) => {
           schoolEntityId: resolvedEntities.school.id,
           originalSchoolInput: resolvedEntities.school.originalInput,
           originalCompanyInput: resolvedEntities.company.originalInput,
+          startingDate: new Date(`${resolvedStartingDate}T00:00:00`),
           companyId: resolvedEntities.company.id,
           requiredHours: isTraineeRole ? Number(requiredHours) : ADMIN_DEFAULT_REQUIRED_HOURS,
         },
@@ -328,7 +330,7 @@ export const updateTrainee = async (req: Request, res: Response) => {
     const requestedRole = req.body?.role as string | undefined;
     const {
       lastName, firstName, middleName, suffix,
-      email, contactNumber, school, companyName, requiredHours,
+      email, contactNumber, school, companyName, startingDate, requiredHours,
       workSchedule,
       verificationToken,
     } = req.body;
@@ -362,11 +364,13 @@ export const updateTrainee = async (req: Request, res: Response) => {
     }
 
     const isTraineeRole = current.user.role === UserRole.TRAINEE;
+    if (!isAdminRequester && Object.prototype.hasOwnProperty.call(req.body ?? {}, "startingDate")) {
+      return res.status(403).json({ error: "Only admins can edit starting date." });
+    }
     const resolvedEntities = isTraineeRole
       ? await resolveCanonicalEntities(prisma, {
         schoolInput: String(school),
         companyInput: String(companyName),
-        autoApprove: isAdminRequester,
       })
       : null;
 
@@ -418,6 +422,7 @@ export const updateTrainee = async (req: Request, res: Response) => {
               schoolEntityId: resolvedEntities?.school.id,
               originalSchoolInput: resolvedEntities?.school.originalInput,
               originalCompanyInput: resolvedEntities?.company.originalInput,
+              ...(isAdminRequester && startingDate ? { startingDate: new Date(`${startingDate}T00:00:00`) } : {}),
               companyId: resolvedEntities?.company.id,
               requiredHours: Number(requiredHours),
             }

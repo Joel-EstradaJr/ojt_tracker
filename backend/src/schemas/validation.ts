@@ -235,6 +235,7 @@ export const createTraineeSchema = z.object({
   contactNumber: contactNumberField("Contact number", true),
   school: institutionField("School"),
   companyName: institutionField("Company name"),
+  startingDate: z.string().trim().optional(),
   requiredHours: z.coerce
     .number({ message: "Required hours must be a number." })
     .int("Required hours must be a whole number.")
@@ -248,6 +249,10 @@ export const createTraineeSchema = z.object({
   verificationToken: z.string().min(1, "Email verification is required.").optional(),
   // Optional for admins; required for self-signup is enforced in the controller.
   faceImageBase64: z.string().trim().max(2_000_000, "Face image is too large.").optional(),
+}).superRefine((data, ctx) => {
+  if ((data.role ?? "trainee") !== "admin" && !data.startingDate) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["startingDate"], message: "Starting date is required." });
+  }
 });
 
 /** Trainee update payload (password not required). */
@@ -260,6 +265,7 @@ export const updateTraineeSchema = z.object({
   contactNumber: contactNumberField("Contact number", true),
   school: institutionField("School"),
   companyName: institutionField("Company name"),
+  startingDate: z.string().trim().min(1, "Starting date is required.").optional(),
   requiredHours: z.coerce
     .number({ message: "Required hours must be a number." })
     .int("Required hours must be a whole number.")

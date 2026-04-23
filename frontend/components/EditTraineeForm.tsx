@@ -13,6 +13,7 @@ import { DEFAULT_WORK_SCHEDULE, WorkSchedule } from "@/lib/ph-holidays";
 import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 import TimePicker from "@/components/TimePicker";
 import CanonicalAutocompleteInput from "@/components/CanonicalAutocompleteInput";
+import DatePicker from "@/components/DatePicker";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -86,6 +87,7 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
   const [contactNumber, setContactNumber] = useState(trainee.contactNumber);
   const [school, setSchool] = useState(trainee.school);
   const [companyName, setCompanyName] = useState(trainee.companyName);
+  const [startingDate, setStartingDate] = useState(trainee.startingDate);
   const [requiredHours, setRequiredHours] = useState(String(trainee.requiredHours));
   const [workSchedule, setWorkSchedule] = useState<WorkSchedule>(
     (trainee.workSchedule as WorkSchedule | undefined) ?? { ...DEFAULT_WORK_SCHEDULE }
@@ -162,7 +164,7 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); setError("");
-    if (!lastName || !firstName || !email || !contactNumber || !school || !companyName || !requiredHours) { setError("All required fields must be filled."); return; }
+    if (!lastName || !firstName || !email || !contactNumber || !school || !companyName || !startingDate || !requiredHours) { setError("All required fields must be filled."); return; }
     const lnErr = validateName("Last name", lastName, true); if (lnErr) { setError(lnErr); return; }
     const fnErr = validateName("First name", firstName, true); if (fnErr) { setError(fnErr); return; }
     const mnErr = validateName("Middle name", middleName, false); if (mnErr) { setError(mnErr); return; }
@@ -225,6 +227,7 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
     cmp("Email", trainee.email, email); cmp("Contact Number", trainee.contactNumber, contactNumber);
     if (isTraineeRole) {
       cmp("School", trainee.school, school); cmp("Company Name", trainee.companyName, companyName);
+      cmp("Starting Date", trainee.startingDate, startingDate);
       cmp("Required Hours", String(trainee.requiredHours), requiredHours);
       const originalWorkSchedule = normalizeWorkSchedule(trainee.workSchedule as WorkSchedule | undefined);
       const currentWorkSchedule = normalizeWorkSchedule(workSchedule);
@@ -267,6 +270,7 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
           contactNumber,
           school,
           companyName,
+          startingDate,
           requiredHours: Number(requiredHours),
           workSchedule: Object.keys(workSchedule).length > 0 ? workSchedule : undefined,
         });
@@ -528,17 +532,20 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
                   label="School"
                   required
                   value={school}
-                  onChange={(next) => setSchool(sanitizeInput(next))}
+                  onChange={(next) => setSchool(sanitizeInput(next).toUpperCase())}
                   placeholder="School / university name"
+                  forceUppercase
                 />
                 <CanonicalAutocompleteInput
                   entityType="company"
                   label="Company / Institution Name"
                   required
                   value={companyName}
-                  onChange={(next) => setCompanyName(sanitizeInput(next))}
+                  onChange={(next) => setCompanyName(sanitizeInput(next).toUpperCase())}
                   placeholder="Company / institution where OJT is rendered"
+                  forceUppercase
                 />
+                <div className="form-group"><label>Starting Date *</label><DatePicker value={startingDate} onChange={setStartingDate} /></div>
                 <div className="form-group"><label>Required Hours *</label><input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} /></div>
 
                 {/* Work Schedule */}

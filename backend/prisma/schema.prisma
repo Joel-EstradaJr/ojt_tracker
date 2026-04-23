@@ -95,6 +95,7 @@ model UserProfile {
   schoolEntityId String?
   originalSchoolInput String?
   originalCompanyInput String?
+  startingDate  DateTime
   companyId     String                    // FK → Company (normalized)
   requiredHours Int
   createdAt     DateTime @default(now())

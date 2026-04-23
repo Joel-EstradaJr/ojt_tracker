@@ -18,6 +18,7 @@ export interface UserProfile {
   contactNumber: string;
   school: string;
   companyName: string;
+  startingDate: string;
   requiredHours: number;
   displayName: string;
   createdAt: string;
@@ -95,6 +96,8 @@ export interface CanonicalEntitySuggestion {
   id: string;
   name: string;
   usageCount: number;
+  status?: "PENDING" | "APPROVED" | "REJECTED";
+  createdAt?: string;
 }
 
 export interface CanonicalEntityAlias {
@@ -110,5 +113,6 @@ export interface CanonicalEntityAdminItem {
   status: "PENDING" | "APPROVED" | "REJECTED";
   usageCount: number;
   traineeCount: number;
+  createdAt: string;
   aliases: CanonicalEntityAlias[];
 }

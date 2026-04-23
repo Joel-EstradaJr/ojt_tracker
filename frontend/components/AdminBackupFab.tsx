@@ -148,10 +148,10 @@ export default function AdminBackupFab() {
                 }}
               >
                 <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: "0.75rem" }}>
-                  Enter SUPER_PASSWORD to continue.
+                  Enter CODE to continue.
                 </p>
                 <div className="form-group" style={{ marginBottom: "0.75rem" }}>
-                  <label>SUPER_PASSWORD</label>
+                  <label>CODE</label>
                   <input
                     type="password"
                     value={password}

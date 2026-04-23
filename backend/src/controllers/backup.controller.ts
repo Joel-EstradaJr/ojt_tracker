@@ -254,6 +254,7 @@ async function exportDatabaseAsZip(): Promise<Buffer> {
       "contactNumber",
       "school",
       "companyName",
+      "startingDate",
       "requiredHours",
       "createdAt",
       "updatedAt",
@@ -267,6 +268,7 @@ async function exportDatabaseAsZip(): Promise<Buffer> {
       contactNumber: t.contactNumber,
       school: t.school,
       companyName: t.company.name,
+      startingDate: t.startingDate.toISOString().slice(0, 10),
       requiredHours: t.requiredHours,
       createdAt: t.createdAt.toISOString(),
       updatedAt: t.updatedAt.toISOString(),
@@ -547,6 +549,7 @@ async function importFromTableCsv(tables: Record<string, CsvRow[]>, stats: Impor
           contactNumber: row.contactNumber || "",
           school: row.school || "",
           companyId,
+          startingDate: parseMaybeDate(row.startingDate) || new Date(),
           requiredHours: parseIntSafe(row.requiredHours),
         },
       });
@@ -960,6 +963,7 @@ async function importLegacyCombinedCsv(tables: Record<string, CsvRow[]>, stats: 
         contactNumber: row.ContactNumber || "",
         school: row.School || "",
         companyName: row.CompanyName || "N/A",
+        startingDate: row.StartingDate || row.StartDate || new Date().toISOString().slice(0, 10),
         requiredHours: row.RequiredHours || "0",
       });
     } else if (type === "SUPERVISOR") {
