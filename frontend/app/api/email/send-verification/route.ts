@@ -6,7 +6,7 @@
 // outbound SMTP) instead of Railway (which blocks SMTP).
 //
 // Flow:
-// 1. Calls Railway backend to generate & store the verification code
+// 1. Calls the backend to generate and store the verification code
 // 2. Sends the email from Vercel via Gmail SMTP
 // 3. Returns success to the client
 // ============================================================
@@ -85,17 +85,12 @@ export async function POST(req: NextRequest) {
       </div>
     `;
 
-        const isDev = process.env.NODE_ENV !== "production";
-
         // 2. Send the email from Vercel via SMTP
         const smtpUser = process.env.SMTP_EMAIL?.trim() || "";
         // App passwords sometimes get copied with whitespace — strip spaces/newlines.
         const smtpPass = (process.env.SMTP_PASSWORD || "").trim().replace(/\s+/g, "");
 
         if (!smtpUser || !smtpPass) {
-          if (isDev) {
-            return NextResponse.json({ message: "Verification code generated (dev).", devCode: code });
-          }
           return NextResponse.json({ error: "SMTP is not configured." }, { status: 500 });
         }
 
@@ -137,10 +132,6 @@ export async function POST(req: NextRequest) {
 
         if (!emailSent) {
           console.error("send-verification SMTP error:", lastErr);
-          if (isDev) {
-            // Unblock local development (some networks block outbound SMTP).
-            return NextResponse.json({ message: "Verification code generated (dev).", devCode: code });
-          }
           return NextResponse.json({ error: "Failed to send verification code." }, { status: 500 });
         }
 

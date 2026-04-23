@@ -83,6 +83,57 @@ export function updateTrainee(
   });
 }
 
+export function fetchEntitySuggestions(type: "school" | "company", query: string) {
+  const qp = new URLSearchParams();
+  if (query.trim()) qp.set("query", query.trim());
+  const suffix = qp.toString() ? `?${qp.toString()}` : "";
+  return request<{ items: import("@/types").CanonicalEntitySuggestion[] }>(`/api/entities/${type}${suffix}`);
+}
+
+export function resolveEntityValue(type: "school" | "company", value: string) {
+  return request<{
+    id: string;
+    canonicalName: string;
+    originalInput: string;
+    source: "exact" | "alias" | "fuzzy" | "new";
+  }>(`/api/entities/${type}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ value }),
+  });
+}
+
+export function adminFetchEntities(type: "school" | "company") {
+  return request<{ items: import("@/types").CanonicalEntityAdminItem[] }>(`/api/entities/admin/${type}`);
+}
+
+export function adminMergeEntities(type: "school" | "company", sourceId: string, targetId: string) {
+  return request<{ message: string }>(`/api/entities/admin/${type}/merge`, {
+    method: "POST",
+    body: JSON.stringify({ sourceId, targetId }),
+  });
+}
+
+export function adminReviewEntity(type: "school" | "company", id: string, status: "PENDING" | "APPROVED" | "REJECTED") {
+  return request<{ message?: string }>(`/api/entities/admin/${type}/${id}/review`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function adminAddAlias(type: "school" | "company", id: string, alias: string) {
+  return request<{ message: string }>(`/api/entities/admin/${type}/${id}/aliases`, {
+    method: "POST",
+    body: JSON.stringify({ alias }),
+  });
+}
+
+export function adminReassignAlias(type: "school" | "company", aliasId: string, canonicalId: string) {
+  return request<{ message: string }>(`/api/entities/admin/${type}/aliases/${aliasId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ canonicalId }),
+  });
+}
+
 export async function verifyPassword(id: string, password: string) {
   const hashed = await sha256(password);
   return request<import("@/types").UserProfile>(`/api/trainees/${id}/verify`, {
@@ -157,7 +208,7 @@ export async function sendEmailVerification(email: string) {
     const body = await res.json().catch(() => ({}));
     throw new Error((body as Record<string, string>).error || res.statusText);
   }
-  return res.json() as Promise<{ message: string; devCode?: string }>;
+  return res.json() as Promise<{ message: string }>;
 }
 
 export async function verifyEmailCode(email: string, code: string) {

@@ -90,3 +90,25 @@ export interface AccomplishmentScript {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface CanonicalEntitySuggestion {
+  id: string;
+  name: string;
+  usageCount: number;
+}
+
+export interface CanonicalEntityAlias {
+  id: string;
+  alias: string;
+  normalizedAlias: string;
+  createdAt: string;
+}
+
+export interface CanonicalEntityAdminItem {
+  id: string;
+  name: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  usageCount: number;
+  traineeCount: number;
+  aliases: CanonicalEntityAlias[];
+}

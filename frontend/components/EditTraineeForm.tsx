@@ -12,6 +12,7 @@ import { sanitizeInput, validateName, validateInstitution, isValidEmail, isValid
 import { DEFAULT_WORK_SCHEDULE, WorkSchedule } from "@/lib/ph-holidays";
 import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 import TimePicker from "@/components/TimePicker";
+import CanonicalAutocompleteInput from "@/components/CanonicalAutocompleteInput";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -83,8 +84,8 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
   const [suffix, setSuffix] = useState((trainee.suffix ?? "").toUpperCase());
   const [email, setEmail] = useState(trainee.email);
   const [contactNumber, setContactNumber] = useState(trainee.contactNumber);
-  const [school, setSchool] = useState(trainee.school.toUpperCase());
-  const [companyName, setCompanyName] = useState(trainee.companyName.toUpperCase());
+  const [school, setSchool] = useState(trainee.school);
+  const [companyName, setCompanyName] = useState(trainee.companyName);
   const [requiredHours, setRequiredHours] = useState(String(trainee.requiredHours));
   const [workSchedule, setWorkSchedule] = useState<WorkSchedule>(
     (trainee.workSchedule as WorkSchedule | undefined) ?? { ...DEFAULT_WORK_SCHEDULE }
@@ -522,8 +523,22 @@ export default function EditTraineeForm({ trainee, onClose, onUpdated }: Props) 
 
             {isTraineeRole && (
               <>
-                <div className="form-group"><label>School *</label><input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
-                <div className="form-group"><label>Company / Institution Name *</label><input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value).toUpperCase())} style={{ textTransform: "uppercase" }} /></div>
+                <CanonicalAutocompleteInput
+                  entityType="school"
+                  label="School"
+                  required
+                  value={school}
+                  onChange={(next) => setSchool(sanitizeInput(next))}
+                  placeholder="School / university name"
+                />
+                <CanonicalAutocompleteInput
+                  entityType="company"
+                  label="Company / Institution Name"
+                  required
+                  value={companyName}
+                  onChange={(next) => setCompanyName(sanitizeInput(next))}
+                  placeholder="Company / institution where OJT is rendered"
+                />
                 <div className="form-group"><label>Required Hours *</label><input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} /></div>
 
                 {/* Work Schedule */}

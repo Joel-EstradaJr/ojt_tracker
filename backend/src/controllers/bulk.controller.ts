@@ -5,6 +5,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { UserRole } from "@prisma/client";
 import prisma from "../utils/prisma";
+import { normalizeEntityInput } from "../utils/canonical-entities";
 
 function csvVal(v: string): string {
   return `"${v.replace(/"/g, '""')}"`;
@@ -140,10 +141,14 @@ export const importAllCSV = async (req: Request, res: Response) => {
           continue;
         }
 
+        const companyName = (row.CompanyName || "N/A").toUpperCase();
         const company = await prisma.company.upsert({
-          where: { name: (row.CompanyName || "N/A").toUpperCase() },
+          where: { name: companyName },
           update: {},
-          create: { name: (row.CompanyName || "N/A").toUpperCase() },
+          create: {
+            name: companyName,
+            normalizedName: normalizeEntityInput(companyName),
+          },
         });
 
         const created = await prisma.$transaction(async (tx) => {

@@ -8,6 +8,7 @@ import { isEmailVerified } from "./email.controller";
 import { setSessionCookie } from "../middleware/auth";
 import { createAuditLog } from "../utils/audit";
 import { fetchFaceEmbedding, getFaceEngine, normalizeImageBase64 } from "../utils/face";
+import { resolveCanonicalEntities } from "../utils/canonical-entities";
 
 const SALT_ROUNDS = 10;
 const INITIAL_PASSWORD_REQUIRED_ERROR = "Forgot Password is disabled for this account until the temporary password is changed.";
@@ -78,14 +79,6 @@ function mapSchedule(entries: Array<{ dayOfWeek: number; startTime: Date; endTim
   return result;
 }
 
-async function upsertCompany(name: string) {
-  return prisma.company.upsert({
-    where: { name },
-    update: {},
-    create: { name },
-  });
-}
-
 function transformTrainee(trainee: any) {
   const totalHours = (trainee.logs || []).reduce((sum: number, l: { hoursWorked: number }) => sum + l.hoursWorked, 0);
   const supervisors = (trainee.supervisors || []).map((s: any) => ({ ...s, displayName: displayName(s) }));
@@ -112,7 +105,7 @@ function transformTrainee(trainee: any) {
     pendingEmailExpiresAt: trainee.user.pendingEmailExpiresAt ?? null,
     emailVerificationStatus,
     contactNumber: trainee.contactNumber,
-    school: trainee.school,
+    school: trainee.schoolEntity?.name ?? trainee.school,
     companyName: trainee.company?.name ?? "",
     requiredHours: trainee.requiredHours,
     workSchedule: mapSchedule(trainee.workSchedule || []),
@@ -131,6 +124,7 @@ async function getTraineeWithRelations(id: string) {
     where: { id },
     include: {
       user: true,
+      schoolEntity: true,
       company: true,
       workSchedule: true,
       supervisors: true,
@@ -222,7 +216,11 @@ export const createTrainee = async (req: Request, res: Response) => {
     }
 
     const passwordHash = await bcrypt.hash(actualPassword, SALT_ROUNDS);
-    const company = await upsertCompany(isTraineeRole ? String(companyName) : ADMIN_DEFAULT_COMPANY);
+    const resolvedEntities = await resolveCanonicalEntities(prisma, {
+      schoolInput: isTraineeRole ? String(school) : ADMIN_DEFAULT_SCHOOL,
+      companyInput: isTraineeRole ? String(companyName) : ADMIN_DEFAULT_COMPANY,
+      autoApprove: isAdminCreating,
+    });
 
     const created = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
@@ -250,8 +248,11 @@ export const createTrainee = async (req: Request, res: Response) => {
           middleName: middleName || null,
           suffix: suffix || null,
           contactNumber,
-          school: isTraineeRole ? school : ADMIN_DEFAULT_SCHOOL,
-          companyId: company.id,
+          school: resolvedEntities.school.canonicalName,
+          schoolEntityId: resolvedEntities.school.id,
+          originalSchoolInput: resolvedEntities.school.originalInput,
+          originalCompanyInput: resolvedEntities.company.originalInput,
+          companyId: resolvedEntities.company.id,
           requiredHours: isTraineeRole ? Number(requiredHours) : ADMIN_DEFAULT_REQUIRED_HOURS,
         },
       });
@@ -305,16 +306,6 @@ export const createTrainee = async (req: Request, res: Response) => {
 
     if (isAdminCreating && tempPasswordPlaintext) {
       const name = transformed.displayName;
-      const internalKey = req.headers["x-internal-key"] as string | undefined;
-      if (internalKey && process.env.EMAIL_INTERNAL_KEY && internalKey === process.env.EMAIL_INTERNAL_KEY) {
-        return res.status(201).json({
-          ...transformed,
-          _tempPassword: tempPasswordPlaintext,
-          _tempEmail: transformed.email,
-          _tempDisplayName: name,
-        });
-      }
-
       try {
         await sendTemporaryPassword(transformed.email, tempPasswordPlaintext, name);
       } catch (emailErr) {
@@ -371,7 +362,13 @@ export const updateTrainee = async (req: Request, res: Response) => {
     }
 
     const isTraineeRole = current.user.role === UserRole.TRAINEE;
-    const company = await upsertCompany(isTraineeRole ? String(companyName) : ADMIN_DEFAULT_COMPANY);
+    const resolvedEntities = isTraineeRole
+      ? await resolveCanonicalEntities(prisma, {
+        schoolInput: String(school),
+        companyInput: String(companyName),
+        autoApprove: isAdminRequester,
+      })
+      : null;
 
     await prisma.$transaction(async (tx) => {
       const userUpdateData: {
@@ -417,8 +414,11 @@ export const updateTrainee = async (req: Request, res: Response) => {
           contactNumber,
           ...(isTraineeRole
             ? {
-              school,
-              companyId: company.id,
+              school: resolvedEntities?.school.canonicalName,
+              schoolEntityId: resolvedEntities?.school.id,
+              originalSchoolInput: resolvedEntities?.school.originalInput,
+              originalCompanyInput: resolvedEntities?.company.originalInput,
+              companyId: resolvedEntities?.company.id,
               requiredHours: Number(requiredHours),
             }
             : {}),
@@ -458,6 +458,7 @@ export const getAllTrainees = async (_req: Request, res: Response) => {
     const trainees = await prisma.userProfile.findMany({
       include: {
         user: true,
+        schoolEntity: true,
         company: true,
         workSchedule: true,
         supervisors: true,
@@ -544,17 +545,6 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     const [local, domain] = trainee.user.email.split("@");
     const masked = local.slice(0, 3) + "***@" + domain;
-
-    const internalKey = req.headers["x-internal-key"] as string | undefined;
-    if (internalKey && process.env.EMAIL_INTERNAL_KEY && internalKey === process.env.EMAIL_INTERNAL_KEY) {
-      return res.json({
-        message: `Verification code sent to ${masked}.`,
-        maskedEmail: masked,
-        code,
-        displayName: displayName(trainee),
-        email: trainee.user.email,
-      });
-    }
 
     await sendResetCode(trainee.user.email, code, displayName(trainee));
     return res.json({ message: `Verification code sent to ${masked}.`, maskedEmail: masked });
@@ -860,19 +850,7 @@ export const requestPendingEmailVerificationCode = async (req: Request, res: Res
       }),
     ]);
 
-    const internalKey = req.headers["x-internal-key"] as string | undefined;
-    if (internalKey && process.env.EMAIL_INTERNAL_KEY && internalKey === process.env.EMAIL_INTERNAL_KEY) {
-      return res.json({
-        message: "Pending email verification code generated.",
-        code,
-        pendingEmail: trainee.user.pendingEmail,
-        displayName: displayName(trainee),
-        expiresInHours: 24,
-      });
-    }
-
-    // Fallback for environments that send email directly from backend.
-    // If this fails, return an error instead of silently succeeding.
+    // Send verification code via email. No fallback — fail cleanly on error.
     await sendPendingEmailUpdateCode(trainee.user.pendingEmail, code, displayName(trainee));
 
     return res.json({ message: "Verification code sent to the pending email address." });

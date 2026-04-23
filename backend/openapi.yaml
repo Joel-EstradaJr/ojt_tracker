@@ -1,0 +1,2688 @@
+openapi: 3.0.3
+info:
+  title: OJT Tracker Backend API
+  version: 1.0.0
+  description: |
+    OpenAPI specification for the OJT Tracker backend. This spec powers Swagger UI
+    at /docs and Redoc at /redoc.
+servers:
+  - url: http://localhost:4000
+    description: Local development
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: ojt_session
+      description: HttpOnly session cookie issued by /api/auth/login.
+
+  parameters:
+    InternalKeyHeader:
+      name: x-internal-key
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Internal key used by server-side callers to receive debug-only fields.
+    SuperPasswordHeader:
+      name: x-super-password
+      in: header
+      required: true
+      schema:
+        type: string
+      description: SHA-256 hash of SUPER_PASSWORD.
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+      example:
+        error: Authentication required.
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required: [message]
+      example:
+        message: Done.
+
+    WorkScheduleEntry:
+      type: object
+      properties:
+        start:
+          type: string
+          example: "08:00"
+        end:
+          type: string
+          example: "17:00"
+      required: [start, end]
+
+    Supervisor:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        traineeId:
+          type: string
+          format: uuid
+        lastName:
+          type: string
+        firstName:
+          type: string
+        middleName:
+          type: string
+          nullable: true
+        suffix:
+          type: string
+          nullable: true
+        contactNumber:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        displayName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      example:
+        id: "c2f1b8c0-7f0f-4db2-a9dd-2c1e4012f8b2"
+        traineeId: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+        lastName: "DOE"
+        firstName: "JANE"
+        middleName: "A"
+        suffix: "JR"
+        contactNumber: "+639171234567"
+        email: "supervisor@example.com"
+        displayName: "JANE A DOE JR"
+        createdAt: "2026-04-01T08:00:00.000Z"
+        updatedAt: "2026-04-01T08:00:00.000Z"
+
+    Trainee:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [admin, trainee]
+        lastName:
+          type: string
+        firstName:
+          type: string
+        middleName:
+          type: string
+          nullable: true
+        suffix:
+          type: string
+          nullable: true
+        email:
+          type: string
+          format: email
+        pendingEmail:
+          type: string
+          nullable: true
+        pendingEmailRequestedAt:
+          type: string
+          format: date-time
+          nullable: true
+        pendingEmailExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        emailVerificationStatus:
+          type: string
+          enum: [verified, pending, expired]
+        contactNumber:
+          type: string
+        school:
+          type: string
+        companyName:
+          type: string
+        requiredHours:
+          type: integer
+        workSchedule:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/WorkScheduleEntry"
+        mustChangePassword:
+          type: boolean
+        lockedUntil:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        displayName:
+          type: string
+        totalHoursRendered:
+          type: number
+        supervisors:
+          type: array
+          items:
+            $ref: "#/components/schemas/Supervisor"
+      example:
+        id: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+        role: trainee
+        lastName: "DOE"
+        firstName: "JANE"
+        middleName: "A"
+        suffix: "JR"
+        email: "jane@example.com"
+        pendingEmail: null
+        pendingEmailRequestedAt: null
+        pendingEmailExpiresAt: null
+        emailVerificationStatus: verified
+        contactNumber: "+639171234567"
+        school: "SAMPLE UNIVERSITY"
+        companyName: "SAMPLE COMPANY"
+        requiredHours: 240
+        workSchedule:
+          "1": { start: "08:00", end: "17:00" }
+        mustChangePassword: false
+        lockedUntil: null
+        createdAt: "2026-04-01T08:00:00.000Z"
+        updatedAt: "2026-04-01T08:00:00.000Z"
+        displayName: "JANE A DOE JR"
+        totalHoursRendered: 120
+        supervisors: []
+
+    TraineeWithTempPassword:
+      allOf:
+        - $ref: "#/components/schemas/Trainee"
+        - type: object
+          properties:
+            _tempPassword:
+              type: string
+            _tempEmail:
+              type: string
+            _tempDisplayName:
+              type: string
+      example:
+        id: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+        role: trainee
+        lastName: "DOE"
+        firstName: "JANE"
+        middleName: "A"
+        suffix: "JR"
+        email: "jane@example.com"
+        pendingEmail: null
+        pendingEmailRequestedAt: null
+        pendingEmailExpiresAt: null
+        emailVerificationStatus: verified
+        contactNumber: "+639171234567"
+        school: "SAMPLE UNIVERSITY"
+        companyName: "SAMPLE COMPANY"
+        requiredHours: 240
+        workSchedule: {}
+        mustChangePassword: true
+        lockedUntil: null
+        createdAt: "2026-04-01T08:00:00.000Z"
+        updatedAt: "2026-04-01T08:00:00.000Z"
+        displayName: "JANE A DOE JR"
+        totalHoursRendered: 0
+        supervisors: []
+        _tempPassword: "TempPass123!"
+        _tempEmail: "jane@example.com"
+        _tempDisplayName: "JANE A DOE"
+
+    LogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        traineeId:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date-time
+        timeIn:
+          type: string
+          format: date-time
+        lunchStart:
+          type: string
+          format: date-time
+        lunchEnd:
+          type: string
+          format: date-time
+        timeOut:
+          type: string
+          format: date-time
+          nullable: true
+        hoursWorked:
+          type: number
+        overtime:
+          type: number
+        offsetUsed:
+          type: number
+        accomplishment:
+          type: string
+          nullable: true
+        faceVerified:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      example:
+        id: "b2f50d6e-4908-4f5c-a616-1b43c9e5a21f"
+        traineeId: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+        date: "2026-04-20T00:00:00.000Z"
+        timeIn: "2026-04-20T08:00:00.000Z"
+        lunchStart: "2026-04-20T12:00:00.000Z"
+        lunchEnd: "2026-04-20T13:00:00.000Z"
+        timeOut: "2026-04-20T17:00:00.000Z"
+        hoursWorked: 480
+        overtime: 0
+        offsetUsed: 0
+        accomplishment: "Worked on onboarding tasks."
+        faceVerified: true
+        createdAt: "2026-04-20T17:01:00.000Z"
+        updatedAt: "2026-04-20T17:01:00.000Z"
+
+    Settings:
+      type: object
+      properties:
+        id:
+          type: string
+        countEarlyInAsOT:
+          type: boolean
+        countLateOutAsOT:
+          type: boolean
+        countEarlyLunchEndAsOT:
+          type: boolean
+      example:
+        id: default
+        countEarlyInAsOT: false
+        countLateOutAsOT: true
+        countEarlyLunchEndAsOT: false
+
+    Script:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        traineeId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      example:
+        id: "55c8b64c-5a39-4d5c-9a6c-0a8f16a2f3d3"
+        traineeId: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+        title: "Daily Summary"
+        content: "Completed module testing and updated documentation."
+        createdAt: "2026-04-20T09:00:00.000Z"
+        updatedAt: "2026-04-20T09:00:00.000Z"
+
+    AuthLoginResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        role:
+          type: string
+          enum: [admin, trainee]
+        traineeId:
+          type: string
+          format: uuid
+          nullable: true
+        mustChangePassword:
+          type: boolean
+        hasPendingEmailChange:
+          type: boolean
+        requiresPendingEmailVerification:
+          type: boolean
+        pendingEmail:
+          type: string
+          nullable: true
+        pendingEmailExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        pendingEmailVerifyAttempts:
+          type: integer
+        pendingEmailAttemptsRemaining:
+          type: integer
+        pendingEmailAdminResendRequired:
+          type: boolean
+        pendingEmailStatus:
+          type: string
+          enum: [verified, pending, expired]
+      example:
+        message: Logged in.
+        role: trainee
+        traineeId: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+        mustChangePassword: false
+        hasPendingEmailChange: false
+        requiresPendingEmailVerification: false
+        pendingEmail: null
+        pendingEmailExpiresAt: null
+        pendingEmailVerifyAttempts: 0
+        pendingEmailAttemptsRemaining: 3
+        pendingEmailAdminResendRequired: false
+        pendingEmailStatus: verified
+
+    AuthMeResponse:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        role:
+          type: string
+          enum: [admin, trainee]
+          nullable: true
+        traineeId:
+          type: string
+          format: uuid
+          nullable: true
+        expiresAt:
+          type: integer
+          nullable: true
+        hasPendingEmailChange:
+          type: boolean
+        requiresPendingEmailVerification:
+          type: boolean
+        pendingEmail:
+          type: string
+          nullable: true
+        pendingEmailExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        pendingEmailVerifyAttempts:
+          type: integer
+        pendingEmailAttemptsRemaining:
+          type: integer
+        pendingEmailAdminResendRequired:
+          type: boolean
+        pendingEmailStatus:
+          type: string
+          enum: [verified, pending, expired]
+        currentUser:
+          type: object
+          properties:
+            id:
+              type: string
+              nullable: true
+            displayName:
+              type: string
+            email:
+              type: string
+              nullable: true
+            isSuper:
+              type: boolean
+            faceEnabled:
+              type: boolean
+            faceAttendanceEnabled:
+              type: boolean
+            faceEnrolledAt:
+              type: string
+              format: date-time
+              nullable: true
+      example:
+        authenticated: true
+        role: trainee
+        traineeId: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+        expiresAt: 1893456000000
+        hasPendingEmailChange: false
+        requiresPendingEmailVerification: false
+        pendingEmail: null
+        pendingEmailExpiresAt: null
+        pendingEmailVerifyAttempts: 0
+        pendingEmailAttemptsRemaining: 3
+        pendingEmailAdminResendRequired: false
+        pendingEmailStatus: verified
+        currentUser:
+          id: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+          displayName: "JANE A DOE JR"
+          email: "jane@example.com"
+          isSuper: false
+          faceEnabled: true
+          faceAttendanceEnabled: true
+          faceEnrolledAt: "2026-04-01T08:00:00.000Z"
+
+    LoginRequest:
+      type: object
+      properties:
+        identifier:
+          type: string
+        fullName:
+          type: string
+        password:
+          type: string
+      required: [password]
+      example:
+        identifier: "jane.doe@example.com"
+        password: "hashed-or-raw-password"
+
+    FaceLoginRequest:
+      type: object
+      properties:
+        identifier:
+          type: string
+        imageBase64:
+          type: string
+      required: [identifier, imageBase64]
+      example:
+        identifier: "jane.doe@example.com"
+        imageBase64: "base64string"
+
+    ForgotPasswordRequest:
+      type: object
+      properties:
+        fullName:
+          type: string
+      required: [fullName]
+      example:
+        fullName: "Jane A Doe"
+
+    VerifyResetCodeRequest:
+      type: object
+      properties:
+        code:
+          type: string
+      required: [code]
+      example:
+        code: "123456"
+
+    ResetPasswordRequest:
+      type: object
+      properties:
+        resetToken:
+          type: string
+        newPassword:
+          type: string
+        confirmPassword:
+          type: string
+      required: [resetToken, newPassword]
+      example:
+        resetToken: "8ac0df5d-2ef7-4dbb-b7a4-0f8e9e48f3b4"
+        newPassword: "new-password"
+        confirmPassword: "new-password"
+
+    SetInitialPasswordRequest:
+      type: object
+      properties:
+        traineeId:
+          type: string
+        currentPassword:
+          type: string
+        newPassword:
+          type: string
+        confirmPassword:
+          type: string
+      required: [traineeId, currentPassword, newPassword, confirmPassword]
+      example:
+        traineeId: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+        currentPassword: "temp-password"
+        newPassword: "new-password"
+        confirmPassword: "new-password"
+
+    TraineeCreateRequest:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [admin, trainee]
+        lastName:
+          type: string
+        firstName:
+          type: string
+        middleName:
+          type: string
+        suffix:
+          type: string
+        email:
+          type: string
+          format: email
+        contactNumber:
+          type: string
+        school:
+          type: string
+        companyName:
+          type: string
+        requiredHours:
+          type: integer
+        workSchedule:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/WorkScheduleEntry"
+        password:
+          type: string
+        supervisors:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupervisorRequest"
+        verificationToken:
+          type: string
+        faceImageBase64:
+          type: string
+      required: [lastName, firstName, email, contactNumber, school, companyName, requiredHours]
+      example:
+        lastName: "DOE"
+        firstName: "JANE"
+        email: "jane@example.com"
+        contactNumber: "+639171234567"
+        school: "SAMPLE UNIVERSITY"
+        companyName: "SAMPLE COMPANY"
+        requiredHours: 240
+
+    TraineeUpdateRequest:
+      type: object
+      properties:
+        lastName:
+          type: string
+        firstName:
+          type: string
+        middleName:
+          type: string
+        suffix:
+          type: string
+        email:
+          type: string
+          format: email
+        contactNumber:
+          type: string
+        school:
+          type: string
+        companyName:
+          type: string
+        requiredHours:
+          type: integer
+        workSchedule:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/WorkScheduleEntry"
+        verificationToken:
+          type: string
+      required: [lastName, firstName, email, contactNumber, school, companyName, requiredHours]
+      example:
+        lastName: "DOE"
+        firstName: "JANE"
+        email: "jane@example.com"
+        contactNumber: "+639171234567"
+        school: "SAMPLE UNIVERSITY"
+        companyName: "SAMPLE COMPANY"
+        requiredHours: 240
+
+    TraineeVerifyPasswordRequest:
+      type: object
+      properties:
+        password:
+          type: string
+      required: [password]
+      example:
+        password: "hashed-or-raw-password"
+
+    ResendTempPasswordResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        _tempPassword:
+          type: string
+        _tempEmail:
+          type: string
+        _tempDisplayName:
+          type: string
+      example:
+        message: Temporary password regenerated.
+        _tempPassword: "TempPass123!"
+        _tempEmail: "jane@example.com"
+        _tempDisplayName: "JANE A DOE"
+
+    SupervisorRequest:
+      type: object
+      properties:
+        lastName:
+          type: string
+        firstName:
+          type: string
+        middleName:
+          type: string
+        suffix:
+          type: string
+        contactNumber:
+          type: string
+        email:
+          type: string
+      required: [lastName, firstName]
+      example:
+        lastName: "SMITH"
+        firstName: "ANNA"
+        contactNumber: "+639171111111"
+        email: "anna.smith@example.com"
+
+    LogCreateRequest:
+      type: object
+      properties:
+        traineeId:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date-time
+        timeIn:
+          type: string
+          format: date-time
+        timeOut:
+          type: string
+          format: date-time
+        lunchStart:
+          type: string
+          format: date-time
+        lunchEnd:
+          type: string
+          format: date-time
+        accomplishment:
+          type: string
+        applyOffset:
+          type: boolean
+        offsetAmount:
+          type: number
+        faceImageBase64:
+          type: string
+      required: [traineeId, date, timeIn]
+      example:
+        traineeId: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+        date: "2026-04-20T00:00:00.000Z"
+        timeIn: "2026-04-20T08:00:00.000Z"
+        timeOut: "2026-04-20T17:00:00.000Z"
+        lunchStart: "2026-04-20T12:00:00.000Z"
+        lunchEnd: "2026-04-20T13:00:00.000Z"
+        accomplishment: "Worked on onboarding tasks."
+
+    LogUpdateRequest:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date-time
+        timeIn:
+          type: string
+          format: date-time
+        timeOut:
+          type: string
+          format: date-time
+        lunchStart:
+          type: string
+          format: date-time
+        lunchEnd:
+          type: string
+          format: date-time
+        accomplishment:
+          type: string
+        applyOffset:
+          type: boolean
+        offsetAmount:
+          type: number
+      example:
+        accomplishment: "Updated accomplishment text."
+        applyOffset: true
+        offsetAmount: 60
+
+    LogActionRequest:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [lunchStart, lunchEnd, timeOut, accomplishment, offset]
+        timestamp:
+          type: string
+          format: date-time
+        accomplishment:
+          type: string
+        offsetMinutes:
+          type: integer
+        faceImageBase64:
+          type: string
+      required: [action]
+      example:
+        action: timeOut
+        timestamp: "2026-04-20T17:00:00.000Z"
+        faceImageBase64: "base64string"
+
+    EmailSendVerificationRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required: [email]
+      example:
+        email: "jane@example.com"
+
+    EmailVerifyCodeRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        code:
+          type: string
+      required: [email, code]
+      example:
+        email: "jane@example.com"
+        code: "123456"
+
+    SettingsUpdateRequest:
+      type: object
+      properties:
+        countEarlyInAsOT:
+          type: boolean
+        countLateOutAsOT:
+          type: boolean
+        countEarlyLunchEndAsOT:
+          type: boolean
+      example:
+        countEarlyInAsOT: false
+        countLateOutAsOT: true
+        countEarlyLunchEndAsOT: false
+
+    ScriptCreateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+      required: [title, content]
+      example:
+        title: "Daily Summary"
+        content: "Completed module testing and updated documentation."
+
+    ScriptUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+      required: [title, content]
+      example:
+        title: "Revised Summary"
+        content: "Added new details."
+
+    BackupVerifyRequest:
+      type: object
+      properties:
+        password:
+          type: string
+      required: [password]
+      example:
+        password: "sha256hash"
+
+    BackupImportResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        dryRun:
+          type: boolean
+        summary:
+          type: object
+          properties:
+            imported:
+              type: integer
+            skipped:
+              type: integer
+            failed:
+              type: integer
+        byTable:
+          type: object
+        failures:
+          type: array
+          items:
+            type: object
+            properties:
+              table:
+                type: string
+              reason:
+                type: string
+              row:
+                type: integer
+        trainees:
+          type: integer
+        supervisors:
+          type: integer
+        logs:
+          type: integer
+        skipped:
+          type: integer
+      example:
+        message: "Import completed."
+        dryRun: false
+        summary:
+          imported: 10
+          skipped: 2
+          failed: 0
+        byTable: {}
+        failures: []
+        trainees: 5
+        supervisors: 3
+        logs: 2
+        skipped: 2
+
+    ImportCsvResponse:
+      type: object
+      properties:
+        imported:
+          type: integer
+        skipped:
+          type: integer
+        skippedDetails:
+          type: array
+          items:
+            type: string
+        logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/LogEntry"
+      example:
+        imported: 5
+        skipped: 1
+        skippedDetails: ["Duplicate date 2026-04-20"]
+        logs: []
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Simple health check endpoint.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+              example:
+                status: ok
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with password
+      description: Logs in by full name or email and sets the session cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in
+          headers:
+            Set-Cookie:
+              description: HttpOnly session cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthLoginResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "423":
+          description: Account locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/auth/face-login:
+    post:
+      tags: [Auth]
+      summary: Login with face recognition
+      description: Logs in using face verification and sets the session cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FaceLoginRequest"
+      responses:
+        "200":
+          description: Logged in
+          headers:
+            Set-Cookie:
+              description: HttpOnly session cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthLoginResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Face login disabled for this account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Face recognition not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/auth/forgot-password/request-code:
+    post:
+      tags: [Auth]
+      summary: Request password reset code
+      description: Sends a verification code to the trainee email for password reset.
+      parameters:
+        - $ref: "#/components/parameters/InternalKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: Code generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  maskedEmail:
+                    type: string
+                  code:
+                    type: string
+                  displayName:
+                    type: string
+                  email:
+                    type: string
+              example:
+                message: If the account exists, a verification code has been sent to the registered email.
+                maskedEmail: "jan***@example.com"
+                code: "123456"
+                displayName: "JANE A DOE"
+                email: "jane@example.com"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Password change required first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/auth/forgot-password/verify-code:
+    post:
+      tags: [Auth]
+      summary: Verify reset code
+      description: Verifies a reset code and returns a reset token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fullName:
+                  type: string
+                code:
+                  type: string
+              required: [fullName, code]
+            example:
+              fullName: "Jane A Doe"
+              code: "123456"
+      responses:
+        "200":
+          description: Code verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  resetToken:
+                    type: string
+              example:
+                message: Code verified.
+                resetToken: "8ac0df5d-2ef7-4dbb-b7a4-0f8e9e48f3b4"
+        "401":
+          description: Invalid or expired code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/auth/forgot-password/reset:
+    post:
+      tags: [Auth]
+      summary: Reset password
+      description: Resets a password using a verified reset token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fullName:
+                  type: string
+                resetToken:
+                  type: string
+                newPassword:
+                  type: string
+                confirmPassword:
+                  type: string
+              required: [fullName, resetToken, newPassword, confirmPassword]
+            example:
+              fullName: "Jane A Doe"
+              resetToken: "8ac0df5d-2ef7-4dbb-b7a4-0f8e9e48f3b4"
+              newPassword: "new-password"
+              confirmPassword: "new-password"
+      responses:
+        "200":
+          description: Password reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current session
+      description: Returns the current authenticated session.
+      responses:
+        "200":
+          description: Auth state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMeResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authenticated:
+                    type: boolean
+                example:
+                  authenticated: false
+
+  /api/auth/verify-super:
+    post:
+      tags: [Auth]
+      summary: Verify super password
+      description: Confirms the super password for admin-only workflows.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+              required: [password]
+            example:
+              password: "sha256hash"
+      responses:
+        "200":
+          description: Verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "401":
+          description: Incorrect password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/auth/session/{traineeId}:
+    get:
+      tags: [Auth]
+      summary: Validate session for trainee
+      description: Confirms that the active session matches the requested trainee id.
+      parameters:
+        - name: traineeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Session state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authenticated:
+                    type: boolean
+                  role:
+                    type: string
+                    enum: [admin, trainee]
+                  traineeId:
+                    type: string
+                    nullable: true
+                  expiresAt:
+                    type: integer
+                    nullable: true
+              example:
+                authenticated: true
+                role: trainee
+                traineeId: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+                expiresAt: 1893456000000
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authenticated:
+                    type: boolean
+                example:
+                  authenticated: false
+
+  /api/auth/set-initial-password:
+    post:
+      tags: [Auth]
+      summary: Set initial password
+      description: Used after admin creates a trainee with a temporary password.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetInitialPasswordRequest"
+      responses:
+        "200":
+          description: Password set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  role:
+                    type: string
+                  traineeId:
+                    type: string
+              example:
+                message: Password set successfully.
+                role: trainee
+                traineeId: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout
+      description: Clears the session cookie.
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/trainees:
+    post:
+      tags: [Trainees]
+      summary: Create trainee
+      description: |
+        Creates a new trainee. Admins may create admins or trainees. Non-admin
+        signups require a verification token and face enrollment.
+      parameters:
+        - $ref: "#/components/parameters/InternalKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TraineeCreateRequest"
+            examples:
+              adminCreate:
+                summary: Admin creates trainee
+                value:
+                  lastName: DOE
+                  firstName: JANE
+                  email: jane@example.com
+                  contactNumber: "+639171234567"
+                  school: SAMPLE UNIVERSITY
+                  companyName: SAMPLE COMPANY
+                  requiredHours: 240
+      responses:
+        "201":
+          description: Trainee created
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Trainee"
+                  - $ref: "#/components/schemas/TraineeWithTempPassword"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Duplicate trainee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    get:
+      tags: [Trainees]
+      summary: List trainees
+      description: Returns all trainees. Admin access is required.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Trainee list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Trainee"
+              example:
+                - id: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+                  role: trainee
+                  lastName: "DOE"
+                  firstName: "JANE"
+                  middleName: "A"
+                  suffix: "JR"
+                  email: "jane@example.com"
+                  pendingEmail: null
+                  pendingEmailRequestedAt: null
+                  pendingEmailExpiresAt: null
+                  emailVerificationStatus: verified
+                  contactNumber: "+639171234567"
+                  school: "SAMPLE UNIVERSITY"
+                  companyName: "SAMPLE COMPANY"
+                  requiredHours: 240
+                  workSchedule: {}
+                  mustChangePassword: false
+                  lockedUntil: null
+                  createdAt: "2026-04-01T08:00:00.000Z"
+                  updatedAt: "2026-04-01T08:00:00.000Z"
+                  displayName: "JANE A DOE JR"
+                  totalHoursRendered: 120
+                  supervisors: []
+
+  /api/trainees/{id}:
+    get:
+      tags: [Trainees]
+      summary: Get trainee by id
+      description: Returns the trainee profile and related info.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Trainee found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Trainee"
+        "404":
+          description: Trainee not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    put:
+      tags: [Trainees]
+      summary: Update trainee
+      description: Updates trainee profile and work schedule.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TraineeUpdateRequest"
+      responses:
+        "200":
+          description: Updated trainee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Trainee"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Duplicate trainee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      tags: [Trainees]
+      summary: Delete trainee
+      description: Deletes a trainee, including related data and audit logs.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                currentPassword:
+                  type: string
+                typedConfirmation:
+                  type: string
+      responses:
+        "200":
+          description: Trainee deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/trainees/{id}/verify:
+    post:
+      tags: [Trainees]
+      summary: Verify trainee password
+      description: Verifies the trainee password and issues a session cookie.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TraineeVerifyPasswordRequest"
+      responses:
+        "200":
+          description: Verified
+          headers:
+            Set-Cookie:
+              description: HttpOnly session cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Trainee"
+        "401":
+          description: Incorrect password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/trainees/{id}/forgot-password:
+    post:
+      tags: [Trainees]
+      summary: Send reset code
+      description: Sends a password reset code to the trainee email.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/InternalKeyHeader"
+      responses:
+        "200":
+          description: Code sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  maskedEmail:
+                    type: string
+                  code:
+                    type: string
+                  displayName:
+                    type: string
+                  email:
+                    type: string
+              example:
+                message: Verification code sent to jan***@example.com.
+                maskedEmail: "jan***@example.com"
+                code: "123456"
+                displayName: "JANE A DOE"
+                email: "jane@example.com"
+        "403":
+          description: Password change required first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/trainees/{id}/verify-reset-code:
+    post:
+      tags: [Trainees]
+      summary: Verify trainee reset code
+      description: Validates a trainee reset code and returns a reset token.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyResetCodeRequest"
+      responses:
+        "200":
+          description: Code verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  resetToken:
+                    type: string
+              example:
+                message: Code verified.
+                resetToken: "8ac0df5d-2ef7-4dbb-b7a4-0f8e9e48f3b4"
+        "401":
+          description: Invalid or expired code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/trainees/{id}/reset-password:
+    put:
+      tags: [Trainees]
+      summary: Reset trainee password
+      description: Updates the trainee password using a reset token.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/trainees/{id}/resend-temp-password:
+    post:
+      tags: [Trainees]
+      summary: Resend temporary password
+      description: Regenerates and sends a temporary password for a trainee.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/InternalKeyHeader"
+      responses:
+        "200":
+          description: Temporary password sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResendTempPasswordResponse"
+        "400":
+          description: Not applicable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/trainees/{id}/pending-email/request-code:
+    post:
+      tags: [Trainees]
+      summary: Request pending email verification code
+      description: Sends or re-sends the pending email verification code.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/InternalKeyHeader"
+      responses:
+        "200":
+          description: Code generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  code:
+                    type: string
+                  pendingEmail:
+                    type: string
+                  displayName:
+                    type: string
+                  expiresInHours:
+                    type: integer
+              example:
+                message: Pending email verification code generated.
+                code: "123456"
+                pendingEmail: "jane.new@example.com"
+                displayName: "JANE A DOE"
+                expiresInHours: 24
+        "400":
+          description: No pending email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/trainees/{id}/verify-pending-email:
+    post:
+      tags: [Trainees]
+      summary: Verify pending email change
+      description: Verifies the pending email change code and applies the new email.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+              required: [code]
+            example:
+              code: "123456"
+      responses:
+        "200":
+          description: Email verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  trainee:
+                    $ref: "#/components/schemas/Trainee"
+              example:
+                message: Email verified successfully. Your new email is now active.
+                trainee:
+                  id: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+                  role: trainee
+                  lastName: "DOE"
+                  firstName: "JANE"
+                  middleName: "A"
+                  suffix: "JR"
+                  email: "jane.new@example.com"
+                  pendingEmail: null
+                  pendingEmailRequestedAt: null
+                  pendingEmailExpiresAt: null
+                  emailVerificationStatus: verified
+                  contactNumber: "+639171234567"
+                  school: "SAMPLE UNIVERSITY"
+                  companyName: "SAMPLE COMPANY"
+                  requiredHours: 240
+                  workSchedule: {}
+                  mustChangePassword: false
+                  lockedUntil: null
+                  createdAt: "2026-04-01T08:00:00.000Z"
+                  updatedAt: "2026-04-01T08:00:00.000Z"
+                  displayName: "JANE A DOE JR"
+                  totalHoursRendered: 120
+                  supervisors: []
+        "403":
+          description: Attempts exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/logs:
+    post:
+      tags: [Logs]
+      summary: Create log entry
+      description: Creates a log entry, with optional face verification.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogCreateRequest"
+      responses:
+        "201":
+          description: Created log
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogEntry"
+        "409":
+          description: Duplicate log for date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/logs/offset/{traineeId}:
+    get:
+      tags: [Logs]
+      summary: Get available offset minutes
+      description: Returns available overtime minutes that can be offset.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: traineeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Available offset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  availableOffset:
+                    type: integer
+              example:
+                availableOffset: 120
+
+  /api/logs/{id}:
+    get:
+      tags: [Logs]
+      summary: List logs by trainee
+      description: Returns log entries and summary totals for a trainee.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Trainee id for log listing.
+      responses:
+        "200":
+          description: Log list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LogEntry"
+                  totalHours:
+                    type: number
+                  totalOvertime:
+                    type: number
+                  totalOffsetUsed:
+                    type: number
+                  availableOffset:
+                    type: number
+              example:
+                logs: []
+                totalHours: 480
+                totalOvertime: 0
+                totalOffsetUsed: 0
+                availableOffset: 120
+
+    put:
+      tags: [Logs]
+      summary: Update log entry
+      description: Updates a log entry and recalculates overtime/offsets.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Log entry id to update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogUpdateRequest"
+      responses:
+        "200":
+          description: Updated log
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogEntry"
+        "404":
+          description: Log not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/logs/{id}/action:
+    patch:
+      tags: [Logs]
+      summary: Apply trainee log action
+      description: Applies attendance actions such as lunch start/end or time out.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogActionRequest"
+      responses:
+        "200":
+          description: Updated log
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogEntry"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/logs/entry/{entryId}:
+    delete:
+      tags: [Logs]
+      summary: Delete log entry
+      description: Deletes a log entry and related ledger rows.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: entryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/supervisors/{traineeId}:
+    post:
+      tags: [Supervisors]
+      summary: Create supervisor
+      description: Adds a supervisor to a trainee.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: traineeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupervisorRequest"
+      responses:
+        "201":
+          description: Created supervisor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supervisor"
+
+    get:
+      tags: [Supervisors]
+      summary: List supervisors
+      description: Lists supervisors for a trainee.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: traineeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Supervisor list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Supervisor"
+              example:
+                - id: "c2f1b8c0-7f0f-4db2-a9dd-2c1e4012f8b2"
+                  traineeId: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+                  lastName: "SMITH"
+                  firstName: "ANNA"
+                  middleName: null
+                  suffix: null
+                  contactNumber: "+639171111111"
+                  email: "anna.smith@example.com"
+                  displayName: "ANNA SMITH"
+                  createdAt: "2026-04-01T08:00:00.000Z"
+                  updatedAt: "2026-04-01T08:00:00.000Z"
+
+  /api/supervisors/entry/{supervisorId}:
+    put:
+      tags: [Supervisors]
+      summary: Update supervisor
+      description: Updates a supervisor record.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: supervisorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupervisorRequest"
+      responses:
+        "200":
+          description: Updated supervisor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supervisor"
+
+    delete:
+      tags: [Supervisors]
+      summary: Delete supervisor
+      description: Removes a supervisor.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: supervisorId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/export/all:
+    get:
+      tags: [Export]
+      summary: Export full backup CSV
+      description: Exports a full database backup as a CSV file.
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+
+  /api/export/csv/{traineeId}:
+    get:
+      tags: [Export]
+      summary: Export trainee logs (CSV)
+      description: Exports trainee logs to CSV.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: traineeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+
+  /api/export/excel/{traineeId}:
+    get:
+      tags: [Export]
+      summary: Export trainee logs (Excel)
+      description: Exports trainee logs to an Excel file.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: traineeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Excel file
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+
+  /api/export/pdf/{traineeId}:
+    get:
+      tags: [Export]
+      summary: Export trainee logs (PDF)
+      description: Exports trainee logs to a PDF file.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: traineeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /api/import/all:
+    post:
+      tags: [Import]
+      summary: Import full database CSV
+      description: Imports a full database CSV backup.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "201":
+          description: Import summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trainees:
+                    type: integer
+                  supervisors:
+                    type: integer
+                  logs:
+                    type: integer
+                  skipped:
+                    type: integer
+              example:
+                trainees: 5
+                supervisors: 3
+                logs: 12
+                skipped: 2
+
+  /api/import/csv/{traineeId}:
+    post:
+      tags: [Import]
+      summary: Import trainee log CSV
+      description: Imports log entries for a trainee.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: traineeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "201":
+          description: Import summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportCsvResponse"
+
+  /api/email/send-verification:
+    post:
+      tags: [Email]
+      summary: Send verification code
+      description: Sends a verification code for email ownership.
+      parameters:
+        - $ref: "#/components/parameters/InternalKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailSendVerificationRequest"
+      responses:
+        "200":
+          description: Sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  code:
+                    type: string
+              example:
+                message: Verification code sent.
+                code: "123456"
+
+  /api/email/verify-code:
+    post:
+      tags: [Email]
+      summary: Verify email code
+      description: Verifies a previously sent email code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailVerifyCodeRequest"
+      responses:
+        "200":
+          description: Verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  verificationToken:
+                    type: string
+              example:
+                message: Email verified successfully.
+                verificationToken: "8ac0df5d-2ef7-4dbb-b7a4-0f8e9e48f3b4"
+
+  /api/settings:
+    get:
+      tags: [Settings]
+      summary: Get settings
+      description: Retrieves system settings.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+
+    put:
+      tags: [Settings]
+      summary: Update settings
+      description: Updates system settings (admin only).
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdateRequest"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+
+  /api/scripts/{traineeId}:
+    get:
+      tags: [Scripts]
+      summary: List scripts
+      description: Retrieves accomplishment scripts for a trainee.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: traineeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Script list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Script"
+              example:
+                - id: "55c8b64c-5a39-4d5c-9a6c-0a8f16a2f3d3"
+                  traineeId: "25a0f5f7-7ad9-49f9-9a2a-9c4b6c1f2c55"
+                  title: "Daily Summary"
+                  content: "Completed module testing and updated documentation."
+                  createdAt: "2026-04-20T09:00:00.000Z"
+                  updatedAt: "2026-04-20T09:00:00.000Z"
+
+    post:
+      tags: [Scripts]
+      summary: Create script
+      description: Creates a new accomplishment script.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: traineeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScriptCreateRequest"
+      responses:
+        "201":
+          description: Created script
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Script"
+
+  /api/scripts/entry/{scriptId}:
+    put:
+      tags: [Scripts]
+      summary: Update script
+      description: Updates an existing accomplishment script.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: scriptId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScriptUpdateRequest"
+      responses:
+        "200":
+          description: Updated script
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Script"
+
+  /api/backup/verify-super:
+    post:
+      tags: [Backup]
+      summary: Verify super password for backup
+      description: Confirms the super password hash for backup operations.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BackupVerifyRequest"
+      responses:
+        "200":
+          description: Verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/backup/export:
+    get:
+      tags: [Backup]
+      summary: Export full backup (ZIP)
+      description: Exports a full database backup as a ZIP archive.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SuperPasswordHeader"
+      responses:
+        "200":
+          description: ZIP file
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+
+  /api/backup/import:
+    post:
+      tags: [Backup]
+      summary: Import backup (ZIP or CSV)
+      description: Imports a backup file and returns import statistics.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SuperPasswordHeader"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                dryRun:
+                  type: string
+              required: [file]
+      responses:
+        "201":
+          description: Import summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackupImportResponse"
+
+  /api/face/config:
+    get:
+      tags: [Face]
+      summary: Get face service configuration
+      description: Returns configuration and availability for face recognition.
+      responses:
+        "200":
+          description: Face config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  faceServiceConfigured:
+                    type: boolean
+                  faceServiceReachable:
+                    type: boolean
+                  matchThreshold:
+                    type: number
+                  engine:
+                    type: string
+              example:
+                faceServiceConfigured: true
+                faceServiceReachable: true
+                matchThreshold: 0.62
+                engine: local
+
+  /api/face/status:
+    get:
+      tags: [Face]
+      summary: Get face status for trainee
+      description: Returns face enrollment and attendance settings.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Face status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  faceEnabled:
+                    type: boolean
+                  faceAttendanceEnabled:
+                    type: boolean
+                  faceEnrolledAt:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  faceServiceConfigured:
+                    type: boolean
+                  matchThreshold:
+                    type: number
+              example:
+                faceEnabled: true
+                faceAttendanceEnabled: true
+                faceEnrolledAt: "2026-04-01T08:00:00.000Z"
+                faceServiceConfigured: true
+                matchThreshold: 0.62
+
+  /api/face/enroll:
+    post:
+      tags: [Face]
+      summary: Enroll face
+      description: Enrolls the trainee face image and stores embedding.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                imageBase64:
+                  type: string
+              required: [imageBase64]
+            example:
+              imageBase64: "base64string"
+      responses:
+        "200":
+          description: Enrolled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/face/disable:
+    post:
+      tags: [Face]
+      summary: Disable face authentication
+      description: Disables face authentication for the trainee.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/face/attendance-mode:
+    post:
+      tags: [Face]
+      summary: Toggle attendance mode
+      description: Enables or disables face verification for attendance actions.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+              required: [enabled]
+            example:
+              enabled: true
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  faceAttendanceEnabled:
+                    type: boolean
+              example:
+                message: Updated.
+                faceAttendanceEnabled: true
+
+  /api/face/verify:
+    post:
+      tags: [Face]
+      summary: Verify face for login
+      description: Verifies face against stored embedding.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                imageBase64:
+                  type: string
+              required: [imageBase64]
+            example:
+              imageBase64: "base64string"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  match:
+                    type: boolean
+                  similarity:
+                    type: number
+                  threshold:
+                    type: number
+              example:
+                match: true
+                similarity: 0.72
+                threshold: 0.62
+        "401":
+          description: Face mismatch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"

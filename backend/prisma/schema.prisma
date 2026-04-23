@@ -36,6 +36,12 @@ enum EmailVerificationPurpose {
   EMAIL_UPDATE
 }
 
+enum CanonicalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // ── User ──────────────────────────────────────────────────────
 // Owns authentication state for BOTH admins and trainees.
 // Separating auth from profile lets admins exist without a
@@ -69,6 +75,8 @@ model User {
   emailVerificationCodes EmailVerificationCode[]
   passwordHistory    PasswordHistory[]
   auditLogsPerformed AuditLog[]
+  reviewedCompanies  Company[] @relation("CompanyReviewedBy")
+  reviewedSchools    School[]  @relation("SchoolReviewedBy")
 }
 
 // ── UserProfile ───────────────────────────────────────────────
@@ -84,6 +92,9 @@ model UserProfile {
   suffix        String?
   contactNumber String
   school        String
+  schoolEntityId String?
+  originalSchoolInput String?
+  originalCompanyInput String?
   companyId     String                    // FK → Company (normalized)
   requiredHours Int
   createdAt     DateTime @default(now())
@@ -91,6 +102,7 @@ model UserProfile {
 
   // Relations
   user         User                @relation(fields: [userId],    references: [id], onDelete: Cascade)
+  schoolEntity School?             @relation(fields: [schoolEntityId], references: [id])
   company      Company             @relation(fields: [companyId], references: [id])
   workSchedule WorkScheduleEntry[]
   logs         LogEntry[]
@@ -98,6 +110,7 @@ model UserProfile {
   overtimeLedger OvertimeLedger[]
   accomplishmentScripts AccomplishmentScript[]
 
+  @@index([schoolEntityId])
   @@index([companyId])
 }
 
@@ -108,10 +121,61 @@ model UserProfile {
 model Company {
   id        String   @id @default(uuid())
   name      String   @unique
+  normalizedName String @unique
+  status    CanonicalStatus @default(PENDING)
+  usageCount Int @default(0)
+  reviewedAt DateTime?
+  reviewedById String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   trainees UserProfile[]
+  aliases CompanyAlias[]
+
+  reviewedBy User? @relation("CompanyReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+}
+
+model CompanyAlias {
+  id        String   @id @default(uuid())
+  alias     String
+  normalizedAlias String @unique
+  companyId String
+  createdAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, normalizedAlias])
+  @@index([companyId])
+}
+
+model School {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  normalizedName String @unique
+  status    CanonicalStatus @default(PENDING)
+  usageCount Int @default(0)
+  reviewedAt DateTime?
+  reviewedById String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trainees UserProfile[]
+  aliases SchoolAlias[]
+
+  reviewedBy User? @relation("SchoolReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+}
+
+model SchoolAlias {
+  id        String   @id @default(uuid())
+  alias     String
+  normalizedAlias String @unique
+  schoolId  String
+  createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, normalizedAlias])
+  @@index([schoolId])
 }
 
 // ── WorkScheduleEntry ─────────────────────────────────────────

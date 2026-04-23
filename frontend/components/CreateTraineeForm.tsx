@@ -13,6 +13,7 @@ import { DEFAULT_WORK_SCHEDULE, WorkSchedule } from "@/lib/ph-holidays";
 import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 import TimePicker from "@/components/TimePicker";
 import FaceCaptureDialog from "@/components/FaceCaptureDialog";
+import CanonicalAutocompleteInput from "@/components/CanonicalAutocompleteInput";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -152,12 +153,7 @@ export default function CreateTraineeForm({
       try {
         const res = await sendEmailVerification(email);
         setEmailCodeSent(true);
-        if (res.devCode) {
-          setEmailMsg(`Dev mode: verification code is ${res.devCode}`);
-          setEmailCode(res.devCode);
-        } else {
-          setEmailMsg("Verification code sent! Check your inbox.");
-        }
+        setEmailMsg("Verification code sent! Check your inbox.");
       }
       catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to send verification code."); }
       finally { setEmailSending(false); }
@@ -341,14 +337,22 @@ export default function CreateTraineeForm({
         {isTraineeRole && (
           <>
             {/* School, Company, Hours */}
-            <div className="form-group">
-              <label>School *</label>
-              <input value={school} onChange={(e) => setSchool(sanitizeInput(e.target.value).toUpperCase())} placeholder="SCHOOL / UNIVERSITY NAME HERE" style={{ textTransform: "uppercase" }} />
-            </div>
-            <div className="form-group">
-              <label>Company / Institution Name *</label>
-              <input value={companyName} onChange={(e) => setCompanyName(sanitizeInput(e.target.value).toUpperCase())} placeholder="COMPANY / INSTITUTION WHERE OJT IS RENDERED" style={{ textTransform: "uppercase" }} />
-            </div>
+            <CanonicalAutocompleteInput
+              entityType="school"
+              label="School"
+              required
+              value={school}
+              onChange={(next) => setSchool(sanitizeInput(next))}
+              placeholder="School / university name"
+            />
+            <CanonicalAutocompleteInput
+              entityType="company"
+              label="Company / Institution Name"
+              required
+              value={companyName}
+              onChange={(next) => setCompanyName(sanitizeInput(next))}
+              placeholder="Company / institution where OJT is rendered"
+            />
             <div className="form-group">
               <label>Required Hours *</label>
               <input type="number" min="1" value={requiredHours} onChange={(e) => setRequiredHours(e.target.value)} />

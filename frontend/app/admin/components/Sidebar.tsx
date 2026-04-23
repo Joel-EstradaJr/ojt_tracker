@@ -13,6 +13,7 @@ interface SidebarProps {
 const menuItems = [
   { href: "/admin/user-management", label: "User Management" },
   { href: "/admin/trainee-management", label: "Trainee Management" },
+  { href: "/admin/entity-management", label: "Entity Management" },
 ] as const;
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
@@ -86,7 +87,9 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 }}
                 title={collapsed ? item.label : undefined}
               >
-                <span aria-hidden="true">{item.label.startsWith("User") ? "U" : "T"}</span>
+                <span aria-hidden="true">
+                  {item.label.startsWith("User") ? "U" : item.label.startsWith("Trainee") ? "T" : "E"}
+                </span>
                 {!collapsed && <span>{item.label}</span>}
               </Link>
             );

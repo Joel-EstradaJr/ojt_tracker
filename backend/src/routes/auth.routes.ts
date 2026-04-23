@@ -357,17 +357,6 @@ router.post("/forgot-password/request-code", async (req: Request, res: Response)
       },
     });
 
-    const internalKey = req.headers["x-internal-key"] as string | undefined;
-    if (internalKey && process.env.EMAIL_INTERNAL_KEY && internalKey === process.env.EMAIL_INTERNAL_KEY) {
-      return res.json({
-        message: FORGOT_PASSWORD_GENERIC_SUCCESS,
-        maskedEmail: maskEmail(trainee.user.email),
-        code,
-        displayName: buildFullName(trainee),
-        email: trainee.user.email,
-      });
-    }
-
     await sendResetCode(trainee.user.email, code, buildFullName(trainee));
     return res.json({ message: FORGOT_PASSWORD_GENERIC_SUCCESS, maskedEmail: maskEmail(trainee.user.email) });
   } catch (err) {

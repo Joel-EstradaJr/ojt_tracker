@@ -5,6 +5,7 @@ import JSZip from "jszip";
 import crypto from "crypto";
 import { AuditAction, EmailVerificationPurpose, OvertimeType, UserRole } from "@prisma/client";
 import prisma from "../utils/prisma";
+import { normalizeEntityInput } from "../utils/canonical-entities";
 
 type CsvRow = Record<string, string>;
 
@@ -463,7 +464,12 @@ async function importFromTableCsv(tables: Record<string, CsvRow[]>, stats: Impor
     }
 
     if (!dryRun) {
-      const created = await prisma.company.create({ data: { name: key } });
+      const created = await prisma.company.create({
+        data: {
+          name: key,
+          normalizedName: normalizeEntityInput(key),
+        },
+      });
       companiesByName.set(key, created.id);
     }
     stats.companies.imported += 1;

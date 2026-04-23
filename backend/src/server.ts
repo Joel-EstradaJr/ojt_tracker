@@ -4,6 +4,8 @@
 
 import dotenv from "dotenv";
 import path from "path";
+import fs from "fs";
+import yaml from "yaml";
 
 // Load backend/.env for local dev and self-hosted runs. In hosted environments,
 // this file typically doesn't exist and dotenv will do nothing.
@@ -13,6 +15,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import { Server } from "http";
+import swaggerUi from "swagger-ui-express";
 import traineeRoutes from "./routes/trainee.routes";
 import logRoutes from "./routes/log.routes";
 import supervisorRoutes from "./routes/supervisor.routes";
@@ -24,9 +27,11 @@ import settingsRoutes from "./routes/settings.routes";
 import scriptRoutes from "./routes/script.routes";
 import backupRoutes from "./routes/backup.routes";
 import faceRoutes from "./routes/face.routes";
+import entityRoutes from "./routes/entity.routes";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const DOCS_ENABLED = String(process.env.DOC_ENABLE).toLowerCase() === "true";
 
 // ── Middleware ────────────────────────────────────────────────
 // Strip surrounding quotes from FRONTEND_URL in case they were
@@ -43,6 +48,37 @@ app.use(
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 
+// ── API docs (OpenAPI + Swagger UI + Redoc) ───────────────
+if (DOCS_ENABLED) {
+  const specPath = path.join(__dirname, "..", "openapi.yaml");
+  const rawSpec = fs.readFileSync(specPath, "utf8");
+  const openApiSpec = yaml.parse(rawSpec);
+
+  app.get("/openapi.json", (_req, res) => {
+    res.json(openApiSpec);
+  });
+
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec, { explorer: true }));
+
+  app.get("/redoc", (_req, res) => {
+    res.type("html").send(`<!doctype html>
+<html>
+  <head>
+    <title>OJT Tracker API Docs</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { margin: 0; padding: 0; }
+    </style>
+  </head>
+  <body>
+    <redoc spec-url="/openapi.json"></redoc>
+    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+  </body>
+</html>`);
+  });
+}
+
 // ── Routes ───────────────────────────────────────────────────
 app.use("/api/trainees", traineeRoutes);
 app.use("/api/logs", logRoutes);
@@ -55,6 +91,7 @@ app.use("/api/settings", settingsRoutes);
 app.use("/api/scripts", scriptRoutes);
 app.use("/api/backup", backupRoutes);
 app.use("/api/face", faceRoutes);
+app.use("/api/entities", entityRoutes);
 
 // ── Health check ─────────────────────────────────────────────
 app.get("/health", (_req, res) => {

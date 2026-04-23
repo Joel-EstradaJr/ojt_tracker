@@ -56,6 +56,7 @@ Edit `backend/.env` and set your connection string:
 DATABASE_URL=postgresql://user:password@localhost:5432/ojt_tracker
 PORT=4000
 FRONTEND_URL=http://localhost:3000
+DOC_ENABLE=true
 ```
 
 ### 3. Install dependencies
@@ -132,6 +133,23 @@ ojt-progress-tracker/
 ```
 
 ---
+
+## API Documentation
+
+OpenAPI documentation is generated from a single spec file and served by the backend.
+
+- Swagger UI (interactive): http://localhost:4000/docs
+- Redoc (read-only): http://localhost:4000/redoc
+
+Set `DOC_ENABLE=true` to enable these routes. When `DOC_ENABLE=false`, the docs routes
+return HTTP 404 and the OpenAPI metadata is not exposed.
+
+To enforce documentation coverage for new endpoints, run:
+
+```bash
+cd backend
+npm run docs:check
+```
 
 ## API Endpoints
 
