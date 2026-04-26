@@ -22,6 +22,10 @@ function collapseSpaces(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function toUpperEntity(value: string): string {
+  return collapseSpaces(value).toUpperCase();
+}
+
 export function normalizeEntityInput(input: string): string {
   const collapsed = collapseSpaces(String(input || ""));
   if (!collapsed) return "";
@@ -77,7 +81,7 @@ async function createSchoolAlias(tx: Prisma.TransactionClient, alias: string, sc
 
   await tx.schoolAlias.upsert({
     where: { normalizedAlias },
-    create: { alias: collapseSpaces(alias), normalizedAlias, schoolId },
+    create: { alias: toUpperEntity(alias), normalizedAlias, schoolId },
     update: { schoolId },
   });
 }
@@ -88,13 +92,13 @@ async function createCompanyAlias(tx: Prisma.TransactionClient, alias: string, c
 
   await tx.companyAlias.upsert({
     where: { normalizedAlias },
-    create: { alias: collapseSpaces(alias), normalizedAlias, companyId },
+    create: { alias: toUpperEntity(alias), normalizedAlias, companyId },
     update: { companyId },
   });
 }
 
 async function resolveSchool(tx: Prisma.TransactionClient, options: ResolveEntityOptions): Promise<ResolveEntityResult> {
-  const originalInput = collapseSpaces(options.input || "");
+  const originalInput = toUpperEntity(options.input || "");
   const normalized = normalizeEntityInput(originalInput);
 
   if (!normalized) {
@@ -171,7 +175,7 @@ async function resolveSchool(tx: Prisma.TransactionClient, options: ResolveEntit
 }
 
 async function resolveCompany(tx: Prisma.TransactionClient, options: ResolveEntityOptions): Promise<ResolveEntityResult> {
-  const originalInput = collapseSpaces(options.input || "");
+  const originalInput = toUpperEntity(options.input || "");
   const normalized = normalizeEntityInput(originalInput);
 
   if (!normalized) {

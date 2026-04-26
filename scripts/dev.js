@@ -7,15 +7,6 @@ const isWin = process.platform === "win32";
 const comspec = process.env.ComSpec || "cmd.exe";
 const npmCmd = "npm";
 
-function dockerAvailable() {
-  try {
-    const r = spawnSync("docker", ["version"], { stdio: "ignore", windowsHide: true });
-    return typeof r.status === "number" && r.status === 0;
-  } catch {
-    return false;
-  }
-}
-
 function parseDotEnvFile(filePath) {
   try {
     if (!fs.existsSync(filePath)) return {};
@@ -126,42 +117,16 @@ async function main() {
 
   const preferredFrontend = toInt(baseEnv.FRONTEND_PORT) ?? 3000;
   const preferredBackend = toInt(baseEnv.BACKEND_PORT) ?? 4000;
-  const preferredFace = toInt(baseEnv.FACE_SERVICE_PORT) ?? 8000;
 
   const frontendPort = await pickPort(preferredFrontend);
   const backendPort = await pickPort(preferredBackend);
-
-  const skipFace = String(baseEnv.FACE_SERVICE_SKIP || "").toLowerCase() === "1";
-  const requiredFace = String(baseEnv.FACE_SERVICE_REQUIRED || "").toLowerCase() === "1";
-
-  const hasDocker = dockerAvailable();
-  const wantFace = !skipFace;
-
-  // If the user explicitly provided a remote face-service URL, never override it.
-  const externalFaceUrl = (baseEnv.FACE_SERVICE_URL || "").trim() || null;
-
-  // Respect explicit FACE_ENGINE if provided.
-  const explicitEngine = String(baseEnv.FACE_ENGINE || "").trim().toLowerCase();
-  const engineForcedOff = explicitEngine === "off";
-  const engineForcedLocal = explicitEngine === "local";
-  const engineForcedRemote = explicitEngine === "remote";
-
-  const useExternalRemote = wantFace && !!externalFaceUrl && !engineForcedOff && !engineForcedLocal;
-  const runDockerFace = wantFace && !useExternalRemote && !engineForcedOff && !engineForcedLocal && hasDocker;
-  const useLocalFace = wantFace && !useExternalRemote && !engineForcedOff && !runDockerFace;
-
-  // Only reserve a face-service port if we intend to run the Docker face-service.
-  const facePort = runDockerFace ? await pickPort(preferredFace) : null;
 
   const frontendUrl = `http://localhost:${frontendPort}`;
   const backendUrl = `http://localhost:${backendPort}`;
 
   console.log(`[dev] Frontend: ${frontendUrl}`);
   console.log(`[dev] Backend:  ${backendUrl}`);
-  if (useExternalRemote) console.log(`[dev] Face:     ${externalFaceUrl} (external)`);
-  else if (facePort) console.log(`[dev] Face:     http://localhost:${facePort}`);
-  else if (useLocalFace) console.log(`[dev] Face:     local (no Docker)`);
-  else console.log(`[dev] Face:     disabled`);
+  console.log("[dev] Face:     OpenFace CLI must be installed on the backend runtime");
 
   const fresh = process.argv.includes("--fresh");
   if (fresh) {
@@ -172,22 +137,11 @@ async function main() {
 
   const children = [];
 
-  if (runDockerFace) {
-    const env = {
-      ...baseEnv,
-      FACE_SERVICE_PORT: String(facePort),
-      PORT: String(facePort),
-    };
-    children.push(spawnNpm("face", ["run", "dev:face"], env));
-  }
-
   {
     const env = {
       ...baseEnv,
       PORT: String(backendPort),
       FRONTEND_URL: frontendUrl,
-      ...(runDockerFace && facePort ? { FACE_SERVICE_URL: `http://localhost:${facePort}` } : {}),
-      ...(useLocalFace && !baseEnv.FACE_ENGINE ? { FACE_ENGINE: "local" } : {}),
     };
     children.push(spawnNpm("backend", ["run", "dev", "--prefix", "backend"], env));
   }
@@ -208,15 +162,10 @@ async function main() {
   for (const c of children) {
     c.on("exit", (code) => {
       const exitCode = typeof code === "number" ? code : 1;
-      if (c.__label === "face" && !requiredFace) {
-        // face-service is optional unless explicitly required
-        return;
-      }
       if (exitCode !== 0) shutdownAll(exitCode);
     });
 
     c.on("error", () => {
-      if (c.__label === "face" && !requiredFace) return;
       shutdownAll(1);
     });
   }

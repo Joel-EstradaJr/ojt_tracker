@@ -53,6 +53,10 @@ function roleToPayloadRole(role: UserRole): "admin" | "trainee" {
   return role === UserRole.ADMIN ? "admin" : "trainee";
 }
 
+function hasFaceEnrollment(user: { faceEnabled?: boolean | null; faceEmbedding?: unknown | null }): boolean {
+  return Boolean(user.faceEnabled) && Boolean(user.faceEmbedding);
+}
+
 function getPendingEmailVerificationState(user: {
   pendingEmail?: string | null;
   pendingEmailExpiresAt?: Date | null;
@@ -248,6 +252,7 @@ router.post("/login", async (req: Request, res: Response) => {
 
     const role = roleToPayloadRole(user.role);
     const pendingState = getPendingEmailVerificationState(user);
+    const requiresFaceEnrollment = role === "trainee" && !hasFaceEnrollment(user);
 
     if (user.mustChangePassword) {
       return res.json({
@@ -260,7 +265,13 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     setSessionCookie(res, { role, traineeId: trainee.id });
-    return res.json({ message: "Logged in.", role, traineeId: trainee.id, ...pendingState });
+    return res.json({
+      message: requiresFaceEnrollment ? "Face enrollment required." : "Logged in.",
+      role,
+      traineeId: trainee.id,
+      requiresFaceEnrollment,
+      ...pendingState,
+    });
   } catch (err) {
     console.error("login error:", err);
     return res.status(500).json({ error: "Internal server error." });
@@ -312,7 +323,7 @@ router.post("/face-login", async (req: Request, res: Response) => {
     }
 
     if (!user.faceEnabled || !user.faceEmbedding) {
-      return res.status(403).json({ error: "Face login is not enabled for this account." });
+      return res.status(403).json({ error: "Face login is not available yet for this account. Sign in with password first." });
     }
 
     const { match } = await verifyFaceMatch(imageBase64, user.faceEmbedding);
@@ -528,6 +539,7 @@ router.get("/me", async (req: Request, res: Response) => {
         traineeId: trainee.id,
         expiresAt: raw.exp ? raw.exp * 1000 : null,
         ...getPendingEmailVerificationState(trainee.user),
+        requiresFaceEnrollment: !hasFaceEnrollment(trainee.user),
         currentUser: {
           id: trainee.id,
           displayName: buildFullName(trainee),
@@ -670,7 +682,12 @@ router.post("/set-initial-password", async (req: Request, res: Response) => {
     const role = roleToPayloadRole(trainee.user.role);
     setSessionCookie(res, { role, traineeId: trainee.id });
 
-    return res.json({ message: "Password set successfully.", role, traineeId: trainee.id });
+    return res.json({
+      message: "Password set successfully.",
+      role,
+      traineeId: trainee.id,
+      requiresFaceEnrollment: role === "trainee" && !hasFaceEnrollment(trainee.user),
+    });
   } catch (err) {
     console.error("set-initial-password error:", err);
     return res.status(500).json({ error: "Internal server error." });

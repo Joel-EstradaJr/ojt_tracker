@@ -8,7 +8,6 @@
     "react-dom": "^18.3.1"
   },
   "scripts": {
-    "dev:face": "node scripts/dev-face-service.js",
     "dev": "node scripts/dev.js",
     "dev:fresh": "node scripts/dev.js --fresh",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",

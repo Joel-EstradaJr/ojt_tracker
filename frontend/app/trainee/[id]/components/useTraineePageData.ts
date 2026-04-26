@@ -80,6 +80,11 @@ export function useTraineePageData() {
             return;
           }
 
+          if (session.requiresFaceEnrollment) {
+            router.replace("/login");
+            return;
+          }
+
           if (session.requiresPendingEmailVerification) {
             router.replace("/login");
             return;

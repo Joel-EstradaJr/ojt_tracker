@@ -1,5 +1,9 @@
 import crypto from "crypto";
-import Jimp from "jimp";
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
+import { spawn } from "child_process";
+import { parse } from "csv-parse/sync";
 
 function getEnvNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -8,26 +12,45 @@ function getEnvNumber(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-export function getFaceServiceUrl(): string | null {
-  const url = process.env.FACE_SERVICE_URL?.trim();
-  return url ? url.replace(/\/$/, "") : null;
+function getEnvBool(name: string, fallback: boolean): boolean {
+  const raw = String(process.env[name] || "").trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === "1" || raw === "true" || raw === "yes";
 }
 
-export type FaceEngine = "remote" | "local" | "off";
+export type FaceEngine = "openface-cli" | "off";
 
 export function getFaceEngine(): FaceEngine {
   const forced = String(process.env.FACE_ENGINE || "").trim().toLowerCase();
   if (forced === "off") return "off";
-  if (forced === "local") return "local";
-  if (forced === "remote") return getFaceServiceUrl() ? "remote" : "off";
+  return "openface-cli";
+}
 
-  // Default behavior: remote when URL is provided, otherwise off.
-  return getFaceServiceUrl() ? "remote" : "off";
+export function getOpenFaceBinaryPath(): string {
+  const fromEnv = String(process.env.OPENFACE_CLI_PATH || "").trim();
+  if (fromEnv) return fromEnv;
+  return "FeatureExtraction";
 }
 
 export function getFaceMatchThreshold(): number {
-  // OpenFace-aligned-image embedding (normalized pixels) tends to have higher cosine similarity.
+  // OpenFace feature-vector embeddings are cosine-compared in [−1, 1].
   return getEnvNumber("FACE_MATCH_THRESHOLD", 0.85);
+}
+
+function getOpenFaceTimeoutMs(): number {
+  return getEnvNumber("OPENFACE_TIMEOUT_MS", 20_000);
+}
+
+function getOpenFaceMinConfidence(): number {
+  return getEnvNumber("OPENFACE_MIN_CONFIDENCE", 0.9);
+}
+
+function getOpenFaceSimSize(): number {
+  return getEnvNumber("OPENFACE_SIMSIZE", 112);
+}
+
+function getOpenFaceSimScale(): number {
+  return getEnvNumber("OPENFACE_SIM_SCALE", 0.7);
 }
 
 function l2Normalize(vec: number[]): number[] {
@@ -39,56 +62,271 @@ function l2Normalize(vec: number[]): number[] {
   return vec;
 }
 
-async function computeLocalEmbedding(imageBase64: string): Promise<number[]> {
-  const size = getEnvNumber("FACE_LOCAL_SIZE", 64);
-  if (!Number.isFinite(size) || size < 8 || size > 256) {
-    throw new Error("Invalid FACE_LOCAL_SIZE.");
+type OpenFaceRow = Record<string, string>;
+
+type OpenFaceRunResult = {
+  outDir: string;
+  csvPath: string;
+  stderr: string;
+};
+
+export type FaceAnalysis = {
+  success: boolean;
+  confidence: number;
+  faceId: string | null;
+  similarityReadyEmbedding: number[];
+  pose: {
+    tx: number | null;
+    ty: number | null;
+    tz: number | null;
+    rx: number | null;
+    ry: number | null;
+    rz: number | null;
+  };
+  gaze: {
+    angleX: number | null;
+    angleY: number | null;
+  };
+  actionUnits: Record<string, number>;
+};
+
+export function mapFaceErrorToUserMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+
+  if (message.includes("no face detected")) {
+    return "No face was detected. Please look at the camera and try again.";
+  }
+  if (message.includes("multiple faces")) {
+    return "Multiple faces were detected. Please ensure only one face is visible.";
+  }
+  if (message.includes("invalid face image") || message.includes("invalid face image encoding")) {
+    return "The captured image is invalid. Please retake your photo.";
   }
 
-  const normalized = normalizeImageBase64(imageBase64);
-  let buf: Buffer;
+  return "Face recognition is temporarily unavailable. Please try again later.";
+}
+
+function toNum(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : Number.NaN;
+}
+
+function toNullableNum(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function listFeatureColumns(headers: string[]): string[] {
+  const excluded = new Set(["frame", "face_id", "timestamp", "confidence", "success"]);
+  const prefixes = ["x_", "y_", "X_", "Y_", "Z_", "p_", "pose_", "gaze_", "AU"];
+  return headers.filter((h) => !excluded.has(h) && prefixes.some((p) => h.startsWith(p)));
+}
+
+function pickSingleFaceRow(rows: OpenFaceRow[]): OpenFaceRow {
+  if (!rows.length) throw new Error("No face detected.");
+
+  const successful = rows.filter((r) => String(r.success || "").trim() === "1");
+  if (!successful.length) throw new Error("No face detected.");
+
+  const minConfidence = getOpenFaceMinConfidence();
+  const highConfidence = successful.filter((r) => toNum(r.confidence) >= minConfidence);
+  const candidates = highConfidence.length ? highConfidence : successful;
+
+  const faceIds = new Set(candidates.map((r) => String(r.face_id || "").trim()).filter(Boolean));
+  if (faceIds.size > 1) {
+    throw new Error("Multiple faces detected. Use an image with exactly one face.");
+  }
+
+  const uniqueFrames = new Set(candidates.map((r) => String(r.frame || "").trim()).filter(Boolean));
+  if (uniqueFrames.size > 1) {
+    throw new Error("Multiple faces detected. Use an image with exactly one face.");
+  }
+
+  return candidates[0];
+}
+
+async function findFirstCsvFile(root: string): Promise<string | null> {
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      const nested = await findFirstCsvFile(full);
+      if (nested) return nested;
+      continue;
+    }
+    if (entry.isFile() && entry.name.toLowerCase().endsWith(".csv")) return full;
+  }
+  return null;
+}
+
+async function runOpenFaceCli(imagePath: string): Promise<OpenFaceRunResult> {
+  const tempOutDir = await fs.mkdtemp(path.join(os.tmpdir(), "openface-out-"));
+  const binary = getOpenFaceBinaryPath();
+
+  const args = [
+    "-f", imagePath,
+    "-out_dir", tempOutDir,
+    "-of", "probe",
+    "-2Dfp",
+    "-3Dfp",
+    "-pose",
+    "-gaze",
+    "-aus",
+    "-simalign",
+    "-simsize", String(getOpenFaceSimSize()),
+    "-simscale", String(getOpenFaceSimScale()),
+    "-nomask",
+  ];
+
+  const timeoutMs = getOpenFaceTimeoutMs();
+  const debug = getEnvBool("OPENFACE_DEBUG", false);
+
+  let stderr = "";
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(binary, args, {
+      stdio: debug ? "inherit" : ["ignore", "ignore", "pipe"],
+    });
+
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+
+    if (!debug && child.stderr) {
+      child.stderr.on("data", (buf: Buffer) => {
+        stderr += buf.toString("utf8");
+      });
+    }
+
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`OpenFace timed out after ${timeoutMs} ms.`));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || "OpenFace failed to process image."));
+        return;
+      }
+      resolve();
+    });
+  });
+
+  const csvPath = await findFirstCsvFile(tempOutDir);
+  if (!csvPath) {
+    await fs.rm(tempOutDir, { recursive: true, force: true });
+    throw new Error("OpenFace did not produce CSV output.");
+  }
+
+  return { outDir: tempOutDir, csvPath, stderr };
+}
+
+async function parseOpenFaceCsv(csvPath: string): Promise<FaceAnalysis> {
+  const csvText = await fs.readFile(csvPath, "utf8");
+  const rows = parse(csvText, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+  }) as OpenFaceRow[];
+
+  const row = pickSingleFaceRow(rows);
+  const headers = Object.keys(row);
+  const featureColumns = listFeatureColumns(headers);
+  if (!featureColumns.length) {
+    throw new Error("OpenFace did not return usable facial features.");
+  }
+
+  const values = featureColumns.map((c) => toNum(row[c]));
+  if (values.some((n) => !Number.isFinite(n))) {
+    throw new Error("Invalid feature vector from OpenFace output.");
+  }
+
+  const mean = values.reduce((s, v) => s + v, 0) / values.length;
+  const centered = values.map((v) => v - mean);
+  const variance = centered.reduce((s, v) => s + v * v, 0) / centered.length;
+  const std = Math.sqrt(variance) || 1;
+  const embedding = l2Normalize(centered.map((v) => v / std));
+
+  const actionUnits: Record<string, number> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (key.startsWith("AU")) {
+      const parsed = toNum(value);
+      if (Number.isFinite(parsed)) actionUnits[key] = parsed;
+    }
+  }
+
+  return {
+    success: String(row.success || "").trim() === "1",
+    confidence: toNum(row.confidence),
+    faceId: row.face_id ? String(row.face_id) : null,
+    similarityReadyEmbedding: embedding,
+    pose: {
+      tx: toNullableNum(row.pose_Tx),
+      ty: toNullableNum(row.pose_Ty),
+      tz: toNullableNum(row.pose_Tz),
+      rx: toNullableNum(row.pose_Rx),
+      ry: toNullableNum(row.pose_Ry),
+      rz: toNullableNum(row.pose_Rz),
+    },
+    gaze: {
+      angleX: toNullableNum(row.gaze_angle_x),
+      angleY: toNullableNum(row.gaze_angle_y),
+    },
+    actionUnits,
+  };
+}
+
+export async function analyzeFaceImageBuffer(imageBuffer: Buffer): Promise<FaceAnalysis> {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openface-in-"));
+  const imagePath = path.join(tempDir, "probe.jpg");
+
   try {
-    buf = Buffer.from(normalized, "base64");
-  } catch {
-    throw new Error("Invalid face image encoding.");
+    await fs.writeFile(imagePath, imageBuffer);
+    const { outDir, csvPath } = await runOpenFaceCli(imagePath);
+    try {
+      return await parseOpenFaceCsv(csvPath);
+    } finally {
+      await fs.rm(outDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
+}
 
-  let img: Jimp;
-  try {
-    img = await Jimp.read(buf);
-  } catch {
-    throw new Error("Invalid face image.");
-  }
+export async function checkOpenFaceReady(): Promise<boolean> {
+  return (await checkOpenFaceAvailability()).ready;
+}
 
-  img.resize(size, size, Jimp.RESIZE_BILINEAR);
-  img.grayscale();
+export async function checkOpenFaceAvailability(): Promise<{ ready: boolean; reason?: string }> {
+  const binary = getOpenFaceBinaryPath();
+  return new Promise<{ ready: boolean; reason?: string }>((resolve) => {
+    const child = spawn(binary, ["-help"], { stdio: "ignore" });
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve({ ready: false, reason: "OpenFace CLI readiness check timed out." });
+    }, 4000);
 
-  const data = img.bitmap.data; // RGBA
-  const out = new Array<number>(size * size);
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      resolve({ ready: false, reason: err instanceof Error ? err.message : "Failed to spawn OpenFace CLI." });
+    });
 
-  // First pass: collect intensities and compute mean.
-  let mean = 0;
-  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    const v = data[i] / 255; // after grayscale, R==G==B
-    out[p] = v;
-    mean += v;
-  }
-  mean /= out.length;
-
-  // Second pass: variance.
-  let varSum = 0;
-  for (let i = 0; i < out.length; i++) {
-    const d = out[i] - mean;
-    varSum += d * d;
-  }
-  const std = Math.sqrt(varSum / out.length) || 1;
-
-  // Standardize.
-  for (let i = 0; i < out.length; i++) {
-    out[i] = (out[i] - mean) / std;
-  }
-
-  return l2Normalize(out);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      // Some binaries return non-zero for help; process spawn success is enough.
+      if (code !== null) {
+        resolve({ ready: true });
+        return;
+      }
+      resolve({ ready: false, reason: "OpenFace CLI exited unexpectedly." });
+    });
+  });
 }
 
 export function normalizeImageBase64(input: string): string {
@@ -127,41 +365,17 @@ function cosineSimilarity(a: number[], b: number[]): number {
 export async function fetchFaceEmbedding(imageBase64: string): Promise<number[]> {
   const engine = getFaceEngine();
   if (engine === "off") throw new Error("Face recognition service is not configured.");
-  if (engine === "local") return computeLocalEmbedding(imageBase64);
 
-  const baseUrl = getFaceServiceUrl();
-  if (!baseUrl) throw new Error("Face recognition service is not configured.");
-
-  let res: Response;
+  const normalized = normalizeImageBase64(imageBase64);
+  let imageBuffer: Buffer;
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15_000);
-
-    res = await fetch(`${baseUrl}/v1/face/embedding`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image_base64: normalizeImageBase64(imageBase64) }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
+    imageBuffer = Buffer.from(normalized, "base64");
   } catch {
-    throw new Error("Face recognition service is unreachable.");
+    throw new Error("Invalid face image encoding.");
   }
 
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const record = body as Record<string, unknown>;
-    const msg = record?.error ?? record?.detail;
-    throw new Error(typeof msg === "string" && msg ? msg : "Face recognition failed.");
-  }
-
-  const embedding = (body as Record<string, unknown>)?.embedding;
-  if (!isNumberArray(embedding)) {
-    throw new Error("Invalid embedding returned by face service.");
-  }
-
-  return embedding;
+  const analysis = await analyzeFaceImageBuffer(imageBuffer);
+  return analysis.similarityReadyEmbedding;
 }
 
 export async function verifyFaceMatch(imageBase64: string, storedEmbedding: unknown): Promise<{ match: boolean; similarity: number }> {

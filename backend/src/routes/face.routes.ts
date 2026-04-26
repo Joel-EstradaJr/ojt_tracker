@@ -2,19 +2,8 @@ import { Router, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import prisma from "../utils/prisma";
 import { requireAuth } from "../middleware/auth";
-import { fetchFaceEmbedding, getFaceEngine, getFaceMatchThreshold, getFaceServiceUrl, verifyFaceMatch } from "../utils/face";
-
-async function checkFaceServiceReachable(url: string): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch(`${url}/health`, { signal: controller.signal });
-    clearTimeout(timeout);
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
+import { uploadImage } from "../middleware/upload";
+import { analyzeFaceImageBuffer, checkOpenFaceAvailability, fetchFaceEmbedding, getFaceEngine, getFaceMatchThreshold, mapFaceErrorToUserMessage, verifyFaceMatch } from "../utils/face";
 
 const router = Router();
 
@@ -24,13 +13,39 @@ router.get("/config", async (_req: Request, res: Response) => {
   if (engine === "off") {
     return res.json({ faceServiceConfigured: false, faceServiceReachable: false, matchThreshold: getFaceMatchThreshold(), engine });
   }
-  if (engine === "local") {
-    return res.json({ faceServiceConfigured: true, faceServiceReachable: true, matchThreshold: getFaceMatchThreshold(), engine });
+
+  const availability = await checkOpenFaceAvailability();
+  if (!availability.ready && availability.reason) {
+    console.error("[face/config] OpenFace unavailable:", availability.reason);
+  }
+  return res.json({ faceServiceConfigured: true, faceServiceReachable: availability.ready, matchThreshold: getFaceMatchThreshold(), engine });
+});
+
+router.post("/analyze-upload", uploadImage.single("image"), async (req: Request, res: Response) => {
+  if (getFaceEngine() === "off") {
+    return res.status(503).json({ error: "Face recognition is disabled." });
   }
 
-  const url = getFaceServiceUrl();
-  const reachable = url ? await checkFaceServiceReachable(url) : false;
-  return res.json({ faceServiceConfigured: true, faceServiceReachable: reachable, matchThreshold: getFaceMatchThreshold(), engine });
+  const reqWithFile = req as Request & { file?: Express.Multer.File };
+  if (!reqWithFile.file || !reqWithFile.file.buffer) {
+    return res.status(400).json({ error: "Image file is required (multipart field: image)." });
+  }
+
+  try {
+    const analysis = await analyzeFaceImageBuffer(reqWithFile.file.buffer);
+    return res.json({
+      message: "Image analyzed successfully.",
+      fileName: reqWithFile.file.originalname,
+      confidence: analysis.confidence,
+      pose: analysis.pose,
+      gaze: analysis.gaze,
+      actionUnits: analysis.actionUnits,
+      embedding: analysis.similarityReadyEmbedding,
+    });
+  } catch (err) {
+    console.error("[face/analyze-upload] OpenFace processing error:", err);
+    return res.status(400).json({ error: mapFaceErrorToUserMessage(err) });
+  }
 });
 
 router.get("/status", requireAuth, async (req: Request, res: Response) => {
@@ -97,8 +112,8 @@ router.post("/enroll", requireAuth, async (req: Request, res: Response) => {
 
     return res.json({ message: "Face enrolled." });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Face enrollment failed.";
-    return res.status(400).json({ error: msg });
+    console.error("[face/enroll] OpenFace enrollment error:", err);
+    return res.status(400).json({ error: mapFaceErrorToUserMessage(err) });
   }
 });
 
@@ -184,8 +199,8 @@ router.post("/verify", requireAuth, async (req: Request, res: Response) => {
     }
     return res.json({ match: true, similarity, threshold: getFaceMatchThreshold() });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Face verification failed.";
-    return res.status(400).json({ error: msg });
+    console.error("[face/verify] OpenFace verification error:", err);
+    return res.status(400).json({ error: mapFaceErrorToUserMessage(err) });
   }
 });
 

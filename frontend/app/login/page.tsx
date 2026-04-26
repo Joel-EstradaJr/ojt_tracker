@@ -7,6 +7,8 @@ import RightSidebarDrawer from "@/components/RightSidebarDrawer";
 import FaceCaptureDialog from "@/components/FaceCaptureDialog";
 import { ThemeToggle } from "@/components/ThemeProvider";
 import {
+  enrollFace,
+  fetchFaceConfig,
   faceLogin,
   getSession,
   isLoginError,
@@ -78,6 +80,10 @@ export default function LoginPage() {
   const [pendingAdminResendRequired, setPendingAdminResendRequired] = useState(false);
   const [pendingVerifyLoading, setPendingVerifyLoading] = useState(false);
   const [pendingVerifyError, setPendingVerifyError] = useState("");
+  const [showMandatoryFaceEnroll, setShowMandatoryFaceEnroll] = useState(false);
+  const [mandatoryFaceEnrollLoading, setMandatoryFaceEnrollLoading] = useState(false);
+  const [mandatoryFaceServiceReachable, setMandatoryFaceServiceReachable] = useState(true);
+  const [mandatoryFaceError, setMandatoryFaceError] = useState("");
 
   const GENERIC_LOGIN_ERROR = "Invalid credentials. Please try again.";
 
@@ -148,6 +154,13 @@ export default function LoginPage() {
         }
 
         if (session.role === "trainee" && session.traineeId) {
+          if (session.requiresFaceEnrollment) {
+            setPendingTraineeId(session.traineeId);
+            setMandatoryFaceError("");
+            setShowMandatoryFaceEnroll(true);
+            return;
+          }
+
           if (session.requiresPendingEmailVerification) {
             setPendingTraineeId(session.traineeId);
             setPendingEmail(session.pendingEmail ?? null);
@@ -171,6 +184,24 @@ export default function LoginPage() {
       cancelled = true;
     };
   }, [router]);
+
+  useEffect(() => {
+    if (!showMandatoryFaceEnroll) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const cfg = await fetchFaceConfig();
+        if (!cancelled) setMandatoryFaceServiceReachable(Boolean(cfg.faceServiceConfigured) && Boolean(cfg.faceServiceReachable));
+      } catch {
+        if (!cancelled) setMandatoryFaceServiceReachable(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showMandatoryFaceEnroll]);
 
   const handleLogin = async () => {
     if (isLoginRestricted) {
@@ -218,6 +249,13 @@ export default function LoginPage() {
       if (result.role === "admin") {
         router.replace("/admin/trainee-management");
       } else if (result.traineeId) {
+        if (result.requiresFaceEnrollment) {
+          setPendingTraineeId(result.traineeId);
+          setMandatoryFaceError("");
+          setShowMandatoryFaceEnroll(true);
+          return;
+        }
+
         if (result.requiresPendingEmailVerification) {
           setPendingTraineeId(result.traineeId);
           setPendingEmail(result.pendingEmail ?? null);
@@ -517,6 +555,12 @@ export default function LoginPage() {
       if (result.role === "admin") {
         router.replace("/admin/trainee-management");
       } else if (result.traineeId) {
+        if (result.requiresFaceEnrollment) {
+          setPendingTraineeId(result.traineeId);
+          setMandatoryFaceError("");
+          setShowMandatoryFaceEnroll(true);
+          return;
+        }
         router.replace(`/trainee/${result.traineeId}`);
       } else {
         setSignupSuccess("Password set successfully. You can now log in.");
@@ -579,6 +623,37 @@ export default function LoginPage() {
     setPendingAttemptsRemaining(3);
     setPendingAdminResendRequired(false);
     setPendingVerifyError("");
+    router.replace("/login");
+  };
+
+  const handleMandatoryFaceEnroll = async (imageDataUrl: string) => {
+    if (!pendingTraineeId) {
+      setMandatoryFaceError("Session is missing. Please log in again.");
+      return;
+    }
+
+    setMandatoryFaceEnrollLoading(true);
+    setMandatoryFaceError("");
+    try {
+      await enrollFace(imageDataUrl);
+      setShowMandatoryFaceEnroll(false);
+      router.replace(`/trainee/${pendingTraineeId}`);
+    } catch (err: unknown) {
+      setMandatoryFaceError(err instanceof Error ? err.message : "Face enrollment failed. Please try again.");
+    } finally {
+      setMandatoryFaceEnrollLoading(false);
+    }
+  };
+
+  const handleMandatoryFaceLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // ignore
+    }
+    setShowMandatoryFaceEnroll(false);
+    setPendingTraineeId("");
+    setMandatoryFaceError("");
     router.replace("/login");
   };
 
@@ -1004,6 +1079,44 @@ export default function LoginPage() {
         busy={faceLoginLoading}
         onCancel={() => setShowFaceLogin(false)}
         onConfirm={handleFaceLogin}
+      />
+
+      {showMandatoryFaceEnroll && (
+        <div style={{ position: "fixed", top: "1rem", right: "1rem", zIndex: 1200, width: "min(92vw, 420px)" }}>
+          <div className="card" style={{ margin: 0 }}>
+            <h3 style={{ margin: 0, fontSize: "1rem" }}>Face Registration Required</h3>
+            <p style={{ margin: "0.35rem 0 0.6rem", color: "var(--text-muted)", fontSize: "0.84rem" }}>
+              Register your face to continue. Access is blocked until this step is completed.
+            </p>
+
+            {!mandatoryFaceServiceReachable && (
+              <div style={{ marginBottom: "0.6rem", padding: "0.55rem 0.7rem", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", background: "var(--danger-light)", color: "var(--danger)", fontSize: "0.82rem" }}>
+                Face registration is temporarily unavailable. Please try again later or contact your administrator.
+              </div>
+            )}
+
+            {mandatoryFaceError && (
+              <div style={{ marginBottom: "0.6rem", padding: "0.55rem 0.7rem", border: "1px solid var(--danger)", borderRadius: "var(--radius-xs)", background: "var(--danger-light)", color: "var(--danger)", fontSize: "0.82rem" }}>
+                {mandatoryFaceError}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button type="button" className="btn btn-outline" onClick={handleMandatoryFaceLogout}>
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <FaceCaptureDialog
+        open={showMandatoryFaceEnroll && mandatoryFaceServiceReachable}
+        title="Register Your Face"
+        confirmLabel="Enroll Face"
+        busy={mandatoryFaceEnrollLoading}
+        onCancel={handleMandatoryFaceLogout}
+        onConfirm={handleMandatoryFaceEnroll}
       />
 
       <style jsx>{`

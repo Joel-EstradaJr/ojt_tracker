@@ -39,3 +39,20 @@ export const uploadBackup = multer({
     cb(new Error("Only CSV and ZIP files are allowed."));
   },
 });
+
+export const uploadImage = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const mime = (file.mimetype || "").toLowerCase();
+    const name = (file.originalname || "").toLowerCase();
+    const isImage = mime.startsWith("image/") || /\.(jpg|jpeg|png|bmp|webp)$/i.test(name);
+
+    if (!isImage) {
+      cb(new Error("Only image files are allowed."));
+      return;
+    }
+
+    cb(null, true);
+  },
+});

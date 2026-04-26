@@ -7,7 +7,6 @@ import { sendPendingEmailUpdateCode, sendResetCode, sendTemporaryPassword } from
 import { isEmailVerified } from "./email.controller";
 import { setSessionCookie } from "../middleware/auth";
 import { createAuditLog } from "../utils/audit";
-import { fetchFaceEmbedding, getFaceEngine, normalizeImageBase64 } from "../utils/face";
 import { resolveCanonicalEntities } from "../utils/canonical-entities";
 
 const SALT_ROUNDS = 10;
@@ -69,6 +68,10 @@ function toHHmm(date: Date): string {
   const hh = String(date.getHours()).padStart(2, "0");
   const mm = String(date.getMinutes()).padStart(2, "0");
   return `${hh}:${mm}`;
+}
+
+function toUpperSafe(value: unknown): string {
+  return String(value ?? "").trim().toUpperCase();
 }
 
 function mapSchedule(entries: Array<{ dayOfWeek: number; startTime: Date; endTime: Date }>): WorkScheduleMap {
@@ -143,7 +146,6 @@ export const createTrainee = async (req: Request, res: Response) => {
       email, contactNumber, school, companyName,
       startingDate, requiredHours, workSchedule,
       password, supervisors, verificationToken,
-      faceImageBase64,
     } = req.body;
 
     const resolvedRole: "admin" | "trainee" = auth?.role === "admin"
@@ -173,35 +175,8 @@ export const createTrainee = async (req: Request, res: Response) => {
       return res.status(409).json({ error: "A trainee with this name already exists." });
     }
 
-    // Trainee self-signup requires face enrollment.
-    let signupFaceEmbedding: number[] | null = null;
-    if (!isAdminCreating && isTraineeRole) {
-      if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
-
-      if (!faceImageBase64 || typeof faceImageBase64 !== "string") {
-        return res.status(400).json({ error: "Face registration is required." });
-      }
-
-      const normalized = normalizeImageBase64(faceImageBase64);
-      if (!normalized || normalized.length < 32) {
-        return res.status(400).json({ error: "Invalid face image." });
-      }
-
-      if (normalized.length > 2_000_000) {
-        return res.status(400).json({ error: "Face image is too large." });
-      }
-
-      if (!/^[A-Za-z0-9+/=]+$/.test(normalized)) {
-        return res.status(400).json({ error: "Invalid face image encoding." });
-      }
-
-      try {
-        signupFaceEmbedding = await fetchFaceEmbedding(faceImageBase64);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Face enrollment failed.";
-        return res.status(400).json({ error: msg });
-      }
-    }
+    const normalizedSchoolInput = isTraineeRole ? toUpperSafe(school) : ADMIN_DEFAULT_SCHOOL;
+    const normalizedCompanyInput = isTraineeRole ? toUpperSafe(companyName) : ADMIN_DEFAULT_COMPANY;
 
     let actualPassword: string;
     let mustChangePassword = false;
@@ -218,8 +193,8 @@ export const createTrainee = async (req: Request, res: Response) => {
 
     const passwordHash = await bcrypt.hash(actualPassword, SALT_ROUNDS);
     const resolvedEntities = await resolveCanonicalEntities(prisma, {
-      schoolInput: isTraineeRole ? String(school) : ADMIN_DEFAULT_SCHOOL,
-      companyInput: isTraineeRole ? String(companyName) : ADMIN_DEFAULT_COMPANY,
+      schoolInput: normalizedSchoolInput,
+      companyInput: normalizedCompanyInput,
     });
     const resolvedStartingDate = isTraineeRole ? String(startingDate || new Date().toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10);
 
@@ -230,14 +205,6 @@ export const createTrainee = async (req: Request, res: Response) => {
           role: toUserRole(resolvedRole),
           passwordHash,
           mustChangePassword,
-          ...(signupFaceEmbedding
-            ? {
-              faceEnabled: true,
-              faceAttendanceEnabled: false,
-              faceEmbedding: signupFaceEmbedding,
-              faceEnrolledAt: new Date(),
-            }
-            : {}),
         },
       });
 
@@ -249,10 +216,10 @@ export const createTrainee = async (req: Request, res: Response) => {
           middleName: middleName || null,
           suffix: suffix || null,
           contactNumber,
-          school: resolvedEntities.school.canonicalName,
+          school: resolvedEntities.school.canonicalName.toUpperCase(),
           schoolEntityId: resolvedEntities.school.id,
-          originalSchoolInput: resolvedEntities.school.originalInput,
-          originalCompanyInput: resolvedEntities.company.originalInput,
+          originalSchoolInput: resolvedEntities.school.originalInput.toUpperCase(),
+          originalCompanyInput: resolvedEntities.company.originalInput.toUpperCase(),
           startingDate: new Date(`${resolvedStartingDate}T00:00:00`),
           companyId: resolvedEntities.company.id,
           requiredHours: isTraineeRole ? Number(requiredHours) : ADMIN_DEFAULT_REQUIRED_HOURS,
@@ -367,10 +334,12 @@ export const updateTrainee = async (req: Request, res: Response) => {
     if (!isAdminRequester && Object.prototype.hasOwnProperty.call(req.body ?? {}, "startingDate")) {
       return res.status(403).json({ error: "Only admins can edit starting date." });
     }
+    const normalizedSchoolInput = isTraineeRole ? toUpperSafe(school) : ADMIN_DEFAULT_SCHOOL;
+    const normalizedCompanyInput = isTraineeRole ? toUpperSafe(companyName) : ADMIN_DEFAULT_COMPANY;
     const resolvedEntities = isTraineeRole
       ? await resolveCanonicalEntities(prisma, {
-        schoolInput: String(school),
-        companyInput: String(companyName),
+        schoolInput: normalizedSchoolInput,
+        companyInput: normalizedCompanyInput,
       })
       : null;
 
@@ -418,10 +387,10 @@ export const updateTrainee = async (req: Request, res: Response) => {
           contactNumber,
           ...(isTraineeRole
             ? {
-              school: resolvedEntities?.school.canonicalName,
+              school: resolvedEntities?.school.canonicalName.toUpperCase(),
               schoolEntityId: resolvedEntities?.school.id,
-              originalSchoolInput: resolvedEntities?.school.originalInput,
-              originalCompanyInput: resolvedEntities?.company.originalInput,
+              originalSchoolInput: resolvedEntities?.school.originalInput.toUpperCase(),
+              originalCompanyInput: resolvedEntities?.company.originalInput.toUpperCase(),
               ...(isAdminRequester && startingDate ? { startingDate: new Date(`${startingDate}T00:00:00`) } : {}),
               companyId: resolvedEntities?.company.id,
               requiredHours: Number(requiredHours),

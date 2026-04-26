@@ -20,7 +20,7 @@ A full-stack web application for tracking On-the-Job Training (OJT) hours, accom
 - **Export** logs to CSV, Excel (.xlsx), and PDF
 - **Import** logs from a CSV file
 - **Cascade delete** – removing a trainee also removes their logs
-- **Optional face recognition**: face login + optional face verification before attendance actions (requires the `face-service`)
+- **OpenFace face recognition**: face login + optional face verification before attendance actions (runs inside backend container via CLI)
 
 ---
 
@@ -29,7 +29,7 @@ A full-stack web application for tracking On-the-Job Training (OJT) hours, accom
 - **Node.js** ≥ 18
 - **npm** ≥ 9 (or yarn / pnpm)
 - **PostgreSQL** running locally or a remote connection string
-- **Docker Desktop** (only if you want to run the optional face recognition `face-service`)
+- **Docker Desktop** (required for local/backend container build)
 
 ---
 
@@ -211,9 +211,10 @@ date,timeIn,timeOut,accomplishments
 
 Create a new Render Web Service with **Root Directory** = `backend`.
 
-Render commands (backend service):
-- Build: `npm ci --include=dev && npm run build`
-- Start: `npm start` (runs `prisma migrate deploy` automatically)
+Render setup (backend service):
+- Environment: `Docker`
+- Root Directory: `backend`
+- Dockerfile Path: `./Dockerfile`
 - Health check: `/health`
 
 Backend environment variables on Render:
@@ -222,7 +223,8 @@ Backend environment variables on Render:
 - `JWT_SECRET`, `JWT_EXPIRY`, `SUPER_NAME`, `SUPER_PASSWORD`
 - `SMTP_EMAIL`, `SMTP_PASSWORD` (used for admin-triggered emails)
 - `EMAIL_INTERNAL_KEY` (must match Vercel)
-- `FACE_SERVICE_URL` = URL of the Python face-service (optional)
+- `FACE_ENGINE` = `openface-cli`
+- `OPENFACE_CLI_PATH` = path to `FeatureExtraction` binary (set in Dockerfile by default)
 - `FACE_MATCH_THRESHOLD` = cosine similarity threshold (optional, defaults to `0.85`)
 
 ### Frontend (Vercel)
@@ -238,36 +240,24 @@ Notes:
 - The frontend uses Next.js rewrites to proxy `/api/*` to the backend, while some `/api/...` endpoints are implemented as Vercel API routes (email-related flows).
 - After changing env vars on Vercel/Render, redeploy/restart for them to take effect.
 
-### Face Recognition Service (Optional)
+### OpenFace Integration (Single Backend Service)
 
-This repo includes a separate service at `face-service/` (FastAPI + OpenFace) used for generating face embeddings.
+OpenFace is executed directly by the Express backend through the `FeatureExtraction` CLI.
 
-- If trainee self-signup requires face enrollment, the backend must either have `FACE_SERVICE_URL` configured and reachable **or** use the local dev engine (`FACE_ENGINE=local`).
-- The frontend checks availability via `GET /api/face/config` and will block face capture/signup if the service is down.
+- No Python service is required.
+- No separate face microservice is required.
+- Backend endpoints write temporary image files, invoke OpenFace CLI, parse CSV outputs, return JSON, and clean up temp files.
 
-#### Run locally (Docker)
+Key backend endpoint for upload analysis:
+- `POST /api/face/analyze-upload` (multipart form-data field: `image`)
 
-```bash
-docker build -t ojt-face-service ./face-service
-docker run -p 8000:8000 ojt-face-service
-```
+Quick check (after backend is running):
+- `GET /api/face/config` should return `faceServiceReachable: true`
 
-Note: OpenFace is a compiled toolkit; in this repo the face-service is intended to run via Docker.
-
-#### No Docker workaround (dev)
-
-If you cannot run Docker on your machine, you can use a lightweight local embedding engine in the backend:
-
-- Set `FACE_ENGINE=local` in `backend/.env`, or
-- Run `npm run dev` from the repo root (it will automatically use the local engine when Docker is unavailable).
-
-If you still want **OpenFace** without installing Docker locally, run the OpenFace face-service on another machine/server (Docker allowed there) and set `FACE_SERVICE_URL` to that URL before starting the root dev script.
-
-Then set `FACE_SERVICE_URL=http://localhost:8000` in `backend/.env` (or your backend environment).
-
-Quick check:
-- open `http://localhost:8000/health` (should return `{ "status": "ok", "engine": "openface" }`)
-- call `GET http://localhost:4000/api/face/config` (should show `faceServiceReachable: true`)
+Implementation notes:
+- CLI call is made with Node `child_process.spawn`
+- OpenFace output CSV is parsed in Node and converted to JSON
+- Embeddings for match/verify are derived from OpenFace feature vectors
 
 ---
 

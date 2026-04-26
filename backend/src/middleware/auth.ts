@@ -45,12 +45,24 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     if (normalized.traineeId) {
       const trainee = await prisma.userProfile.findUnique({
         where: { id: normalized.traineeId },
-        include: { user: { select: { role: true } } },
+        include: { user: { select: { role: true, faceEnabled: true, faceEmbedding: true } } },
       });
 
       const mappedRole = trainee?.user?.role === UserRole.ADMIN ? "admin" : "trainee";
       if (!trainee?.user || mappedRole !== normalized.role) {
         return res.status(401).json({ error: "Session expired or invalid." });
+      }
+
+      const hasFaceEnrollment = Boolean(trainee.user.faceEnabled) && Boolean(trainee.user.faceEmbedding);
+      const enrollmentAllowed =
+        (req.baseUrl === "/api/face" && (req.path === "/enroll" || req.path === "/status" || req.path === "/config"))
+        || (req.baseUrl === "/api/auth" && req.path === "/logout");
+
+      if (normalized.role === "trainee" && !hasFaceEnrollment && !enrollmentAllowed) {
+        return res.status(403).json({
+          error: "Face enrollment is required before accessing this feature.",
+          code: "FACE_ENROLLMENT_REQUIRED",
+        });
       }
     }
 

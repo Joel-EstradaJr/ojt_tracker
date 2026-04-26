@@ -4,11 +4,3 @@ dist/
 .next/
 *.tsbuildinfo
 .turbo/
-
-# Python
-__pycache__/
-*.pyc
-.venv/
-.venv311/
-.venv312/
-face-service/.venv*/

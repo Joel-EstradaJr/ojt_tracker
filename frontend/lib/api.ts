@@ -50,7 +50,6 @@ export async function createTrainee(data: {
   password?: string;
   supervisors?: import("@/types").SupervisorInput[];
   verificationToken?: string;
-  faceImageBase64?: string;
 }) {
   const payload: Record<string, unknown> = { ...data };
   if (data.password) {
@@ -404,6 +403,7 @@ export interface SessionInfo {
   role?: "admin" | "trainee";
   traineeId?: string | null;
   expiresAt?: number | null;
+  requiresFaceEnrollment?: boolean;
   hasPendingEmailChange?: boolean;
   requiresPendingEmailVerification?: boolean;
   pendingEmail?: string | null;
@@ -428,6 +428,7 @@ export interface LoginResponse {
   role: "admin" | "trainee";
   traineeId?: string | null;
   mustChangePassword?: boolean;
+  requiresFaceEnrollment?: boolean;
   hasPendingEmailChange?: boolean;
   requiresPendingEmailVerification?: boolean;
   pendingEmail?: string | null;
@@ -621,7 +622,7 @@ export async function setInitialPassword(traineeId: string, currentPassword: str
   const hashedNew = await sha256(newPassword);
   const hashedConfirm = await sha256(confirmPassword);
 
-  return request<{ message: string; role: "admin" | "trainee"; traineeId?: string | null }>("/api/auth/set-initial-password", {
+  return request<{ message: string; role: "admin" | "trainee"; traineeId?: string | null; requiresFaceEnrollment?: boolean }>("/api/auth/set-initial-password", {
     method: "POST",
     body: JSON.stringify({
       traineeId,

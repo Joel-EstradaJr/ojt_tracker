@@ -6,12 +6,13 @@
 services:
   - type: web
     name: ojt-tracker-backend
-    env: node
+    env: docker
     rootDir: backend
-    buildCommand: npm ci --include=dev && npm run build
-    startCommand: npx prisma migrate deploy && npm start
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
+      - key: FACE_ENGINE
+        value: openface-cli

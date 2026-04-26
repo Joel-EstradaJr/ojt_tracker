@@ -247,8 +247,6 @@ export const createTraineeSchema = z.object({
     .optional(),
   supervisors: z.array(supervisorInputSchema).optional(),
   verificationToken: z.string().min(1, "Email verification is required.").optional(),
-  // Optional for admins; required for self-signup is enforced in the controller.
-  faceImageBase64: z.string().trim().max(2_000_000, "Face image is too large.").optional(),
 }).superRefine((data, ctx) => {
   if ((data.role ?? "trainee") !== "admin" && !data.startingDate) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["startingDate"], message: "Starting date is required." });
