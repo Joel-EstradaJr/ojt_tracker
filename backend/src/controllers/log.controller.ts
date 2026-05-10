@@ -135,7 +135,7 @@ export const createLog = async (req: Request, res: Response) => {
     const {
       traineeId, date, timeIn, timeOut, lunchStart, lunchEnd,
       accomplishment, applyOffset, offsetAmount,
-      faceImageBase64,
+      faceFrames,
     } = req.body as {
       traineeId: string;
       date: string;
@@ -146,7 +146,7 @@ export const createLog = async (req: Request, res: Response) => {
       accomplishment?: string;
       applyOffset?: boolean;
       offsetAmount?: number;
-      faceImageBase64?: string;
+      faceFrames?: string[];
     };
 
     if (auth?.role === "trainee" && auth.traineeId !== traineeId) {
@@ -182,21 +182,29 @@ export const createLog = async (req: Request, res: Response) => {
 
       if (trainee.user.faceAttendanceEnabled) {
         if (getFaceEngine() === "off") return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
-        if (!faceImageBase64 || typeof faceImageBase64 !== "string") {
-          return res.status(403).json({ error: "Face verification required." });
+        if (!Array.isArray(faceFrames) || faceFrames.length < 5 || !faceFrames.every((frame) => typeof frame === "string" && frame.trim().length > 0)) {
+          return res.status(400).json({ error: "frames (array of at least 5 base64 images) is required." });
         }
-        if (!trainee.user.faceEnabled || !trainee.user.faceEmbedding) {
+        if (!trainee.user.faceEnabled || !Array.isArray(trainee.user.faceEmbedding) || trainee.user.faceEmbedding.length !== 128) {
           return res.status(403).json({ error: "Face verification is enabled but face is not enrolled." });
         }
 
         try {
-          const { match } = await verifyFaceMatch(faceImageBase64, trainee.user.faceEmbedding);
-          if (!match) return res.status(401).json({ error: "Face mismatch." });
+          const { match, similarity } = await verifyFaceMatch(faceFrames, trainee.user.faceEmbedding);
+          console.info(`[log/create] userId=${traineeId} similarity=${similarity.toFixed(4)} result=${match ? "match" : "mismatch"}`);
+          if (!match) return res.status(401).json({ error: "Face does not match." });
           faceVerified = true;
         } catch (err) {
           console.error("[log/create] OpenFace verification error:", err);
           if (isFaceServiceUnavailableError(err)) {
             return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
+          }
+          const message = err instanceof Error ? err.message.toLowerCase() : "";
+          if (message.includes("no face detected")) {
+            return res.status(400).json({ error: "No face detected" });
+          }
+          if (message.includes("static image detected")) {
+            return res.status(401).json({ error: "Static image detected" });
           }
           throw err;
         }
@@ -414,12 +422,12 @@ export const patchLogAction = async (req: Request, res: Response) => {
   try {
     const auth = (req as Request & { auth?: { role: "admin" | "trainee"; traineeId?: string } }).auth;
     const { id } = req.params;
-    const { action, timestamp, accomplishment, offsetMinutes, faceImageBase64 } = req.body as {
+    const { action, timestamp, accomplishment, offsetMinutes, faceFrames } = req.body as {
       action: "lunchStart" | "lunchEnd" | "timeOut" | "accomplishment" | "offset";
       timestamp?: string;
       accomplishment?: string;
       offsetMinutes?: number;
-      faceImageBase64?: string;
+      faceFrames?: string[];
     };
 
     const log = await prisma.logEntry.findUnique({ where: { id } });
@@ -449,22 +457,30 @@ export const patchLogAction = async (req: Request, res: Response) => {
 
       if (trainee.user.faceAttendanceEnabled) {
         if (getFaceEngine() === "off") return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
-        if (!faceImageBase64 || typeof faceImageBase64 !== "string") {
-          return res.status(403).json({ error: "Face verification required." });
+        if (!Array.isArray(faceFrames) || faceFrames.length < 5 || !faceFrames.every((frame: string) => typeof frame === "string" && frame.trim().length > 0)) {
+          return res.status(400).json({ error: "frames (array of at least 5 base64 images) is required." });
         }
-        if (!trainee.user.faceEnabled || !trainee.user.faceEmbedding) {
+        if (!trainee.user.faceEnabled || !Array.isArray(trainee.user.faceEmbedding) || trainee.user.faceEmbedding.length !== 128) {
           return res.status(403).json({ error: "Face verification is enabled but face is not enrolled." });
         }
 
         try {
-          const { match } = await verifyFaceMatch(faceImageBase64, trainee.user.faceEmbedding);
-          if (!match) return res.status(401).json({ error: "Face mismatch." });
+          const { match, similarity } = await verifyFaceMatch(faceFrames, trainee.user.faceEmbedding);
+          console.info(`[log/update] userId=${log.traineeId} similarity=${similarity.toFixed(4)} result=${match ? "match" : "mismatch"}`);
+          if (!match) return res.status(401).json({ error: "Face does not match." });
 
           faceVerifiedThisAction = true;
         } catch (err) {
           console.error("[log/update] OpenFace verification error:", err);
           if (isFaceServiceUnavailableError(err)) {
             return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
+          }
+          const message = err instanceof Error ? err.message.toLowerCase() : "";
+          if (message.includes("no face detected")) {
+            return res.status(400).json({ error: "No face detected" });
+          }
+          if (message.includes("static image detected")) {
+            return res.status(401).json({ error: "Static image detected" });
           }
           throw err;
         }

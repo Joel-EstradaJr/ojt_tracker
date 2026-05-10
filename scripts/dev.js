@@ -1,5 +1,6 @@
 const { spawn, spawnSync } = require("child_process");
 const net = require("net");
+const os = require("os");
 const path = require("path");
 const fs = require("fs");
 
@@ -45,6 +46,18 @@ function npmCommand(npmArgs) {
 function toInt(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function getLanIp() {
+  const nets = os.networkInterfaces();
+  for (const entries of Object.values(nets)) {
+    for (const entry of entries || []) {
+      if (entry.family === "IPv4" && !entry.internal) {
+        return entry.address;
+      }
+    }
+  }
+  return null;
 }
 
 function isPortFree(port) {
@@ -119,15 +132,18 @@ async function main() {
 
   const preferredFrontend = toInt(baseEnv.FRONTEND_PORT) ?? 3000;
   const preferredBackend = toInt(baseEnv.BACKEND_PORT) ?? 10000;
+  const bindHost = baseEnv.DEV_BIND_HOST || "0.0.0.0";
+  const publicHost = baseEnv.DEV_PUBLIC_HOST || getLanIp() || "localhost";
 
   const frontendPort = await pickPort(preferredFrontend);
   const backendPort = await pickPort(preferredBackend);
 
-  const frontendUrl = `http://localhost:${frontendPort}`;
-  const backendUrl = `http://localhost:${backendPort}`;
+  const frontendUrl = `http://${publicHost}:${frontendPort}`;
+  const backendUrl = `http://${publicHost}:${backendPort}`;
 
   console.log(`[dev] Frontend: ${frontendUrl}`);
   console.log(`[dev] Backend:  ${backendUrl}`);
+  console.log(`[dev] Binding:  ${bindHost}`);
   console.log("[dev] Face:     Docker backend includes the OpenFace CLI runtime");
 
   const fresh = process.argv.includes("--fresh");
@@ -202,7 +218,9 @@ async function main() {
       NEXT_PUBLIC_API_URL: backendUrl,
       PORT: String(frontendPort),
     };
-    children.push(spawnNpm("frontend", ["run", "dev", "--prefix", "frontend", "--", "-p", String(frontendPort)], env));
+    children.push(
+      spawnNpm("frontend", ["run", "dev", "--prefix", "frontend", "--", "-p", String(frontendPort), "-H", bindHost], env)
+    );
   }
 
   function shutdownAll(exitCode) {

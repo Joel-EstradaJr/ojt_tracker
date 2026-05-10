@@ -1,11 +1,11 @@
-﻿import { Router, Request, Response } from "express";
+import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { UserRole } from "@prisma/client";
 import prisma from "../utils/prisma";
 import { sendResetCode } from "../utils/email";
-import { FACE_SERVICE_UNAVAILABLE_MESSAGE, getFaceEngine, isFaceServiceUnavailableError, verifyFaceMatch } from "../utils/face";
+import { FACE_SERVICE_UNAVAILABLE_MESSAGE, getFaceEngine, isFaceServiceUnavailableError, requireOpenFace, verifyFaceMatch } from "../utils/face";
 import { AuthPayload, clearSessionCookie, requireAdmin, requireAuth, setSessionCookie } from "../middleware/auth";
 
 const router = Router();
@@ -54,7 +54,7 @@ function roleToPayloadRole(role: UserRole): "admin" | "trainee" {
 }
 
 function hasFaceEnrollment(user: { faceEnabled?: boolean | null; faceEmbedding?: unknown | null }): boolean {
-  return Boolean(user.faceEnabled) && Boolean(user.faceEmbedding);
+  return Boolean(user.faceEnabled) && Array.isArray(user.faceEmbedding) && user.faceEmbedding.length === 128;
 }
 
 function getPendingEmailVerificationState(user: {
@@ -279,13 +279,25 @@ router.post("/login", async (req: Request, res: Response) => {
 });
 
 router.post("/face-login", async (req: Request, res: Response) => {
-  const { identifier, imageBase64 } = req.body as { identifier?: string; imageBase64?: string };
+  const { identifier, frames, userId } = req.body as { identifier?: string; frames?: string[]; userId?: string };
 
   const loginIdentifier = typeof identifier === "string" ? identifier.trim() : "";
-  if (!loginIdentifier) return res.status(400).json({ error: "Identifier is required." });
-  if (!imageBase64 || typeof imageBase64 !== "string") return res.status(400).json({ error: "imageBase64 is required." });
+  const loginUserId = typeof userId === "string" ? userId.trim() : "";
+  const hasFrames = Array.isArray(frames) && frames.length >= 5 && frames.every((frame) => typeof frame === "string" && frame.trim().length > 0);
+
+  if (!loginIdentifier && !loginUserId) return res.status(400).json({ error: "Identifier or userId is required." });
+  if (!hasFrames) return res.status(400).json({ error: "frames (array of at least 5 base64 images) is required." });
 
   if (getFaceEngine() === "off") return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
+
+  // BUG FIX: Hard-reject if OpenFace is unavailable at runtime.
+  // Previously, the system could silently fall back or bypass verification
+  // when OpenFace was unavailable, allowing unauthorized face logins.
+  try {
+    requireOpenFace();
+  } catch {
+    return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
+  }
 
   const normalizedEmail = loginIdentifier.toLowerCase();
   const isEmailIdentifier = normalizedEmail.includes("@");
@@ -297,6 +309,13 @@ router.post("/face-login", async (req: Request, res: Response) => {
         include: { user: true },
       })
       : null;
+
+    if (!trainee && loginUserId) {
+      trainee = await prisma.userProfile.findFirst({
+        where: { userId: loginUserId },
+        include: { user: true },
+      });
+    }
 
     if (!trainee) {
       trainee = await findTraineeByFullName(loginIdentifier);
@@ -322,13 +341,49 @@ router.post("/face-login", async (req: Request, res: Response) => {
       return res.status(403).json({ error: "Face login is disabled until the temporary password is changed." });
     }
 
-    if (!user.faceEnabled || !user.faceEmbedding) {
-      return res.status(403).json({ error: "Face login is not available yet for this account. Sign in with password first." });
+    if (!user.faceEnabled || !hasFaceEnrollment(user)) {
+      return res.status(403).json({ error: "Face is not enrolled for this account." });
     }
 
-    const { match } = await verifyFaceMatch(imageBase64, user.faceEmbedding);
+    const { match, similarity } = await verifyFaceMatch(frames, user.faceEmbedding);
     if (!match) {
-      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+      // BUG FIX: Increment failedLoginAttempts on face mismatch.
+      // Previously face login failures were NOT tracked, allowing
+      // unlimited brute-force attempts via face without lockout.
+      const nextFailedAttempts = user.failedLoginAttempts + 1;
+      const accountLocked = nextFailedAttempts >= ACCOUNT_LOCK_THRESHOLD;
+      const lockoutMinutes = accountLocked ? null : getLockoutMinutes(nextFailedAttempts);
+      const lockedUntil = lockoutMinutes ? new Date(Date.now() + lockoutMinutes * 60 * 1000) : null;
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: nextFailedAttempts,
+          lockedUntil,
+        },
+      });
+
+      console.warn(`[face-login] Face mismatch for user ${user.id} (similarity: ${similarity.toFixed(4)}). Failed attempts: ${nextFailedAttempts}`);
+      console.info(`[face-login] userId=${user.id} similarity=${similarity.toFixed(4)} result=mismatch`);
+
+      if (accountLocked) {
+        return res.status(423).json({ error: "Face does not match", accountLocked: true, lockoutUserId: user.id });
+      }
+
+      return res.status(401).json({ error: "Face does not match" });
+    }
+
+    console.info(`[face-login] userId=${user.id} similarity=${similarity.toFixed(4)} result=match`);
+
+    // Successful face login — reset failed attempts
+    if (user.failedLoginAttempts !== 0 || user.lockedUntil) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        },
+      });
     }
 
     const role = roleToPayloadRole(user.role);
@@ -340,6 +395,16 @@ router.post("/face-login", async (req: Request, res: Response) => {
     console.error("face-login error:", err);
     if (isFaceServiceUnavailableError(err)) {
       return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
+    }
+    const message = err instanceof Error ? err.message : "";
+    if (message.toLowerCase().includes("no face detected")) {
+      return res.status(400).json({ error: "No face detected" });
+    }
+    if (message.toLowerCase().includes("static image detected")) {
+      return res.status(401).json({ error: "Static image detected" });
+    }
+    if (message.toLowerCase().includes("face is not enrolled")) {
+      return res.status(403).json({ error: "Face is not enrolled for this account." });
     }
     return res.status(500).json({ error: "Internal server error." });
   }

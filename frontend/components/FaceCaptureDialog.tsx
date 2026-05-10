@@ -1,412 +1,564 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { analyzeFrame, captureFrame, type FaceBox, type FrameAnalysis } from "@/lib/face-guidance";
+
+type CaptureMode = "enroll" | "verify";
 
 type Props = {
   open: boolean;
   title: string;
   confirmLabel: string;
   busy?: boolean;
+  errorMessage?: string;
+  mode?: CaptureMode;
   onCancel: () => void;
-  onConfirm: (imageDataUrl: string) => void;
+  onConfirm: (frames: string[]) => void | Promise<void>;
 };
 
-type GuideStatus = "ok" | "warn" | "bad" | "unknown";
+type GuideTone = "red" | "orange" | "yellow" | "green";
 
-type FaceBox = { x: number; y: number; width: number; height: number };
+type CaptureStepId = "straight" | "left" | "right" | "up" | "down";
 
-type LiveGuide = {
-  detectorAvailable: boolean;
-  frameW: number;
-  frameH: number;
-  face: GuideStatus;
-  lighting: GuideStatus;
-  distance: GuideStatus;
-  centering: GuideStatus;
-  tilt: GuideStatus;
-  messages: string[];
+type Baseline = {
+  centerX: number;
+  centerY: number;
+  areaRatio: number;
+};
+
+type CaptureStep = {
+  id: CaptureStepId;
+  label: string;
+  prompt: string;
+  perStepFrames: number;
+  validatePose: (analysis: FrameAnalysis, baseline: Baseline | null) => boolean;
+};
+
+type GuideState = {
+  message: string;
+  tone: GuideTone;
   box?: FaceBox;
+  analysis?: FrameAnalysis;
+  collected: number;
+  totalRequired: number;
+  stepIndex: number;
+  totalSteps: number;
+  stepLabel: string;
+  stepPrompt: string;
+  stableCount: number;
 };
 
-function statusColor(status: GuideStatus) {
-  if (status === "ok") return "var(--success-text)";
-  if (status === "warn") return "var(--primary)";
-  if (status === "bad") return "var(--danger)";
-  return "var(--text-muted)";
+const ANALYZE_INTERVAL_MS = 250;
+const CAPTURE_MIN_GAP_MS = 360;
+const STABLE_REQUIRED = 4;
+
+const VERIFY_STEPS: CaptureStep[] = [
+  {
+    id: "straight",
+    label: "Verification",
+    prompt: "Look straight and hold still.",
+    perStepFrames: 5,
+    validatePose: (analysis) => {
+      if (!analysis.box) return false;
+      const centerX = (analysis.box.x + (analysis.box.width / 2)) / Math.max(1, analysis.width);
+      const centerY = (analysis.box.y + (analysis.box.height / 2)) / Math.max(1, analysis.height);
+      const dx = Math.abs(centerX - 0.5);
+      const dy = Math.abs(centerY - 0.5);
+      return dx <= 0.25 && dy <= 0.25;
+    },
+  },
+];
+
+const ENROLL_STEPS: CaptureStep[] = [
+  {
+    id: "straight",
+    label: "1/5 Straight",
+    prompt: "Look straight at the camera.",
+    perStepFrames: 3,
+    validatePose: (analysis) => {
+      if (!analysis.box) return false;
+      const centerX = (analysis.box.x + (analysis.box.width / 2)) / Math.max(1, analysis.width);
+      const centerY = (analysis.box.y + (analysis.box.height / 2)) / Math.max(1, analysis.height);
+      return Math.abs(centerX - 0.5) <= 0.22 && Math.abs(centerY - 0.5) <= 0.22;
+    },
+  },
+  {
+    id: "left",
+    label: "2/5 Left",
+    prompt: "Turn your face slightly left.",
+    perStepFrames: 2,
+    validatePose: (analysis, baseline) => {
+      if (!analysis.box || !baseline) return false;
+      const centerX = (analysis.box.x + (analysis.box.width / 2)) / Math.max(1, analysis.width);
+      const areaRatio = (analysis.box.width * analysis.box.height) / Math.max(1, analysis.width * analysis.height);
+      return centerX <= baseline.centerX - 0.03 || areaRatio <= baseline.areaRatio * 0.92;
+    },
+  },
+  {
+    id: "right",
+    label: "3/5 Right",
+    prompt: "Turn your face slightly right.",
+    perStepFrames: 2,
+    validatePose: (analysis, baseline) => {
+      if (!analysis.box || !baseline) return false;
+      const centerX = (analysis.box.x + (analysis.box.width / 2)) / Math.max(1, analysis.width);
+      const areaRatio = (analysis.box.width * analysis.box.height) / Math.max(1, analysis.width * analysis.height);
+      return centerX >= baseline.centerX + 0.03 || areaRatio <= baseline.areaRatio * 0.92;
+    },
+  },
+  {
+    id: "up",
+    label: "4/5 Up",
+    prompt: "Look slightly up.",
+    perStepFrames: 2,
+    validatePose: (analysis, baseline) => {
+      if (!analysis.box || !baseline) return false;
+      const centerY = (analysis.box.y + (analysis.box.height / 2)) / Math.max(1, analysis.height);
+      return centerY <= baseline.centerY - 0.03;
+    },
+  },
+  {
+    id: "down",
+    label: "5/5 Down",
+    prompt: "Look slightly down.",
+    perStepFrames: 2,
+    validatePose: (analysis, baseline) => {
+      if (!analysis.box || !baseline) return false;
+      const centerY = (analysis.box.y + (analysis.box.height / 2)) / Math.max(1, analysis.height);
+      return centerY >= baseline.centerY + 0.03;
+    },
+  },
+];
+
+function toneStyles(tone: GuideTone) {
+  if (tone === "green") {
+    return { border: "#23c55e", text: "#14532d", background: "rgba(34, 197, 94, 0.12)" };
+  }
+  if (tone === "yellow") {
+    return { border: "#facc15", text: "#713f12", background: "rgba(250, 204, 21, 0.12)" };
+  }
+  if (tone === "orange") {
+    return { border: "#fb923c", text: "#7c2d12", background: "rgba(251, 146, 60, 0.12)" };
+  }
+  return { border: "#ef4444", text: "#7f1d1d", background: "rgba(239, 68, 68, 0.12)" };
 }
 
-export default function FaceCaptureDialog({ open, title, confirmLabel, busy, onCancel, onConfirm }: Props) {
+function getGridColor(tone: GuideTone) {
+  if (tone === "green") return "rgba(34, 197, 94, 0.45)";
+  if (tone === "yellow") return "rgba(250, 204, 21, 0.38)";
+  if (tone === "orange") return "rgba(251, 146, 60, 0.38)";
+  return "rgba(239, 68, 68, 0.36)";
+}
+
+function evaluateGuide(step: CaptureStep, analysis: FrameAnalysis | undefined, baseline: Baseline | null): { message: string; tone: GuideTone; ready: boolean } {
+  if (!analysis || analysis.faceCount === 0) {
+    return { message: "No face detected. Align your face inside the oval.", tone: "red", ready: false };
+  }
+
+  if (analysis.faceCount > 1) {
+    return { message: "Multiple faces detected. Keep only one face in view.", tone: "red", ready: false };
+  }
+
+  if (!analysis.box) {
+    return { message: "Face box unavailable. Adjust camera and lighting.", tone: "red", ready: false };
+  }
+
+  const minArea = analysis.brightness < 95 ? 0.08 : 0.1;
+  if (analysis.areaRatio < minArea) {
+    return { message: "Move closer.", tone: "orange", ready: false };
+  }
+
+  if (analysis.areaRatio > 0.65) {
+    return { message: "Move slightly farther.", tone: "orange", ready: false };
+  }
+
+  if (analysis.centeredness > 0.27 && step.id === "straight") {
+    return { message: "Center your face in the oval.", tone: "yellow", ready: false };
+  }
+
+  if (analysis.brightness < 48) {
+    return { message: "Lighting too low. Face a light source.", tone: "yellow", ready: false };
+  }
+
+  if (analysis.blurry) {
+    return { message: "Image is blurry. Hold still for a moment.", tone: "yellow", ready: false };
+  }
+
+  if (analysis.qualityScore < 0.28) {
+    return { message: "Quality is unstable. Keep steady and try again.", tone: "yellow", ready: false };
+  }
+
+  if (!step.validatePose(analysis, baseline)) {
+    return { message: step.prompt, tone: "yellow", ready: false };
+  }
+
+  return { message: "Good. Hold steady, capturing...", tone: "green", ready: true };
+}
+
+export default function FaceCaptureDialog({ open, title, confirmLabel, busy, errorMessage, mode = "verify", onCancel, onConfirm }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [error, setError] = useState<string>("");
-  const [captured, setCaptured] = useState<string | null>(null);
+  const analysisTimerRef = useRef<number | null>(null);
 
-  const detectorRef = useRef<any>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const captureLockedRef = useRef(false);
+  const stableCountRef = useRef(0);
+  const lastCaptureAtRef = useRef(0);
+  const baselineRef = useRef<Baseline | null>(null);
+  const previousBoxRef = useRef<FaceBox | null>(null);
+  const stepFramesRef = useRef<string[][]>([]);
+  const analysisRef = useRef<FrameAnalysis | null>(null);
 
-  const [guide, setGuide] = useState<LiveGuide>({
-    detectorAvailable: false,
-    frameW: 0,
-    frameH: 0,
-    face: "unknown",
-    lighting: "unknown",
-    distance: "unknown",
-    centering: "unknown",
-    tilt: "unknown",
-    messages: [],
+  const steps = useMemo(() => (mode === "enroll" ? ENROLL_STEPS : VERIFY_STEPS), [mode]);
+  const totalRequired = useMemo(() => steps.reduce((sum, step) => sum + step.perStepFrames, 0), [steps]);
+
+  const [stepIndex, setStepIndex] = useState(0);
+  const [localError, setLocalError] = useState("");
+  const [guide, setGuide] = useState<GuideState>({
+    message: "Starting camera...",
+    tone: "yellow",
+    collected: 0,
+    totalRequired,
+    stepIndex: 0,
+    totalSteps: steps.length,
+    stepLabel: steps[0]?.label ?? "Capture",
+    stepPrompt: steps[0]?.prompt ?? "Hold still.",
+    stableCount: 0,
   });
 
-  const canCapture = useMemo(() => {
-    // If the detector is available, require exactly one face detected.
-    if (guide.detectorAvailable) return guide.face === "ok";
-    return true;
-  }, [guide.detectorAvailable, guide.face]);
+  const styles = useMemo(() => toneStyles(guide.tone), [guide.tone]);
+
+  const resetSession = () => {
+    if (analysisTimerRef.current) {
+      window.clearInterval(analysisTimerRef.current);
+      analysisTimerRef.current = null;
+    }
+    captureLockedRef.current = false;
+    stableCountRef.current = 0;
+    lastCaptureAtRef.current = 0;
+    baselineRef.current = null;
+    previousBoxRef.current = null;
+    stepFramesRef.current = steps.map(() => []);
+    analysisRef.current = null;
+    setStepIndex(0);
+  };
 
   const stopStream = () => {
     const stream = streamRef.current;
     if (stream) {
-      stream.getTracks().forEach((t) => t.stop());
+      stream.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
   };
 
   useEffect(() => {
     if (!open) {
+      resetSession();
       stopStream();
-      setCaptured(null);
-      setError("");
-      setGuide({
-        detectorAvailable: false,
-        frameW: 0,
-        frameH: 0,
-        face: "unknown",
-        lighting: "unknown",
-        distance: "unknown",
-        centering: "unknown",
-        tilt: "unknown",
-        messages: [],
-      });
+      setLocalError("");
       return;
     }
 
     let cancelled = false;
+    resetSession();
 
     (async () => {
       try {
-        setError("");
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        setLocalError("");
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 24, min: 12 },
+          },
+          audio: false,
+        });
+
         if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
+          stream.getTracks().forEach((track) => track.stop());
           return;
         }
 
         streamRef.current = stream;
-
-        // Init Shape Detection API FaceDetector if supported.
-        const FaceDetectorCtor = (globalThis as any).FaceDetector;
-        if (FaceDetectorCtor && !detectorRef.current) {
-          try {
-            detectorRef.current = new FaceDetectorCtor({ fastMode: true, maxDetectedFaces: 2 });
-          } catch {
-            detectorRef.current = null;
-          }
-        }
-
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
         }
       } catch {
-        setError("Camera access was denied or is unavailable.");
+        setLocalError("Camera access was denied or is unavailable.");
       }
     })();
 
     return () => {
       cancelled = true;
+      resetSession();
       stopStream();
     };
-  }, [open]);
+  }, [open, steps]);
 
   useEffect(() => {
-    if (!open) return;
-    if (captured) return;
-
-    let stopped = false;
-    let busyTick = false;
-
-    const canvas = document.createElement("canvas");
-    canvasRef.current = canvas;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
+    if (!open || busy) return;
 
     const tick = async () => {
-      if (stopped) return;
-      if (busyTick) return;
+      if (captureLockedRef.current) return;
 
       const video = videoRef.current;
-      if (!video || !ctx) return;
-      if (video.readyState < 2) return;
+      if (!video || video.readyState < 2) {
+        return;
+      }
 
-      busyTick = true;
+      const activeStep = steps[Math.min(stepIndex, steps.length - 1)];
+      if (!activeStep) return;
+
+      let nextAnalysis: FrameAnalysis | null = null;
+      try {
+        nextAnalysis = await analyzeFrame(video);
+      } catch {
+        nextAnalysis = null;
+      }
+
+      analysisRef.current = nextAnalysis;
+
+      const evaluation = evaluateGuide(activeStep, nextAnalysis ?? undefined, baselineRef.current);
+      const box = nextAnalysis?.box;
+
+      let movementOk = true;
+      if (box && previousBoxRef.current) {
+        const centerX = box.x + (box.width / 2);
+        const centerY = box.y + (box.height / 2);
+        const prevX = previousBoxRef.current.x + (previousBoxRef.current.width / 2);
+        const prevY = previousBoxRef.current.y + (previousBoxRef.current.height / 2);
+        const delta = Math.sqrt(((centerX - prevX) ** 2) + ((centerY - prevY) ** 2));
+        movementOk = delta / Math.max(1, nextAnalysis?.width ?? 1) < 0.025;
+      }
+
+      previousBoxRef.current = box ?? null;
+
+      if (evaluation.ready && movementOk) {
+        stableCountRef.current += 1;
+      } else {
+        stableCountRef.current = 0;
+      }
+
+      const collected = stepFramesRef.current.flat().length;
+
+      setGuide({
+        message: evaluation.message,
+        tone: evaluation.tone,
+        box,
+        analysis: nextAnalysis ?? undefined,
+        collected,
+        totalRequired,
+        stepIndex,
+        totalSteps: steps.length,
+        stepLabel: activeStep.label,
+        stepPrompt: activeStep.prompt,
+        stableCount: stableCountRef.current,
+      });
+
+      if (!evaluation.ready || !nextAnalysis) {
+        return;
+      }
+
+      if (stableCountRef.current < STABLE_REQUIRED) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastCaptureAtRef.current < CAPTURE_MIN_GAP_MS) {
+        return;
+      }
+
+      if (nextAnalysis.blurry || nextAnalysis.qualityScore < 0.3) {
+        return;
+      }
 
       try {
-        const vw = video.videoWidth || 640;
-        const vh = video.videoHeight || 480;
-        const scale = Math.min(1, 360 / vw);
-        const W = Math.max(160, Math.round(vw * scale));
-        const H = Math.max(120, Math.round(vh * scale));
-        canvas.width = W;
-        canvas.height = H;
-        ctx.drawImage(video, 0, 0, W, H);
+        const frame = captureFrame(video, 0.92);
+        lastCaptureAtRef.current = now;
 
-        // Lighting heuristic: average luminance + contrast.
-        const data = ctx.getImageData(0, 0, W, H).data;
-        let sum = 0;
-        let sumSq = 0;
-        let count = 0;
+        if (!stepFramesRef.current[stepIndex]) {
+          stepFramesRef.current[stepIndex] = [];
+        }
+        stepFramesRef.current[stepIndex].push(frame);
 
-        // Sample every ~20th pixel (performance).
-        const step = 4 * 20;
-        for (let i = 0; i < data.length; i += step) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-          sum += y;
-          sumSq += y * y;
-          count++;
+        if (!baselineRef.current && activeStep.id === "straight" && nextAnalysis.box) {
+          baselineRef.current = {
+            centerX: (nextAnalysis.box.x + (nextAnalysis.box.width / 2)) / Math.max(1, nextAnalysis.width),
+            centerY: (nextAnalysis.box.y + (nextAnalysis.box.height / 2)) / Math.max(1, nextAnalysis.height),
+            areaRatio: nextAnalysis.areaRatio,
+          };
         }
 
-        const avg = count ? sum / count : 0;
-        const variance = count ? Math.max(0, sumSq / count - avg * avg) : 0;
-        const std = Math.sqrt(variance);
-
-        let lighting: GuideStatus = "unknown";
-        if (count) {
-          if (avg < 70 || std < 22) lighting = "bad";
-          else if (avg > 210) lighting = "warn";
-          else lighting = "ok";
+        const doneForStep = stepFramesRef.current[stepIndex].length >= activeStep.perStepFrames;
+        if (!doneForStep) {
+          return;
         }
 
-        const detector = detectorRef.current;
-        let face: GuideStatus = detector ? "bad" : "unknown";
-        let distance: GuideStatus = detector ? "unknown" : "unknown";
-        let centering: GuideStatus = detector ? "unknown" : "unknown";
-        let tilt: GuideStatus = detector ? "unknown" : "unknown";
-        let box: FaceBox | undefined;
-
-        const messages: string[] = [];
-
-        if (detector) {
-          const faces = await detector.detect(canvas);
-
-          if (!faces || faces.length === 0) {
-            face = "bad";
-            messages.push("No face detected. Face the camera and remove obstructions.");
-          } else if (faces.length > 1) {
-            face = "bad";
-            messages.push("Multiple faces detected. Ensure only one face is in frame.");
-          } else {
-            face = "ok";
-            const bb = faces[0]?.boundingBox as { x: number; y: number; width: number; height: number };
-            if (bb && Number.isFinite(bb.x) && Number.isFinite(bb.y)) {
-              box = { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
-
-              const areaRatio = (bb.width * bb.height) / (W * H);
-              if (areaRatio < 0.08) {
-                distance = "bad";
-                messages.push("Move closer to the camera.");
-              } else if (areaRatio > 0.35) {
-                distance = "warn";
-                messages.push("Move a bit farther from the camera.");
-              } else {
-                distance = "ok";
-              }
-
-              const cx = bb.x + bb.width / 2;
-              const cy = bb.y + bb.height / 2;
-              const dx = Math.abs(cx - W / 2) / (W / 2);
-              const dy = Math.abs(cy - H / 2) / (H / 2);
-              if (dx > 0.28 || dy > 0.28) {
-                centering = "warn";
-                messages.push("Center your face in the frame.");
-              } else {
-                centering = "ok";
-              }
-            }
-
-            // Optional tilt (roll) if landmarks are available.
-            const landmarks = (faces[0] as any)?.landmarks as any[] | undefined;
-            if (Array.isArray(landmarks) && landmarks.length) {
-              const find = (re: RegExp) => landmarks.find((l) => re.test(String(l?.type ?? "")));
-              const leftEye = find(/left.*eye/i);
-              const rightEye = find(/right.*eye/i);
-              const p1 = leftEye?.locations?.[0] ?? leftEye?.location;
-              const p2 = rightEye?.locations?.[0] ?? rightEye?.location;
-              if (p1 && p2 && Number.isFinite(p1.x) && Number.isFinite(p1.y) && Number.isFinite(p2.x) && Number.isFinite(p2.y)) {
-                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x) * (180 / Math.PI);
-                if (Math.abs(angle) > 12) {
-                  tilt = "warn";
-                  messages.push("Keep your head level (reduce tilt)." );
-                } else {
-                  tilt = "ok";
-                }
-              }
-            }
-          }
+        if (stepIndex + 1 < steps.length) {
+          stableCountRef.current = 0;
+          previousBoxRef.current = null;
+          setStepIndex((prev) => prev + 1);
+          return;
         }
 
-        if (lighting === "bad") {
-          messages.push("Lighting is too low. Move to a brighter area or face a light source.");
-        } else if (lighting === "warn") {
-          messages.push("Lighting is very bright. Avoid backlight and reduce glare.");
-        }
-
-        if (messages.length === 0) {
-          messages.push("Looks good. Capture when ready.");
-        }
-
-        setGuide({
-          detectorAvailable: Boolean(detector),
-          frameW: W,
-          frameH: H,
-          face,
-          lighting,
-          distance,
-          centering,
-          tilt,
-          messages,
-          box,
-        });
+        captureLockedRef.current = true;
+        const allFrames = stepFramesRef.current.flat();
+        await onConfirm(allFrames);
       } catch {
-        setGuide((prev) => ({
-          ...prev,
-          detectorAvailable: Boolean(detectorRef.current),
-          messages: prev.messages.length ? prev.messages : ["Adjust your face and lighting, then capture."],
-        }));
-      } finally {
-        busyTick = false;
+        setLocalError("Unable to capture a stable face frame. Please retry.");
+        stableCountRef.current = 0;
       }
     };
 
-    const interval = window.setInterval(() => { void tick(); }, 350);
+    analysisTimerRef.current = window.setInterval(() => {
+      void tick();
+    }, ANALYZE_INTERVAL_MS);
+
     void tick();
 
     return () => {
-      stopped = true;
-      window.clearInterval(interval);
+      if (analysisTimerRef.current) {
+        window.clearInterval(analysisTimerRef.current);
+        analysisTimerRef.current = null;
+      }
     };
-  }, [open, captured]);
+  }, [open, busy, onConfirm, stepIndex, steps, totalRequired]);
 
-  if (!open) return null;
+  if (!open) {
+    return null;
+  }
 
-  const captureFrame = () => {
-    if (!videoRef.current) return;
-
-    const video = videoRef.current;
-    const width = video.videoWidth || 640;
-    const height = video.videoHeight || 480;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, width, height);
-
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-    setCaptured(dataUrl);
-  };
+  const overlayTone = localError || errorMessage ? "red" : guide.tone;
+  const overlayStyles = toneStyles(overlayTone);
+  const gridColor = getGridColor(overlayTone);
 
   return (
-    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: "var(--bg)", borderRadius: "var(--radius)", padding: "1.25rem", maxWidth: 520, width: "92%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-        <h3 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>{title}</h3>
-
-        {error ? (
-          <div style={{ padding: "0.6rem 0.85rem", borderRadius: "var(--radius-sm)", background: "var(--danger-light)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.85rem" }}>
-            {error}
-          </div>
-        ) : (
-          <div style={{ display: "grid", gap: "0.75rem" }}>
-            {!captured ? (
-              <div style={{ position: "relative" }}>
-                <video ref={videoRef} playsInline style={{ width: "100%", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", background: "var(--bg-subtle)" }} />
-                {guide.detectorAvailable && guide.box && guide.frameW > 0 && guide.frameH > 0 && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: `${(guide.box.x / guide.frameW) * 100}%`,
-                      top: `${(guide.box.y / guide.frameH) * 100}%`,
-                      width: `${(guide.box.width / guide.frameW) * 100}%`,
-                      height: `${(guide.box.height / guide.frameH) * 100}%`,
-                      border: `2px solid ${statusColor(guide.face)}`,
-                      borderRadius: 8,
-                      boxSizing: "border-box",
-                      pointerEvents: "none",
-                    }}
-                  />
-                )}
-              </div>
-            ) : (
-              <img src={captured} alt="Captured face" style={{ width: "100%", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }} />
-            )}
-
-            {!captured && (
-              <div style={{ display: "grid", gap: "0.35rem", padding: "0.75rem", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-subtle)" }}>
-                <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", fontSize: "0.8rem" }}>
-                  <span style={{ color: statusColor(guide.face) }}>Face: {guide.detectorAvailable ? (guide.face === "ok" ? "Detected" : "Not ready") : "(no detector)"}</span>
-                  <span style={{ color: statusColor(guide.lighting) }}>Light: {guide.lighting === "ok" ? "Good" : guide.lighting === "warn" ? "Very bright" : guide.lighting === "bad" ? "Too low" : "—"}</span>
-                  <span style={{ color: statusColor(guide.distance) }}>Distance: {guide.distance === "ok" ? "Good" : guide.distance === "warn" ? "Adjust" : guide.distance === "bad" ? "Adjust" : "—"}</span>
-                  <span style={{ color: statusColor(guide.centering) }}>Center: {guide.centering === "ok" ? "Good" : guide.centering === "warn" ? "Adjust" : "—"}</span>
-                  <span style={{ color: statusColor(guide.tilt) }}>Tilt: {guide.tilt === "ok" ? "Good" : guide.tilt === "warn" ? "Adjust" : "—"}</span>
-                </div>
-
-                <ul style={{ margin: 0, paddingLeft: "1.1rem", color: "var(--text-muted)", fontSize: "0.78rem" }}>
-                  {guide.messages.slice(0, 3).map((m, i) => (
-                    <li key={i}>{m}</li>
-                  ))}
-                </ul>
-
-                {!guide.detectorAvailable && (
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                    Live face positioning guidance is limited in this browser. Use good lighting and center your face.
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "space-between", flexWrap: "wrap" }}>
-              {!captured ? (
-                <button type="button" className="btn btn-outline" onClick={captureFrame} disabled={busy || !canCapture}>
-                  Capture
-                </button>
-              ) : (
-                <button type="button" className="btn btn-outline" onClick={() => setCaptured(null)} disabled={busy}>
-                  Retake
-                </button>
-              )}
-
-              <div style={{ display: "flex", gap: "0.5rem", marginLeft: "auto" }}>
-                <button type="button" className="btn btn-outline" onClick={onCancel} disabled={busy}>
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => captured && onConfirm(captured)}
-                  disabled={busy || !captured}
-                >
-                  {busy ? "Working…" : confirmLabel}
-                </button>
-              </div>
-            </div>
-
-            <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--text-muted)" }}>
-              Tip: Face the camera with good lighting.
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(2, 6, 23, 0.64)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+      <div style={{ width: "min(96vw, 700px)", borderRadius: 20, background: "linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.92))", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 30px 90px rgba(0,0,0,0.45)", padding: "1rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: "1rem", marginBottom: "0.75rem" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700, color: "#f8fafc" }}>{title}</h3>
+            <p style={{ margin: "0.35rem 0 0", color: "rgba(226,232,240,0.72)", fontSize: "0.85rem" }}>
+              {confirmLabel}
             </p>
           </div>
+          <button type="button" className="btn btn-outline" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+        </div>
+
+        {(localError || errorMessage) && (
+          <div style={{ marginBottom: "0.75rem", padding: "0.7rem 0.85rem", borderRadius: 14, border: "1px solid #ef4444", background: "rgba(239, 68, 68, 0.12)", color: "#fecaca", fontWeight: 600 }}>
+            {localError || errorMessage}
+          </div>
         )}
+
+        <div style={{ marginBottom: "0.65rem" }}>
+          <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
+            {steps.map((step, idx) => {
+              const status = idx < stepIndex ? "done" : idx === stepIndex ? "active" : "pending";
+              const bg = status === "done" ? "rgba(34,197,94,0.2)" : status === "active" ? "rgba(59,130,246,0.22)" : "rgba(148,163,184,0.12)";
+              const border = status === "done" ? "1px solid #22c55e" : status === "active" ? "1px solid #60a5fa" : "1px solid rgba(148,163,184,0.35)";
+              const color = status === "done" ? "#bbf7d0" : status === "active" ? "#bfdbfe" : "#cbd5e1";
+              return (
+                <div key={step.id} style={{ padding: "0.28rem 0.6rem", borderRadius: 999, background: bg, border, color, fontSize: "0.76rem", fontWeight: 700 }}>
+                  {step.label}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ position: "relative", borderRadius: 20, overflow: "hidden", background: "#020617", border: `2px solid ${overlayStyles.border}` }}>
+          <video ref={videoRef} playsInline muted style={{ width: "100%", aspectRatio: "4 / 3", objectFit: "cover", display: "block", background: "#020617" }} />
+
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              inset: 0,
+              pointerEvents: "none",
+              backgroundImage: `
+                linear-gradient(to right, transparent 0, transparent calc(33.333% - 1px), ${gridColor} calc(33.333% - 1px), ${gridColor} calc(33.333% + 1px), transparent calc(33.333% + 1px), transparent calc(66.666% - 1px), ${gridColor} calc(66.666% - 1px), ${gridColor} calc(66.666% + 1px), transparent calc(66.666% + 1px)),
+                linear-gradient(to bottom, transparent 0, transparent calc(33.333% - 1px), ${gridColor} calc(33.333% - 1px), ${gridColor} calc(33.333% + 1px), transparent calc(33.333% + 1px), transparent calc(66.666% - 1px), ${gridColor} calc(66.666% - 1px), ${gridColor} calc(66.666% + 1px), transparent calc(66.666% + 1px))
+              `,
+              backgroundSize: "100% 100%",
+              mixBlendMode: "screen",
+            }}
+          />
+
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: "50%",
+              width: "43%",
+              height: "59%",
+              transform: "translate(-50%, -50%)",
+              border: `2px dashed ${gridColor}`,
+              borderRadius: "999px",
+              boxShadow: "0 0 0 9999px rgba(0,0,0,0.12) inset",
+              pointerEvents: "none",
+            }}
+          />
+
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: "50%",
+              width: 12,
+              height: 12,
+              transform: "translate(-50%, -50%)",
+              borderRadius: 999,
+              background: overlayStyles.border,
+              boxShadow: `0 0 0 8px ${overlayStyles.border}22, 0 0 24px ${overlayStyles.border}88`,
+              pointerEvents: "none",
+            }}
+          />
+
+          {guide.box && (
+            <div
+              style={{
+                position: "absolute",
+                left: `${(guide.box.x / (guide.analysis?.width || 1)) * 100}%`,
+                top: `${(guide.box.y / (guide.analysis?.height || 1)) * 100}%`,
+                width: `${(guide.box.width / (guide.analysis?.width || 1)) * 100}%`,
+                height: `${(guide.box.height / (guide.analysis?.height || 1)) * 100}%`,
+                border: `3px solid ${overlayStyles.border}`,
+                borderRadius: 16,
+                boxSizing: "border-box",
+                pointerEvents: "none",
+              }}
+            />
+          )}
+
+          <div style={{ position: "absolute", left: 10, top: 10, padding: "0.3rem 0.55rem", borderRadius: 10, background: "rgba(2,6,23,0.7)", color: "#e2e8f0", fontWeight: 700, fontSize: "0.76rem", border: "1px solid rgba(148,163,184,0.38)" }}>
+            {guide.stepLabel}
+          </div>
+        </div>
+
+        <div style={{ marginTop: "0.85rem", padding: "0.85rem 0.95rem", borderRadius: 16, border: `1px solid ${overlayStyles.border}`, background: overlayStyles.background, color: overlayStyles.text }}>
+          <div style={{ fontSize: "1rem", fontWeight: 700 }}>{guide.message}</div>
+          <div style={{ marginTop: "0.35rem", fontSize: "0.82rem", opacity: 0.92 }}>
+            {guide.stepPrompt}
+          </div>
+          <div style={{ marginTop: "0.42rem", fontSize: "0.78rem", opacity: 0.88 }}>
+            Stable frames: {guide.stableCount}/{STABLE_REQUIRED} | Quality: {Math.round((guide.analysis?.qualityScore ?? 0) * 100)}%
+          </div>
+        </div>
+
+        <div style={{ marginTop: "0.75rem", display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ color: "rgba(226,232,240,0.72)", fontSize: "0.82rem" }}>
+            {guide.analysis?.detectorName === "face-api.js" ? "face-api.js" : guide.analysis?.detectorName === "FaceDetector" ? "FaceDetector" : "Camera guidance"}
+          </div>
+          <div style={{ color: "#cbd5e1", fontSize: "0.85rem", fontWeight: 600 }}>
+            {busy ? "Submitting frames..." : `Captured ${guide.collected} of ${guide.totalRequired}`}
+          </div>
+        </div>
       </div>
     </div>
   );

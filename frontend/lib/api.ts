@@ -272,7 +272,7 @@ export function createLog(data: {
   accomplishment?: string;
   applyOffset?: boolean;
   offsetAmount?: number;
-  faceImageBase64?: string;
+  faceFrames?: string[];
 }) {
   return request<import("@/types").LogEntry>("/api/logs", {
     method: "POST",
@@ -285,7 +285,7 @@ export function patchLogAction(logId: string, data: {
   timestamp?: string;
   accomplishment?: string;
   offsetMinutes?: number;
-  faceImageBase64?: string;
+  faceFrames?: string[];
 }) {
   return request<import("@/types").LogEntry>(`/api/logs/${logId}/action`, {
     method: "PATCH",
@@ -504,12 +504,12 @@ export async function login(fullName: string, password: string) {
   return res.json() as Promise<LoginResponse>;
 }
 
-export async function faceLogin(identifier: string, imageBase64: string) {
+export async function faceLogin(identifier: string, frames: string[], userId?: string) {
   const res = await fetch(`${BASE}/api/auth/face-login`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ identifier, imageBase64 }),
+    body: JSON.stringify({ identifier, frames, userId }),
   });
 
   if (!res.ok) {
@@ -532,10 +532,22 @@ export function getFaceStatus() {
   return request<FaceStatus>("/api/face/status");
 }
 
-export function enrollFace(imageBase64: string) {
-  return request<{ message: string }>("/api/face/enroll", {
+export function enrollFace(frames: string[], options?: { userId?: string; reEnroll?: boolean }) {
+  return request<{ message: string; multiFrame?: boolean; frameCount?: number }>("/api/face/enroll", {
     method: "POST",
-    body: JSON.stringify({ imageBase64 }),
+    body: JSON.stringify({ frames, userId: options?.userId, reEnroll: options?.reEnroll }),
+  });
+}
+
+/**
+ * Multi-frame face enrollment (more secure).
+ * Requires ≥3 base64-encoded face images.
+ * The backend will average embeddings and check liveness.
+ */
+export function enrollFaceMultiFrame(frames: string[]) {
+  return request<{ message: string; multiFrame: boolean; frameCount: number }>("/api/face/enroll", {
+    method: "POST",
+    body: JSON.stringify({ frames }),
   });
 }
 
@@ -552,10 +564,10 @@ export function setFaceAttendanceMode(enabled: boolean) {
   });
 }
 
-export function verifyFace(imageBase64: string) {
+export function verifyFace(frames: string[]) {
   return request<{ match: boolean; similarity: number; threshold: number }>("/api/face/verify", {
     method: "POST",
-    body: JSON.stringify({ imageBase64 }),
+    body: JSON.stringify({ frames }),
   });
 }
 

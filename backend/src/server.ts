@@ -28,7 +28,7 @@ import scriptRoutes from "./routes/script.routes";
 import backupRoutes from "./routes/backup.routes";
 import faceRoutes from "./routes/face.routes";
 import entityRoutes from "./routes/entity.routes";
-import { checkOpenFaceAvailability, getFaceEngine, getOpenFaceBinaryPath } from "./utils/face";
+import { checkOpenFaceAvailability, getFaceEngine, getOpenFaceBinaryPath, setOpenFaceReady } from "./utils/face";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -45,6 +45,12 @@ app.use(
     credentials: true,
   })
 );
+// Request timeout middleware
+app.use((req, res, next) => {
+  req.setTimeout(30000); // 30 second timeout per request
+  res.setTimeout(30000);
+  next();
+});
 // Base64 images for face recognition can be large; raise the JSON body limit.
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
@@ -102,16 +108,32 @@ app.get("/health", (_req, res) => {
 // ── Start ────────────────────────────────────────────────────
 let server: Server;
 
-async function startServer() {
-  if (getFaceEngine() !== "off") {
-    const availability = await checkOpenFaceAvailability();
-    if (!availability.ready) {
-      console.error(`[startup] OpenFace CLI is required but unavailable at ${getOpenFaceBinaryPath()}.`);
-      if (availability.reason) {
-        console.error(`[startup] OpenFace error: ${availability.reason}`);
-      }
-      process.exit(1);
+async function refreshOpenFaceAvailability(): Promise<void> {
+  if (getFaceEngine() === "off") {
+    setOpenFaceReady(false);
+    return;
+  }
+
+  const availability = await checkOpenFaceAvailability();
+  setOpenFaceReady(Boolean(availability.ready));
+
+  if (!availability.ready) {
+    console.error(`[face] OpenFace CLI unavailable at ${getOpenFaceBinaryPath()}.`);
+    if (availability.reason) {
+      console.error(`[face] OpenFace error: ${availability.reason}`);
     }
+  } else {
+    console.log("[face] OpenFace CLI readiness check passed.");
+  }
+}
+
+async function startServer() {
+  await refreshOpenFaceAvailability();
+
+  if (getFaceEngine() !== "off") {
+    setInterval(() => {
+      void refreshOpenFaceAvailability();
+    }, 30_000);
   }
 
   server = app.listen(PORT, () => {

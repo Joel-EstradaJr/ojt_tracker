@@ -333,7 +333,7 @@ export default function LoginPage() {
     setShowFaceLogin(true);
   };
 
-  const handleFaceLogin = async (imageDataUrl: string) => {
+  const handleFaceLogin = async (frames: string[]) => {
     if (isLoginRestricted) return;
 
     setError("");
@@ -342,9 +342,10 @@ export default function LoginPage() {
     const normalizedFullName = fullName.trim().toUpperCase();
 
     try {
-      const result = await faceLogin(normalizedFullName, imageDataUrl);
+      const result = await faceLogin(normalizedFullName, frames);
       setActiveLockout(null);
       setPermanentLock(null);
+      setShowFaceLogin(false);
 
       if (result.role === "admin") {
         router.replace("/admin/trainee-management");
@@ -374,7 +375,6 @@ export default function LoginPage() {
       setError(err instanceof Error ? err.message : GENERIC_LOGIN_ERROR);
     } finally {
       setFaceLoginLoading(false);
-      setShowFaceLogin(false);
     }
   };
 
@@ -626,7 +626,7 @@ export default function LoginPage() {
     router.replace("/login");
   };
 
-  const handleMandatoryFaceEnroll = async (imageDataUrl: string) => {
+  const handleMandatoryFaceEnroll = async (frames: string[]) => {
     if (!pendingTraineeId) {
       setMandatoryFaceError("Session is missing. Please log in again.");
       return;
@@ -635,7 +635,7 @@ export default function LoginPage() {
     setMandatoryFaceEnrollLoading(true);
     setMandatoryFaceError("");
     try {
-      await enrollFace(imageDataUrl);
+      await enrollFace(frames, { userId: pendingTraineeId });
       setShowMandatoryFaceEnroll(false);
       router.replace(`/trainee/${pendingTraineeId}`);
     } catch (err: unknown) {
@@ -648,6 +648,36 @@ export default function LoginPage() {
       setMandatoryFaceEnrollLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!error) return;
+    const clear = () => setError("");
+    const timer = window.setTimeout(clear, 4000);
+    window.addEventListener("mousemove", clear, { once: true });
+    window.addEventListener("keydown", clear, { once: true });
+    window.addEventListener("touchstart", clear, { once: true });
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("mousemove", clear);
+      window.removeEventListener("keydown", clear);
+      window.removeEventListener("touchstart", clear);
+    };
+  }, [error]);
+
+  useEffect(() => {
+    if (!mandatoryFaceError) return;
+    const clear = () => setMandatoryFaceError("");
+    const timer = window.setTimeout(clear, 4000);
+    window.addEventListener("mousemove", clear, { once: true });
+    window.addEventListener("keydown", clear, { once: true });
+    window.addEventListener("touchstart", clear, { once: true });
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("mousemove", clear);
+      window.removeEventListener("keydown", clear);
+      window.removeEventListener("touchstart", clear);
+    };
+  }, [mandatoryFaceError]);
 
   const handleMandatoryFaceLogout = async () => {
     try {
@@ -1080,8 +1110,10 @@ export default function LoginPage() {
         open={showFaceLogin}
         title="Face Login"
         confirmLabel="Verify & Login"
+        mode="verify"
         busy={faceLoginLoading}
         onCancel={() => setShowFaceLogin(false)}
+        errorMessage={error}
         onConfirm={handleFaceLogin}
       />
 
@@ -1118,8 +1150,10 @@ export default function LoginPage() {
         open={showMandatoryFaceEnroll && mandatoryFaceServiceReachable}
         title="Register Your Face"
         confirmLabel="Enroll Face"
+        mode="enroll"
         busy={mandatoryFaceEnrollLoading}
         onCancel={handleMandatoryFaceLogout}
+        errorMessage={mandatoryFaceError}
         onConfirm={handleMandatoryFaceEnroll}
       />
 

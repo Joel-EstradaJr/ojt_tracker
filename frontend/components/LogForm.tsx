@@ -182,7 +182,7 @@ export default function LogForm({
   const [faceBusy, setFaceBusy] = useState(false);
   const [showFaceEnroll, setShowFaceEnroll] = useState(false);
   const [showFaceVerify, setShowFaceVerify] = useState(false);
-  const [pendingFaceImage, setPendingFaceImage] = useState<string | null>(null);
+  const [pendingFaceFrames, setPendingFaceFrames] = useState<string[] | null>(null);
 
   // Find today's log from passed logs
   useEffect(() => {
@@ -255,6 +255,21 @@ export default function LogForm({
       setScriptsError("");
     }
   }, [showAccomplishmentModal]);
+
+  useEffect(() => {
+    if (!error) return;
+    const clear = () => setError("");
+    const timer = window.setTimeout(clear, 4000);
+    window.addEventListener("mousemove", clear, { once: true });
+    window.addEventListener("keydown", clear, { once: true });
+    window.addEventListener("touchstart", clear, { once: true });
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("mousemove", clear);
+      window.removeEventListener("keydown", clear);
+      window.removeEventListener("touchstart", clear);
+    };
+  }, [error]);
 
   const isEditing = !!editingLog;
   const effectiveAvailable = isEditing && editingLog
@@ -433,18 +448,18 @@ export default function LogForm({
     });
   };
 
-  const handleEnrollFace = async (imageDataUrl: string) => {
+  const handleEnrollFace = async (frames: string[]) => {
     await runGuarded("face-enroll", async () => {
       setFaceBusy(true);
       setError("");
       try {
-        await enrollFace(imageDataUrl);
+        await enrollFace(frames, { userId: traineeId });
         await refreshFaceStatus();
+        setShowFaceEnroll(false);
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Face enrollment failed.");
       } finally {
         setFaceBusy(false);
-        setShowFaceEnroll(false);
       }
     });
   };
@@ -483,7 +498,7 @@ export default function LogForm({
   const handleTraineeAction = (action: ActionStep) => {
     setCapturedTime(new Date());
     setPendingAction(action);
-    setPendingFaceImage(null);
+    setPendingFaceFrames(null);
 
     if (faceAttendanceEnabled) {
       setShowFaceVerify(true);
@@ -506,13 +521,13 @@ export default function LogForm({
             traineeId,
             date: new Date().toISOString(),
             timeIn: capturedTime.toISOString(),
-            faceImageBase64: pendingFaceImage ?? undefined,
+            faceFrames: pendingFaceFrames ?? undefined,
           });
         } else if (todayLog) {
           const updated = await patchLogAction(todayLog.id, {
             action: pendingAction as "lunchStart" | "lunchEnd" | "timeOut",
             timestamp: capturedTime.toISOString(),
-            faceImageBase64: pendingFaceImage ?? undefined,
+            faceFrames: pendingFaceFrames ?? undefined,
           });
           if (pendingAction === "timeOut") {
             setAccomplishmentTargetLogId(updated.id);
@@ -527,7 +542,7 @@ export default function LogForm({
         setLoading(false);
         setPendingAction(null);
         setCapturedTime(null);
-        setPendingFaceImage(null);
+        setPendingFaceFrames(null);
       }
     });
   };
@@ -772,7 +787,9 @@ export default function LogForm({
           open={showFaceEnroll}
           title="Enroll Face"
           confirmLabel="Enroll"
+          mode="enroll"
           busy={faceBusy}
+          errorMessage={error}
           onCancel={() => setShowFaceEnroll(false)}
           onConfirm={handleEnrollFace}
         />
@@ -781,15 +798,17 @@ export default function LogForm({
           open={showFaceVerify}
           title="Face Verification"
           confirmLabel="Use This Photo"
+          mode="verify"
           busy={faceBusy || loading}
+          errorMessage={error}
           onCancel={() => {
             setShowFaceVerify(false);
             setPendingAction(null);
             setCapturedTime(null);
-            setPendingFaceImage(null);
+            setPendingFaceFrames(null);
           }}
-          onConfirm={(imageDataUrl) => {
-            setPendingFaceImage(imageDataUrl);
+          onConfirm={(frames) => {
+            setPendingFaceFrames(frames);
             setShowFaceVerify(false);
             setShowConfirm(true);
           }}
@@ -824,7 +843,7 @@ export default function LogForm({
                 </div>
               </div>
               <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
-                <button type="button" className="btn btn-outline" onClick={() => { setShowConfirm(false); setPendingAction(null); setCapturedTime(null); setPendingFaceImage(null); }} style={{ padding: "0.5rem 1rem" }}>
+                <button type="button" className="btn btn-outline" onClick={() => { setShowConfirm(false); setPendingAction(null); setCapturedTime(null); setPendingFaceFrames(null); }} style={{ padding: "0.5rem 1rem" }}>
                   Cancel
                 </button>
                 <button type="button" className="btn btn-primary" onClick={confirmTraineeAction} disabled={loading} style={{ padding: "0.5rem 1rem" }}>

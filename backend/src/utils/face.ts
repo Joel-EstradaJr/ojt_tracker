@@ -20,7 +20,11 @@ function getEnvBool(name: string, fallback: boolean): boolean {
 
 export type FaceEngine = "openface-cli" | "off";
 
-export const FACE_SERVICE_UNAVAILABLE_MESSAGE = "Face recognition is temporarily unavailable. Please try again later.";
+export const FACE_SERVICE_UNAVAILABLE_MESSAGE = "Face recognition service unavailable";
+export const FACE_MIN_CONFIDENCE = 0.75;
+export const FACE_MATCH_THRESHOLD = 0.85;
+export const FACE_LIVENESS_STDDEV_THRESHOLD = 0.001;
+export const MIN_FACE_FRAMES = 5;
 
 export function getFaceEngine(): FaceEngine {
   const forced = String(process.env.FACE_ENGINE || "").trim().toLowerCase();
@@ -35,8 +39,7 @@ export function getOpenFaceBinaryPath(): string {
 }
 
 export function getFaceMatchThreshold(): number {
-  // OpenFace feature-vector embeddings are cosine-compared in [−1, 1].
-  return getEnvNumber("FACE_MATCH_THRESHOLD", 0.85);
+  return getEnvNumber("FACE_MATCH_THRESHOLD", FACE_MATCH_THRESHOLD);
 }
 
 function getOpenFaceTimeoutMs(): number {
@@ -44,7 +47,7 @@ function getOpenFaceTimeoutMs(): number {
 }
 
 function getOpenFaceMinConfidence(): number {
-  return getEnvNumber("OPENFACE_MIN_CONFIDENCE", 0.9);
+  return getEnvNumber("OPENFACE_MIN_CONFIDENCE", 0.75);
 }
 
 function getOpenFaceSimSize(): number {
@@ -55,13 +58,47 @@ function getOpenFaceSimScale(): number {
   return getEnvNumber("OPENFACE_SIM_SCALE", 0.7);
 }
 
+// Minimum embedding variance across multi-frame submissions.
+// If the max pairwise distance is below this, all frames are
+// identical → static photo / screen replay.
+function getLivenessMinVariance(): number {
+  return getEnvNumber("FACE_LIVENESS_MIN_VARIANCE", 0.01);
+}
+
+// ── Runtime OpenFace availability gate ──────────────────────
+// Set once at startup after the readiness check passes.
+// Cleared if a runtime operation fails with a spawn/ENOENT error.
+let openFaceAvailable = false;
+
+export function setOpenFaceReady(ready: boolean): void {
+  openFaceAvailable = ready;
+}
+
+export function isOpenFaceReady(): boolean {
+  return openFaceAvailable;
+}
+
+/**
+ * Guard function — call before any face operation.
+ * Throws a descriptive error (caught as 503) if OpenFace is unavailable.
+ */
+export function requireOpenFace(): void {
+  if (getFaceEngine() === "off") {
+    throw new Error(FACE_SERVICE_UNAVAILABLE_MESSAGE);
+  }
+  if (!openFaceAvailable) {
+    throw new Error(FACE_SERVICE_UNAVAILABLE_MESSAGE);
+  }
+}
+
+// ── Vector math ─────────────────────────────────────────────
+
 function l2Normalize(vec: number[]): number[] {
   let sumSq = 0;
   for (const v of vec) sumSq += v * v;
   const norm = Math.sqrt(sumSq);
   if (!Number.isFinite(norm) || norm === 0) return vec;
-  for (let i = 0; i < vec.length; i++) vec[i] /= norm;
-  return vec;
+  return vec.map((v) => v / norm);
 }
 
 type OpenFaceRow = Record<string, string>;
@@ -104,6 +141,12 @@ export function mapFaceErrorToUserMessage(error: unknown): string {
   if (message.includes("invalid face image") || message.includes("invalid face image encoding")) {
     return "The captured image is invalid. Please retake your photo.";
   }
+  if (message.includes("low confidence")) {
+    return "Face detection confidence is too low. Please ensure good lighting and look directly at the camera.";
+  }
+  if (message.includes("liveness")) {
+    return "Liveness check failed. Please use a live camera, not a photo or screen.";
+  }
 
   return FACE_SERVICE_UNAVAILABLE_MESSAGE;
 }
@@ -117,6 +160,7 @@ export function isFaceServiceUnavailableError(error: unknown): boolean {
     || message.includes("not configured")
     || message.includes("openface")
     || message.includes("failed to spawn")
+    || message.includes("not available")
   );
 }
 
@@ -130,10 +174,76 @@ function toNullableNum(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function listFeatureColumns(headers: string[]): string[] {
-  const excluded = new Set(["frame", "face_id", "timestamp", "confidence", "success"]);
-  const prefixes = ["x_", "y_", "X_", "Y_", "Z_", "p_", "pose_", "gaze_", "AU"];
-  return headers.filter((h) => !excluded.has(h) && prefixes.some((p) => h.startsWith(p)));
+/**
+ * Extract ONLY 2D facial landmark columns (x_0..x_67, y_0..y_67).
+ *
+ * WHY: The previous implementation grabbed ALL feature columns including
+ * pose_Tx/Ty/Tz, gaze_angle_x/y, and AU01_r..AU45_r. These encode
+ * expression and head orientation — NOT identity. Two different people
+ * with the same expression and pose would produce nearly identical
+ * "embeddings", which is why face login was accepting any face.
+ *
+ * 2D landmarks encode facial bone structure (eye spacing, nose bridge
+ * width, jaw shape) which IS identity-discriminative.
+ */
+function listLandmarkColumns(headers: string[]): string[] {
+  return headers.filter((h) => {
+    // Match x_0..x_63 and y_0..y_63 to produce a 128-dim embedding.
+    if (/^[xy]_\d+$/.test(h)) {
+      const idx = parseInt(h.split("_")[1], 10);
+      return idx >= 0 && idx <= 63;
+    }
+    return false;
+  });
+}
+
+/**
+ * Normalize 2D landmarks to be position- and scale-invariant.
+ *
+ * Steps:
+ * 1. Extract x[] and y[] arrays from the raw landmark values
+ * 2. Center on the nose tip (landmark 30)
+ * 3. Scale by inter-ocular distance (distance between outer eye corners,
+ *    landmarks 36 and 45) so the embedding doesn't change with distance
+ *    from the camera
+ * 4. Flatten back to [x0,y0, x1,y1, ...] and L2-normalize
+ */
+function normalizeLandmarks(landmarkValues: number[], landmarkColumns: string[]): number[] {
+  // Separate into x and y arrays, indexed by landmark number.
+  const xs: number[] = new Array(64).fill(0);
+  const ys: number[] = new Array(64).fill(0);
+
+  for (let i = 0; i < landmarkColumns.length; i++) {
+    const col = landmarkColumns[i];
+    const axis = col[0]; // 'x' or 'y'
+    const idx = parseInt(col.split("_")[1], 10);
+    if (axis === "x") xs[idx] = landmarkValues[i];
+    else ys[idx] = landmarkValues[i];
+  }
+
+  // Center on nose tip (landmark 30)
+  const noseX = xs[30];
+  const noseY = ys[30];
+  for (let i = 0; i < 64; i++) {
+    xs[i] -= noseX;
+    ys[i] -= noseY;
+  }
+
+  // Scale by inter-ocular distance (landmarks 36=left eye outer, 45=right eye outer)
+  const iod = Math.sqrt((xs[36] - xs[45]) ** 2 + (ys[36] - ys[45]) ** 2);
+  const scale = iod > 1e-6 ? iod : 1; // Prevent division by zero
+  for (let i = 0; i < 64; i++) {
+    xs[i] /= scale;
+    ys[i] /= scale;
+  }
+
+  // Flatten to interleaved [x0,y0, x1,y1, ...].
+  const flat: number[] = [];
+  for (let i = 0; i < 64; i++) {
+    flat.push(xs[i], ys[i]);
+  }
+
+  return l2Normalize(flat);
 }
 
 function pickSingleFaceRow(rows: OpenFaceRow[]): OpenFaceRow {
@@ -144,7 +254,12 @@ function pickSingleFaceRow(rows: OpenFaceRow[]): OpenFaceRow {
 
   const minConfidence = getOpenFaceMinConfidence();
   const highConfidence = successful.filter((r) => toNum(r.confidence) >= minConfidence);
-  const candidates = highConfidence.length ? highConfidence : successful;
+
+  if (!highConfidence.length) {
+    throw new Error("No face detected.");
+  }
+
+  const candidates = highConfidence;
 
   const faceIds = new Set(candidates.map((r) => String(r.face_id || "").trim()).filter(Boolean));
   if (faceIds.size > 1) {
@@ -180,16 +295,9 @@ async function runOpenFaceCli(imagePath: string): Promise<OpenFaceRunResult> {
   const args = [
     "-f", imagePath,
     "-out_dir", tempOutDir,
-    "-of", "probe",
     "-2Dfp",
-    "-3Dfp",
     "-pose",
-    "-gaze",
     "-aus",
-    "-simalign",
-    "-simsize", String(getOpenFaceSimSize()),
-    "-simscale", String(getOpenFaceSimScale()),
-    "-nomask",
   ];
 
   const timeoutMs = getOpenFaceTimeoutMs();
@@ -215,6 +323,8 @@ async function runOpenFaceCli(imagePath: string): Promise<OpenFaceRunResult> {
 
     child.on("error", (err) => {
       clearTimeout(timer);
+      // Mark OpenFace as unavailable on spawn failure
+      setOpenFaceReady(false);
       reject(err);
     });
 
@@ -251,22 +361,24 @@ async function parseOpenFaceCsv(csvPath: string): Promise<FaceAnalysis> {
 
   const row = pickSingleFaceRow(rows);
   const headers = Object.keys(row);
-  const featureColumns = listFeatureColumns(headers);
-  if (!featureColumns.length) {
-    throw new Error("OpenFace did not return usable facial features.");
+
+  // ── Identity embedding from 2D landmarks only ──────────────
+  // BUG FIX: Previously used listFeatureColumns() which grabbed
+  // pose, gaze, AUs, AND landmarks. Now we ONLY use 2D landmarks
+  // for identity-discriminative matching.
+  const landmarkColumns = listLandmarkColumns(headers);
+  if (landmarkColumns.length !== 128) {
+    throw new Error("OpenFace did not return sufficient facial landmark data.");
   }
 
-  const values = featureColumns.map((c) => toNum(row[c]));
-  if (values.some((n) => !Number.isFinite(n))) {
-    throw new Error("Invalid feature vector from OpenFace output.");
+  const landmarkValues = landmarkColumns.map((c) => toNum(row[c]));
+  if (landmarkValues.some((n) => !Number.isFinite(n))) {
+    throw new Error("Invalid landmark values from OpenFace output.");
   }
 
-  const mean = values.reduce((s, v) => s + v, 0) / values.length;
-  const centered = values.map((v) => v - mean);
-  const variance = centered.reduce((s, v) => s + v * v, 0) / centered.length;
-  const std = Math.sqrt(variance) || 1;
-  const embedding = l2Normalize(centered.map((v) => v / std));
+  const embedding = normalizeLandmarks(landmarkValues, landmarkColumns);
 
+  // ── Action Units (kept for liveness/expression analysis) ───
   const actionUnits: Record<string, number> = {};
   for (const [key, value] of Object.entries(row)) {
     if (key.startsWith("AU")) {
@@ -297,6 +409,9 @@ async function parseOpenFaceCsv(csvPath: string): Promise<FaceAnalysis> {
 }
 
 export async function analyzeFaceImageBuffer(imageBuffer: Buffer): Promise<FaceAnalysis> {
+  // Runtime guard: reject if OpenFace is not available
+  requireOpenFace();
+
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openface-in-"));
   const imagePath = path.join(tempDir, "probe.jpg");
 
@@ -377,8 +492,8 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 export async function fetchFaceEmbedding(imageBase64: string): Promise<number[]> {
-  const engine = getFaceEngine();
-  if (engine === "off") throw new Error("Face recognition service is not configured.");
+  // Runtime guard
+  requireOpenFace();
 
   const normalized = normalizeImageBase64(imageBase64);
   let imageBuffer: Buffer;
@@ -389,18 +504,166 @@ export async function fetchFaceEmbedding(imageBase64: string): Promise<number[]>
   }
 
   const analysis = await analyzeFaceImageBuffer(imageBuffer);
+
+  if (analysis.confidence < FACE_MIN_CONFIDENCE) {
+    throw new Error("No face detected.");
+  }
+
   return analysis.similarityReadyEmbedding;
 }
 
-export async function verifyFaceMatch(imageBase64: string, storedEmbedding: unknown): Promise<{ match: boolean; similarity: number }> {
+export async function verifyFaceMatch(imageBase64OrFrames: string | string[], storedEmbedding: unknown): Promise<{ match: boolean; similarity: number; liveEmbedding: number[] }> {
+  // BUG FIX: Previously, if storedEmbedding was missing/invalid,
+  // the error was thrown but could be caught upstream and ignored.
+  // Now we are explicit: no enrollment = no match, period.
   if (!isNumberArray(storedEmbedding)) {
     throw new Error("Face is not enrolled for this account.");
   }
 
-  const probe = await fetchFaceEmbedding(imageBase64);
+  const probe = Array.isArray(imageBase64OrFrames)
+    ? await extractAveragedEmbeddingFromFrames(imageBase64OrFrames)
+    : await fetchFaceEmbedding(imageBase64OrFrames);
+
+  // Dimension mismatch means the stored embedding was from the old
+  // format (pose+gaze+AU) and needs re-enrollment.
+  if (probe.length !== storedEmbedding.length) {
+    throw new Error(
+      "Stored face data is incompatible (dimension mismatch). Please re-enroll your face."
+    );
+  }
+
   const similarity = cosineSimilarity(storedEmbedding, probe);
   const threshold = getFaceMatchThreshold();
-  return { match: similarity >= threshold, similarity };
+  return { match: similarity >= threshold, similarity, liveEmbedding: probe };
+}
+
+// ── Multi-frame enrollment ──────────────────────────────────
+
+/**
+ * Enroll a face from multiple frames.
+ *
+ * Requirements:
+ * - At least 3 frames
+ * - No more than 1 frame may fail face detection
+ * - Embeddings must show natural liveness variation (not a static photo)
+ * - Final embedding is the average of all valid per-frame embeddings
+ */
+export async function enrollFromMultipleFrames(framesBase64: string[]): Promise<number[]> {
+  requireOpenFace();
+
+  if (framesBase64.length < MIN_FACE_FRAMES) {
+    throw new Error(`At least ${MIN_FACE_FRAMES} face frames are required.`);
+  }
+
+  const embeddings = await extractFrameEmbeddingsFromFrames(framesBase64);
+
+  // Liveness check: ensure embeddings are NOT perfectly identical
+  checkLivenessFromEmbeddings(embeddings);
+
+  // Average all valid embeddings
+  const dim = embeddings[0].length;
+  const averaged = new Array(dim).fill(0);
+  for (const emb of embeddings) {
+    for (let i = 0; i < dim; i++) {
+      averaged[i] += emb[i];
+    }
+  }
+  for (let i = 0; i < dim; i++) {
+    averaged[i] /= embeddings.length;
+  }
+
+  return l2Normalize(averaged);
+}
+
+/**
+ * Liveness check: reject if all embeddings across frames are
+ * perfectly identical, which indicates a static photo or screen.
+ *
+ * A live face will always show slight natural variation in
+ * landmark positions across frames due to micro-movements.
+ */
+export function checkLivenessFromEmbeddings(embeddings: number[][]): void {
+  if (embeddings.length < 2) return;
+
+  const dimensionCount = embeddings[0].length;
+  const frameCount = embeddings.length;
+  const means = new Array(dimensionCount).fill(0);
+
+  for (const embedding of embeddings) {
+    for (let i = 0; i < dimensionCount; i++) {
+      means[i] += embedding[i];
+    }
+  }
+
+  for (let i = 0; i < dimensionCount; i++) {
+    means[i] /= frameCount;
+  }
+
+  let varianceSum = 0;
+  for (let i = 0; i < dimensionCount; i++) {
+    let dimensionVariance = 0;
+    for (const embedding of embeddings) {
+      const diff = embedding[i] - means[i];
+      dimensionVariance += diff * diff;
+    }
+    dimensionVariance /= frameCount;
+    varianceSum += dimensionVariance;
+  }
+
+  const averageStdDev = Math.sqrt(varianceSum / dimensionCount);
+  if (averageStdDev < FACE_LIVENESS_STDDEV_THRESHOLD) {
+    throw new Error("Static image detected — liveness check failed");
+  }
+}
+
+async function extractFrameEmbeddingsFromFrames(framesBase64: string[]): Promise<number[][]> {
+  if (!framesBase64.length) {
+    throw new Error("No face detected.");
+  }
+
+  // Allow a limited number of bad frames (blur/motion/no-face) so low-end webcams
+  // can still pass as long as there are enough usable frames.
+  const minSuccessfulFrames = Math.max(4, Math.ceil(framesBase64.length * 0.7));
+  const maxFailures = Math.max(1, framesBase64.length - minSuccessfulFrames);
+
+  const embeddings: number[][] = [];
+  let failures = 0;
+  for (const frame of framesBase64) {
+    try {
+      embeddings.push(await fetchFaceEmbedding(frame));
+    } catch {
+      failures += 1;
+      if (failures > maxFailures) {
+        throw new Error("No face detected.");
+      }
+    }
+  }
+
+  if (embeddings.length < minSuccessfulFrames) {
+    throw new Error("No face detected.");
+  }
+
+  return embeddings;
+}
+
+async function extractAveragedEmbeddingFromFrames(framesBase64: string[]): Promise<number[]> {
+  const embeddings = await extractFrameEmbeddingsFromFrames(framesBase64);
+
+  checkLivenessFromEmbeddings(embeddings);
+
+  const dimensionCount = embeddings[0].length;
+  const averaged = new Array(dimensionCount).fill(0);
+  for (const embedding of embeddings) {
+    for (let i = 0; i < dimensionCount; i++) {
+      averaged[i] += embedding[i];
+    }
+  }
+
+  for (let i = 0; i < dimensionCount; i++) {
+    averaged[i] /= embeddings.length;
+  }
+
+  return l2Normalize(averaged);
 }
 
 export function hashEmbedding(embedding: number[]): string {

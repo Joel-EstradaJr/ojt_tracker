@@ -139,6 +139,9 @@ async function getTraineeWithRelations(id: string) {
 
 export const createTrainee = async (req: Request, res: Response) => {
   try {
+    console.log("[trainees] POST /api/trainees received");
+    console.log("[trainees] Request body keys:", Object.keys(req.body));
+    
     const auth = (req as Request & { auth?: { role: "admin" | "trainee" } }).auth;
     const {
       role,
@@ -147,6 +150,8 @@ export const createTrainee = async (req: Request, res: Response) => {
       startingDate, requiredHours, workSchedule,
       password, supervisors, verificationToken,
     } = req.body;
+
+    console.log("[trainees] Email:", email, "Auth role:", auth?.role);
 
     const resolvedRole: "admin" | "trainee" = auth?.role === "admin"
       ? (role === "admin" ? "admin" : "trainee")
@@ -160,9 +165,12 @@ export const createTrainee = async (req: Request, res: Response) => {
 
     const isAdminCreating = auth?.role === "admin";
     if (!isAdminCreating) {
+      console.log("[trainees] Checking email verification for:", email);
       if (!verificationToken || !(await isEmailVerified(email, verificationToken))) {
+        console.log("[trainees] Email verification failed or token missing");
         return res.status(400).json({ error: "Email must be verified before creating a trainee." });
       }
+      console.log("[trainees] Email verification passed");
     }
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -284,7 +292,10 @@ export const createTrainee = async (req: Request, res: Response) => {
 
     return res.status(201).json(transformed);
   } catch (err) {
-    console.error("createTrainee error:", err);
+    console.error("[trainees] createTrainee error:", err instanceof Error ? err.message : String(err));
+    if (err instanceof Error) {
+      console.error("[trainees] Error stack:", err.stack);
+    }
     return res.status(500).json({ error: "Internal server error." });
   }
 };

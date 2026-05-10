@@ -53,7 +53,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
         return res.status(401).json({ error: "Session expired or invalid." });
       }
 
-      const hasFaceEnrollment = Boolean(trainee.user.faceEnabled) && Boolean(trainee.user.faceEmbedding);
+      const hasFaceEnrollment = Boolean(trainee.user.faceEnabled) && Array.isArray(trainee.user.faceEmbedding) && trainee.user.faceEmbedding.length === 128;
       const enrollmentAllowed =
         (req.baseUrl === "/api/face" && (req.path === "/enroll" || req.path === "/status" || req.path === "/config"))
         || (req.baseUrl === "/api/auth" && req.path === "/logout");

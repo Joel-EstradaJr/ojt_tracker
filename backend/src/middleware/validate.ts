@@ -26,7 +26,7 @@ import {
 export function sanitizeBody(req: Request, _res: Response, next: NextFunction) {
   // Password fields must NEVER be sanitized — sanitizeString strips valid password chars (e.g. $)
   // Face image base64 must also never be sanitized (it commonly contains '=' padding).
-  const SKIP_FIELDS = new Set(["password", "confirmPassword", "newPassword", "faceImageBase64", "imageBase64"]);
+  const SKIP_FIELDS = new Set(["password", "confirmPassword", "newPassword", "faceImageBase64", "faceFrames", "imageBase64"]);
   if (req.body && typeof req.body === "object") {
     for (const key of Object.keys(req.body)) {
       if (SKIP_FIELDS.has(key)) continue;
