@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import prisma from "../utils/prisma";
 import { requireAuth } from "../middleware/auth";
 import { uploadImage } from "../middleware/upload";
-import { analyzeFaceImageBuffer, checkOpenFaceAvailability, fetchFaceEmbedding, getFaceEngine, getFaceMatchThreshold, mapFaceErrorToUserMessage, verifyFaceMatch } from "../utils/face";
+import { analyzeFaceImageBuffer, checkOpenFaceAvailability, fetchFaceEmbedding, getFaceEngine, getFaceMatchThreshold, isFaceServiceUnavailableError, mapFaceErrorToUserMessage, FACE_SERVICE_UNAVAILABLE_MESSAGE, verifyFaceMatch } from "../utils/face";
 
 const router = Router();
 
@@ -85,7 +85,7 @@ router.post("/enroll", requireAuth, async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Trainee session required." });
   }
 
-  if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
+  if (getFaceEngine() === "off") return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
 
   const { imageBase64 } = req.body as { imageBase64?: string };
   if (!imageBase64 || typeof imageBase64 !== "string") {
@@ -113,6 +113,9 @@ router.post("/enroll", requireAuth, async (req: Request, res: Response) => {
     return res.json({ message: "Face enrolled." });
   } catch (err) {
     console.error("[face/enroll] OpenFace enrollment error:", err);
+    if (isFaceServiceUnavailableError(err)) {
+      return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
+    }
     return res.status(400).json({ error: mapFaceErrorToUserMessage(err) });
   }
 });
@@ -178,7 +181,7 @@ router.post("/verify", requireAuth, async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Trainee session required." });
   }
 
-  if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
+  if (getFaceEngine() === "off") return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
 
   const { imageBase64 } = req.body as { imageBase64?: string };
   if (!imageBase64 || typeof imageBase64 !== "string") {
@@ -200,6 +203,9 @@ router.post("/verify", requireAuth, async (req: Request, res: Response) => {
     return res.json({ match: true, similarity, threshold: getFaceMatchThreshold() });
   } catch (err) {
     console.error("[face/verify] OpenFace verification error:", err);
+    if (isFaceServiceUnavailableError(err)) {
+      return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
+    }
     return res.status(400).json({ error: mapFaceErrorToUserMessage(err) });
   }
 });

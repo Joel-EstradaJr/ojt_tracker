@@ -639,7 +639,11 @@ export default function LoginPage() {
       setShowMandatoryFaceEnroll(false);
       router.replace(`/trainee/${pendingTraineeId}`);
     } catch (err: unknown) {
-      setMandatoryFaceError(err instanceof Error ? err.message : "Face enrollment failed. Please try again.");
+      const message = err instanceof Error ? err.message : "Face enrollment failed. Please try again.";
+      setMandatoryFaceError(message);
+      if (message.toLowerCase().includes("temporarily unavailable")) {
+        setMandatoryFaceServiceReachable(false);
+      }
     } finally {
       setMandatoryFaceEnrollLoading(false);
     }

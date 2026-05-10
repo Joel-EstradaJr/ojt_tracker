@@ -20,6 +20,8 @@ function getEnvBool(name: string, fallback: boolean): boolean {
 
 export type FaceEngine = "openface-cli" | "off";
 
+export const FACE_SERVICE_UNAVAILABLE_MESSAGE = "Face recognition is temporarily unavailable. Please try again later.";
+
 export function getFaceEngine(): FaceEngine {
   const forced = String(process.env.FACE_ENGINE || "").trim().toLowerCase();
   if (forced === "off") return "off";
@@ -103,7 +105,19 @@ export function mapFaceErrorToUserMessage(error: unknown): string {
     return "The captured image is invalid. Please retake your photo.";
   }
 
-  return "Face recognition is temporarily unavailable. Please try again later.";
+  return FACE_SERVICE_UNAVAILABLE_MESSAGE;
+}
+
+export function isFaceServiceUnavailableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error || "").toLowerCase();
+  return (
+    message.includes("enoent")
+    || message.includes("spawn")
+    || message.includes("timed out")
+    || message.includes("not configured")
+    || message.includes("openface")
+    || message.includes("failed to spawn")
+  );
 }
 
 function toNum(value: unknown): number {
@@ -310,7 +324,7 @@ export async function checkOpenFaceAvailability(): Promise<{ ready: boolean; rea
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       resolve({ ready: false, reason: "OpenFace CLI readiness check timed out." });
-    }, 4000);
+    }, 15_000);
 
     child.on("error", (err) => {
       clearTimeout(timer);

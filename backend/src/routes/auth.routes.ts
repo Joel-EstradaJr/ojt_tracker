@@ -5,7 +5,7 @@ import jwt from "jsonwebtoken";
 import { UserRole } from "@prisma/client";
 import prisma from "../utils/prisma";
 import { sendResetCode } from "../utils/email";
-import { getFaceEngine, verifyFaceMatch } from "../utils/face";
+import { FACE_SERVICE_UNAVAILABLE_MESSAGE, getFaceEngine, isFaceServiceUnavailableError, verifyFaceMatch } from "../utils/face";
 import { AuthPayload, clearSessionCookie, requireAdmin, requireAuth, setSessionCookie } from "../middleware/auth";
 
 const router = Router();
@@ -285,7 +285,7 @@ router.post("/face-login", async (req: Request, res: Response) => {
   if (!loginIdentifier) return res.status(400).json({ error: "Identifier is required." });
   if (!imageBase64 || typeof imageBase64 !== "string") return res.status(400).json({ error: "imageBase64 is required." });
 
-  if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
+  if (getFaceEngine() === "off") return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
 
   const normalizedEmail = loginIdentifier.toLowerCase();
   const isEmailIdentifier = normalizedEmail.includes("@");
@@ -338,6 +338,9 @@ router.post("/face-login", async (req: Request, res: Response) => {
     return res.json({ message: "Logged in.", role, traineeId: trainee.id, ...pendingState });
   } catch (err) {
     console.error("face-login error:", err);
+    if (isFaceServiceUnavailableError(err)) {
+      return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
+    }
     return res.status(500).json({ error: "Internal server error." });
   }
 });

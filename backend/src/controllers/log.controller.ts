@@ -1,7 +1,7 @@
 ﻿import { Request, Response } from "express";
 import { differenceInMinutes } from "date-fns";
 import prisma from "../utils/prisma";
-import { getFaceEngine, verifyFaceMatch } from "../utils/face";
+import { FACE_SERVICE_UNAVAILABLE_MESSAGE, getFaceEngine, isFaceServiceUnavailableError, verifyFaceMatch } from "../utils/face";
 
 const DEFAULT_STANDARD_MINUTES = 8 * 60;
 const STANDARD_LUNCH_MINUTES = 60;
@@ -181,7 +181,7 @@ export const createLog = async (req: Request, res: Response) => {
       workSchedule = trainee.workSchedule;
 
       if (trainee.user.faceAttendanceEnabled) {
-        if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
+        if (getFaceEngine() === "off") return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
         if (!faceImageBase64 || typeof faceImageBase64 !== "string") {
           return res.status(403).json({ error: "Face verification required." });
         }
@@ -189,9 +189,17 @@ export const createLog = async (req: Request, res: Response) => {
           return res.status(403).json({ error: "Face verification is enabled but face is not enrolled." });
         }
 
-        const { match } = await verifyFaceMatch(faceImageBase64, trainee.user.faceEmbedding);
-        if (!match) return res.status(401).json({ error: "Face mismatch." });
-        faceVerified = true;
+        try {
+          const { match } = await verifyFaceMatch(faceImageBase64, trainee.user.faceEmbedding);
+          if (!match) return res.status(401).json({ error: "Face mismatch." });
+          faceVerified = true;
+        } catch (err) {
+          console.error("[log/create] OpenFace verification error:", err);
+          if (isFaceServiceUnavailableError(err)) {
+            return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
+          }
+          throw err;
+        }
       }
     } else {
       const trainee = await prisma.userProfile.findUnique({
@@ -440,7 +448,7 @@ export const patchLogAction = async (req: Request, res: Response) => {
       if (!trainee?.user) return res.status(404).json({ error: "Trainee not found." });
 
       if (trainee.user.faceAttendanceEnabled) {
-        if (getFaceEngine() === "off") return res.status(503).json({ error: "Face recognition service is not configured." });
+        if (getFaceEngine() === "off") return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
         if (!faceImageBase64 || typeof faceImageBase64 !== "string") {
           return res.status(403).json({ error: "Face verification required." });
         }
@@ -448,10 +456,18 @@ export const patchLogAction = async (req: Request, res: Response) => {
           return res.status(403).json({ error: "Face verification is enabled but face is not enrolled." });
         }
 
-        const { match } = await verifyFaceMatch(faceImageBase64, trainee.user.faceEmbedding);
-        if (!match) return res.status(401).json({ error: "Face mismatch." });
+        try {
+          const { match } = await verifyFaceMatch(faceImageBase64, trainee.user.faceEmbedding);
+          if (!match) return res.status(401).json({ error: "Face mismatch." });
 
-        faceVerifiedThisAction = true;
+          faceVerifiedThisAction = true;
+        } catch (err) {
+          console.error("[log/update] OpenFace verification error:", err);
+          if (isFaceServiceUnavailableError(err)) {
+            return res.status(503).json({ error: FACE_SERVICE_UNAVAILABLE_MESSAGE });
+          }
+          throw err;
+        }
       }
     }
 

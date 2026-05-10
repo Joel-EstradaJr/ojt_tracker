@@ -16,3 +16,11 @@ services:
         value: production
       - key: FACE_ENGINE
         value: openface-cli
+      - key: OPENFACE_CLI_PATH
+        value: /opt/openface/build/bin/FeatureExtraction
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: VECLIB_MAXIMUM_THREADS
+        value: "1"

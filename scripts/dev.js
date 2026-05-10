@@ -6,6 +6,8 @@ const fs = require("fs");
 const isWin = process.platform === "win32";
 const comspec = process.env.ComSpec || "cmd.exe";
 const npmCmd = "npm";
+const backendImage = "ojt-backend-openface";
+const backendContainer = "ojt-openface-dev";
 
 function parseDotEnvFile(filePath) {
   try {
@@ -116,7 +118,7 @@ async function main() {
   const baseEnv = { ...backendEnvFromFile, ...process.env };
 
   const preferredFrontend = toInt(baseEnv.FRONTEND_PORT) ?? 3000;
-  const preferredBackend = toInt(baseEnv.BACKEND_PORT) ?? 4000;
+  const preferredBackend = toInt(baseEnv.BACKEND_PORT) ?? 10000;
 
   const frontendPort = await pickPort(preferredFrontend);
   const backendPort = await pickPort(preferredBackend);
@@ -126,7 +128,7 @@ async function main() {
 
   console.log(`[dev] Frontend: ${frontendUrl}`);
   console.log(`[dev] Backend:  ${backendUrl}`);
-  console.log("[dev] Face:     OpenFace CLI must be installed on the backend runtime");
+  console.log("[dev] Face:     Docker backend includes the OpenFace CLI runtime");
 
   const fresh = process.argv.includes("--fresh");
   if (fresh) {
@@ -135,21 +137,70 @@ async function main() {
     if (code !== 0) process.exit(code);
   }
 
+  const buildCode = await runOnce("docker", ["build", "-t", backendImage, "backend"], baseEnv);
+  if (buildCode !== 0) process.exit(buildCode);
+
+  await runOnce("docker", ["rm", "-f", backendContainer], baseEnv);
+
   const children = [];
 
   {
     const env = {
       ...baseEnv,
-      PORT: String(backendPort),
+      PORT: "10000",
       FRONTEND_URL: frontendUrl,
+      FACE_ENGINE: "openface-cli",
+      OPENFACE_CLI_PATH: "/opt/openface/build/bin/FeatureExtraction",
+      OPENBLAS_NUM_THREADS: "1",
+      OMP_NUM_THREADS: "1",
+      VECLIB_MAXIMUM_THREADS: "1",
     };
-    children.push(spawnNpm("backend", ["run", "dev", "--prefix", "backend"], env));
+    // Rewrite DATABASE_URL so the container can reach the host's PostgreSQL.
+    // Inside Docker, "localhost" means the container itself, so we swap it
+    // for "host.docker.internal" which Docker resolves to the host machine.
+    const rawDbUrl = baseEnv.DATABASE_URL || "";
+    const dockerDbUrl = rawDbUrl.replace(
+      /localhost(:\d+)/,
+      "host.docker.internal$1"
+    );
+
+    const dockerArgs = [
+      "run",
+      "--rm",
+      "--name",
+      backendContainer,
+      "--add-host=host.docker.internal:host-gateway",
+      "-p",
+      `${backendPort}:10000`,
+      "--env-file",
+      backendEnvPath,
+      "-e",
+      `DATABASE_URL=${dockerDbUrl}`,
+      "-e",
+      "PORT=10000",
+      "-e",
+      `FRONTEND_URL=${frontendUrl}`,
+      "-e",
+      "FACE_ENGINE=openface-cli",
+      "-e",
+      "OPENFACE_CLI_PATH=/opt/openface/build/bin/FeatureExtraction",
+      "-e",
+      "OPENBLAS_NUM_THREADS=1",
+      "-e",
+      "OMP_NUM_THREADS=1",
+      "-e",
+      "VECLIB_MAXIMUM_THREADS=1",
+      backendImage,
+    ];
+    children.push(spawnProc("backend", "docker", dockerArgs, env));
   }
 
   {
     const env = {
       ...baseEnv,
       BACKEND_URL: backendUrl,
+      NEXT_PUBLIC_API_URL: backendUrl,
+      PORT: String(frontendPort),
     };
     children.push(spawnNpm("frontend", ["run", "dev", "--prefix", "frontend", "--", "-p", String(frontendPort)], env));
   }

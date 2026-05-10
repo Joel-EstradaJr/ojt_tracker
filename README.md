@@ -80,21 +80,16 @@ npx prisma migrate dev --name init
 
 This creates the database tables and generates the Prisma client.
 
-### 5. Start the servers
+### 5. Start the app
 
-In **two separate terminals**:
+From the repository root, run:
 
 ```bash
-# Terminal 1 — Backend (http://localhost:4000)
-cd backend
-npm run dev
-
-# Terminal 2 — Frontend (http://localhost:3000)
-cd frontend
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+This starts the frontend plus the Dockerized backend that includes OpenFace.
+Open the printed frontend URL in your browser.
 
 ---
 
@@ -253,6 +248,35 @@ Key backend endpoint for upload analysis:
 
 Quick check (after backend is running):
 - `GET /api/face/config` should return `faceServiceReachable: true`
+
+### Mandatory OpenFace Runtime (Dockerized Backend)
+
+OpenFace is a required backend dependency and must run in the backend container.
+
+For local development, the root `npm run dev` command builds the backend image,
+starts the Docker container, and runs the frontend against it.
+
+Local validation flow:
+
+```bash
+cd backend
+docker build -t ojt-backend-openface .
+docker run --rm -p 10000:10000 --name ojt-openface ojt-backend-openface
+```
+
+Open a second terminal and validate OpenFace binaries inside the running container:
+
+```bash
+docker exec -it ojt-openface /opt/openface/build/bin/FaceLandmarkImg -f /opt/openface/samples/default.jpg
+docker exec -it ojt-openface /opt/openface/build/bin/FeatureExtraction -f /opt/openface/samples/default.wmv
+```
+
+These commands validate:
+- facial landmark detection
+- head pose estimation
+- action unit recognition
+- eye gaze estimation
+- feature extraction outputs
 
 Implementation notes:
 - CLI call is made with Node `child_process.spawn`

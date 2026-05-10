@@ -28,6 +28,7 @@ import scriptRoutes from "./routes/script.routes";
 import backupRoutes from "./routes/backup.routes";
 import faceRoutes from "./routes/face.routes";
 import entityRoutes from "./routes/entity.routes";
+import { checkOpenFaceAvailability, getFaceEngine, getOpenFaceBinaryPath } from "./utils/face";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -99,9 +100,26 @@ app.get("/health", (_req, res) => {
 });
 
 // ── Start ────────────────────────────────────────────────────
-const server: Server = app.listen(PORT, () => {
-  console.log(`Backend running on http://localhost:${PORT}`);
-});
+let server: Server;
+
+async function startServer() {
+  if (getFaceEngine() !== "off") {
+    const availability = await checkOpenFaceAvailability();
+    if (!availability.ready) {
+      console.error(`[startup] OpenFace CLI is required but unavailable at ${getOpenFaceBinaryPath()}.`);
+      if (availability.reason) {
+        console.error(`[startup] OpenFace error: ${availability.reason}`);
+      }
+      process.exit(1);
+    }
+  }
+
+  server = app.listen(PORT, () => {
+    console.log(`Backend running on http://localhost:${PORT}`);
+  });
+}
+
+void startServer();
 
 function shutdown(signal: string) {
   server.close((err?: Error) => {
